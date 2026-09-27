@@ -47,6 +47,8 @@ describe('Hermes stream request mapping', () => {
     expect(startBody.conversation_history).toEqual([{ role: 'user', content: 'prior' }]);
   });
 
+  // Two Bridge instances start native Python/SQLite readers; Windows CI process
+  // startup can exceed Vitest's 5 s default. Keep assertions and bounded timeout.
   it.each([false, true])('restores native prior turns after restart (native context=%s)', async nativeContext => {
     const directory = await createTempDirectory();
     const dbPath = join(directory, 'state.db');
@@ -96,5 +98,5 @@ describe('Hermes stream request mapping', () => {
       role: 'user',
       content: 'after restart',
     });
-  });
+  }, 20_000);
 });

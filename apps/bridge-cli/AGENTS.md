@@ -96,3 +96,7 @@ Codex first-time detached pairing must carry the resolved device scope into the 
 `clawket claude-code pair` / `pair --backend claude-code` uses the installed, unmodified Claude executable and device discovery by default. `--project` authorizes only that project. State, logs and Preview credentials live under the independent `~/.clawket/claude-code` tree; lifecycle commands stop only authenticated Clawket-owned runtimes. The official `@anthropic-ai/claude-agent-sdk` is an explicit package external, retained as a production dependency; do not bundle its assets or silently substitute its packaged CLI for the user's selected executable. Native authentication remains on the computer. See `../../docs/3.1/claude-code.md`.
 
 Claude first-time detached pairing must carry the resolved device scope into the child even when adding a not-yet-created `--config` path. Existing scoped configurations are never silently widened.
+
+## 3.1 release
+
+The authorized Bridge release is `3.1.0`. Keep the publish guard and bundled workspace versions aligned. New Pi/Codex/Claude Code production endpoints must pass pairing and message verification before npm publication; preserve the existing OpenClaw/Hermes endpoints and pairing state. Client distribution is a separate release stage.
