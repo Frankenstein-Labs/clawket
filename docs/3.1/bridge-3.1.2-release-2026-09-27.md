@@ -1,0 +1,9 @@
+# Bridge 3.1.2 release · 2026-09-27
+
+Owner authorized the Bridge-only npm publication while preparing the TestFlight Archive separately. Published source commit: `4b1b5fbf0ef407512d55e003a746e9f1c212a521` on `main`. No App distribution or Worker deployment was performed in this step.
+
+This patch includes the Codex, Claude Code and Pi session-preview correction: the newest visible user or assistant message supplies the preview and activity time, including native/imported histories. It keeps the optional descriptor field compatible with older Apps; OpenClaw and Hermes connection paths are unchanged. See [session-previews.md](session-previews.md).
+
+Before publication, the local publish workflow passed v1 compatibility replay (5 files, 39 cases), rebuilt the CLI, verified the package (3 files, 4 required runtime boundaries, 71 runtime modules, 111 provenance inputs), and completed an npm dry run. The exact source commit passed [all required CI jobs](https://github.com/p697/clawket/actions/runs/36321860785), including the macOS/Windows Bridge and Relay compatibility jobs, repository-wide checks, v1 replay, audits and secret scan. The owner was simultaneously running an Xcode Archive when the actual npm upload began, so the upload used the already verified bundle with `--ignore-scripts` to avoid repeating local tests and builds beside that Archive.
+
+The public npm registry reports [`@p697/clawket@3.1.2`](https://www.npmjs.com/package/@p697/clawket/v/3.1.2), with `latest=3.1.2` and `gitHead=4b1b5fbf0ef407512d55e003a746e9f1c212a521`. The downloaded public tarball has SHA-256 `8c156028498faa3dc164697d3b27fe67ded21f26bdc4741f5f1d450cff43e0dd`; its SHA-1 `03712b5a3c1e8d7cfc2d3bc67e5cdff39035c595` and SHA-512 integrity match npm metadata. Publishing the package does not upgrade installed Bridge processes automatically.
