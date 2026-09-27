@@ -14,6 +14,7 @@ import {
   Space,
 } from '../../theme/tokens';
 import { AgentAvatar, type AgentAttentionTone, type AgentAvatarStatus } from './AgentAvatar';
+import type { PlatformKind } from './PlatformMark';
 import { TypingDots } from './TypingDots';
 
 const PRESSED_OPACITY = 0.88;
@@ -29,6 +30,8 @@ export type HeaderPillProps = Readonly<{
   working?: boolean;
   emoji?: string | null;
   avatarUrl?: string | null;
+  /** The Agent's backend: a product Agent wears the official mark, as on the roster. */
+  platform?: PlatformKind | null;
   status?: AgentAvatarStatus;
   attentionTone?: AgentAttentionTone;
   /** `glass` floats the pill over a chat wallpaper on translucent chrome. */
@@ -50,6 +53,7 @@ export function HeaderPill({
   working = false,
   emoji,
   avatarUrl,
+  platform,
   status = 'idle',
   attentionTone,
   material = 'surface',
@@ -82,6 +86,7 @@ export function HeaderPill({
         name={avatarName ?? name}
         emoji={emoji}
         avatarUrl={avatarUrl}
+        platform={platform}
         variant="header"
         status={status}
         attentionTone={attentionTone}

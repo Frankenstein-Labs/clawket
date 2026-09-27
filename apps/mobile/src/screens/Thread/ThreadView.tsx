@@ -88,6 +88,7 @@ import {
 import { FloatingButton } from '../../components/ui/FloatingButton';
 import { HeaderTextAction } from '../../components/ui/HeaderTextAction';
 import { HeaderPill } from '../../components/ui/HeaderPill';
+import type { PlatformKind } from '../../components/ui/PlatformMark';
 import { ToolCallRow, ToolGroupRow } from '../../components/chat/ToolCallRow';
 import { Sheet } from '../../components/ui/Sheet';
 import { ReplyFailureSheet } from '../../components/chat/ReplyFailureSheet';
@@ -296,6 +297,8 @@ export type ThreadViewProps = Readonly<{
   messageSubmittedAt?: number | null;
   agentEmoji?: string | null;
   agentAvatarUrl?: string | null;
+  /** The Agent's backend, so a product Agent wears its official mark in the header and signatures. */
+  agentPlatform?: PlatformKind | null;
   sessionTitle?: string | null;
   projectPath?: string | null;
   isMainSession?: boolean;
@@ -421,6 +424,7 @@ export function ThreadView({
   messageSubmittedAt,
   agentEmoji,
   agentAvatarUrl,
+  agentPlatform,
   sessionTitle,
   projectPath,
   isMainSession = true,
@@ -500,8 +504,8 @@ export function ThreadView({
   const hasParticipants = messages.some(isIncomingParticipant);
   const presentation = useMemo(() => ({
     appearance: chatAppearance, fontSize: chatFontSize, locale,
-    identity: { agentId, name: agentName, emoji: agentEmoji, avatarUrl: agentAvatarUrl, showAvatar: showAgentAvatar || hasParticipants, showRoleLabel: hasParticipants },
-  }), [chatAppearance, chatFontSize, locale, agentId, agentName, agentEmoji, agentAvatarUrl, showAgentAvatar, hasParticipants]);
+    identity: { agentId, name: agentName, emoji: agentEmoji, avatarUrl: agentAvatarUrl, platform: agentPlatform, showAvatar: showAgentAvatar || hasParticipants, showRoleLabel: hasParticipants },
+  }), [chatAppearance, chatFontSize, locale, agentId, agentName, agentEmoji, agentAvatarUrl, agentPlatform, showAgentAvatar, hasParticipants]);
   const reduceMotion = useReducedMotion();
   const [composerExpanded, setComposerExpanded] = useState(false);
   const compactComposerHeight = useRef(0);
@@ -1077,6 +1081,7 @@ export function ThreadView({
             icon={isCronSession ? CalendarClock : undefined}
             emoji={agentEmoji}
             avatarUrl={agentAvatarUrl}
+            platform={agentPlatform}
             status={avatarStatus}
             material={wallpaperActive ? 'glass' : 'surface'}
             accessibilityLabel={copy.settings}

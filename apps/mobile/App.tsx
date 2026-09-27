@@ -2128,6 +2128,7 @@ function AppContent({
                 onClose={() => setExportTarget(null)} />
               <IncomingShareCoordinator ready={navigationReady && !permissionsLoading && !paywallVisible && !announcementPresentation}
                 targets={connections.roster.flatMap((group) => group.agents.map((item) => item.agent))}
+                resolvePlatform={(connectionId) => connections.connections.find((item) => item.id === connectionId)?.backendKind}
                 onConnect={() => rootNavigationRef.navigate('Onboarding', { presentation: 'modal' })}
                 onChoose={(agent, shareId, onHandedOff) => {
                   const open = () => { onHandedOff(); rootNavigationRef.navigate('Thread', {

@@ -4,6 +4,7 @@ import type { ThinkingLevel } from '../../../utils/gateway-settings';
 import type { ModelInfo } from '../../../components/chat/ModelPickerModal';
 import type { ModelProviderInfo } from '../../../components/chat/model-picker-data';
 import { ChatSharePosterModal } from '../../../components/chat/ChatSharePosterModal';
+import type { PlatformKind } from '../../../components/ui/PlatformMark';
 import { CommandOptionPickerModal } from '../../../components/chat/CommandOptionPickerModal';
 import { ImagePreviewModal } from '../../../components/chat/ImagePreviewModal';
 import { ModelPickerModal } from '../../../components/chat/ModelPickerModal';
@@ -46,6 +47,7 @@ export type ThreadOverlaysProps = Readonly<{
   agentName: string;
   agentEmoji?: string;
   agentAvatarUri?: string;
+  agentPlatform?: PlatformKind | null;
   shareProductLabel?: string;
   onCloseShare: () => void;
   preview: PreviewState;
@@ -111,6 +113,7 @@ export function ThreadOverlays({
   agentName,
   agentEmoji,
   agentAvatarUri,
+  agentPlatform,
   shareProductLabel,
   onCloseShare,
   preview,
@@ -146,6 +149,7 @@ export function ThreadOverlays({
         agentName={agentName}
         agentEmoji={agentEmoji}
         agentAvatarUri={agentAvatarUri}
+        agentPlatform={agentPlatform}
         shareProductLabel={shareProductLabel}
         messageText={shareMessage?.text ?? ''}
         modelLabel={shareMessage?.modelLabel}

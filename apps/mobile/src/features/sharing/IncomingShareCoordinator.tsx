@@ -8,14 +8,17 @@ import { Sheet } from '../../components/ui/Sheet';
 import { SettingsDivider, SettingsRow } from '../../components/ui/SettingsGroup';
 import { Banner } from '../../components/ui/Banner';
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
+import type { PlatformKind } from '../../components/ui/PlatformMark';
 import { Button } from '../../components/ui/Button';
 import { IncomingShareStore, type IncomingShare } from '../../services/incoming-share';
 import { useAppTheme } from '../../theme';
 import { ControlSize, FontSize, LineHeight, Radius, Space } from '../../theme/tokens';
 
 const SNAP_POINTS = ['52%', '92%'];
-export function IncomingShareCoordinator({ ready, targets, onChoose, onConnect }: Readonly<{
+export function IncomingShareCoordinator({ ready, targets, resolvePlatform, onChoose, onConnect }: Readonly<{
   ready: boolean; targets: readonly AgentDescriptor[];
+  /** A target's backend, so product Agents show their official mark as on the roster. */
+  resolvePlatform?: (connectionId: string) => PlatformKind | undefined;
   onChoose: (agent: AgentDescriptor, shareId: string, onHandedOff: () => void) => void;
   onConnect: () => void;
 }>): React.JSX.Element {
@@ -76,7 +79,7 @@ export function IncomingShareCoordinator({ ready, targets, onChoose, onConnect }
       </View> : null}
       {share ? targets.map((agent, index) => <React.Fragment key={`${agent.connectionId}:${agent.agentId}`}>
         {index ? <SettingsDivider inset="content" /> : null}
-        <SettingsRow title={agent.name} leading={<AgentAvatar agentId={agent.agentId} name={agent.name} emoji={agent.emoji} avatarUrl={agent.avatarUrl} variant="sheet" />} onPress={() => choose(() => { setVisible(true); onChoose(agent, share.id, () => setVisible(false)); })} showChevron testID={`share-target-${agent.connectionId}-${agent.agentId}`} />
+        <SettingsRow title={agent.name} leading={<AgentAvatar agentId={agent.agentId} name={agent.name} emoji={agent.emoji} avatarUrl={agent.avatarUrl} platform={resolvePlatform?.(agent.connectionId)} variant="sheet" />} onPress={() => choose(() => { setVisible(true); onChoose(agent, share.id, () => setVisible(false)); })} showChevron testID={`share-target-${agent.connectionId}-${agent.agentId}`} />
       </React.Fragment>) : null}
       {!targets.length ? <Button label={t('Connect', { ns: 'config' })} onPress={() => choose(onConnect)} /> : null}
       {share ? <Button label={t('Discard', { ns: 'config' })} variant="ghost" onPress={() => { void IncomingShareStore.remove(share.id, true).then(() => { setShare(null); setVisible(false); }).catch(() => setError('share_failed')); }} /> : null}

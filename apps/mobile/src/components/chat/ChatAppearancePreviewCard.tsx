@@ -7,6 +7,7 @@ import type { AccentColorId, ChatAppearanceSettings } from '../../types';
 import { Bubble } from '../ui/Bubble';
 import { ChatPresentationProvider } from './ChatPresentation';
 import { ChatMessageIdentity } from './ChatMessageIdentity';
+import type { PlatformKind } from '../ui/PlatformMark';
 import { ChatBackgroundLayer } from './ChatBackgroundLayer';
 import { createChatGlassStyle, isChatWallpaperActive } from '../../features/chat-appearance/resolver';
 
@@ -15,6 +16,7 @@ export type ChatAppearancePreviewAgent = Readonly<{
   name: string;
   emoji?: string | null;
   avatarUrl?: string | null;
+  platform?: PlatformKind | null;
 }>;
 
 type Props = {
@@ -46,6 +48,7 @@ export function ChatAppearancePreviewCard({ accentId, agent, appearance, backgro
           name={agent?.name ?? t('chat:Assistant')}
           emoji={agent?.emoji}
           avatarUrl={agent?.avatarUrl}
+          platform={agent?.platform}
           showAvatar={showAgentAvatar}
         />
         <Bubble role="assistant">{t('Clear words. Calm surfaces. Familiar controls.')}</Bubble>

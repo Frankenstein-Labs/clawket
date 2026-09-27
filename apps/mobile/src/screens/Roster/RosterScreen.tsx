@@ -64,8 +64,10 @@ import {
 } from '../../utils/chat-message';
 import {
   buildRosterRows,
+  resolveRosterBackendMarks,
   resolveRosterLiveConnectionId,
   resolveRosterPageState,
+  rosterBackendAccessibilityName,
   type RosterDisplayRow,
   type RosterModelOptions,
   type RosterPageState,
@@ -446,6 +448,8 @@ export function RosterView({
         return t('{{count}}mo ago', { count });
     }
   }, [t]);
+  // A roster that mixes backends marks each Agent's own avatar with its product (owner decision 2026-09-27).
+  const backendMarks = useMemo(() => resolveRosterBackendMarks(rows), [rows]);
   const renderRow = useCallback<ListRenderItem<RosterDisplayRow>>(({ item }) => {
     const activeConnectionOffline = item.connectionId === activeConnectionId
       && (showOfflineBanner ?? state === 'offline');
@@ -472,6 +476,8 @@ export function RosterView({
             : item.activity === 'tool' ? t('Using tool', { ns: 'chat' }) : t('Working')
           : item.subtitle?.label ?? item.preview ?? t('No activity yet')}
         pinned={item.kind === 'agent' && item.agentPinned}
+        platform={item.backendKind}
+        platformBadge={backendMarks && item.kind === 'agent'}
         sessionIcon={item.kind === 'pinned_session' && item.sessionKind ? resolveSessionTileIcon({
           kind: item.sessionKind,
           channel: item.sessionChannel,
@@ -486,7 +492,7 @@ export function RosterView({
         cached={item.cached}
         locked={item.locked}
         live={live}
-        accessibilityLabel={[item.name, live ? t('Connected', { ns: 'settings' }) : null, timeLabel, item.cached && item.syncedAt ? `${t('Last synced')} ${relativeTime(item.syncedAt, translateRelativeTime)}` : null, item.attention === 'input' ? t('Agent needs your input', { ns: 'chat' }) : item.attention === 'approval' ? t('Needs attention') : item.working ? t('Working') : null, item.unreadCount > 0 ? t('Unread messages') : null].filter(Boolean).join(', ')}
+        accessibilityLabel={[item.name, backendMarks ? rosterBackendAccessibilityName(item) : null, live ? t('Connected', { ns: 'settings' }) : null, timeLabel, item.cached && item.syncedAt ? `${t('Last synced')} ${relativeTime(item.syncedAt, translateRelativeTime)}` : null, item.attention === 'input' ? t('Agent needs your input', { ns: 'chat' }) : item.attention === 'approval' ? t('Needs attention') : item.working ? t('Working') : null, item.unreadCount > 0 ? t('Unread messages') : null].filter(Boolean).join(', ')}
         onPress={() => { dismissRoster?.(); open(item); }}
         {...(onLongPressRow ? { onLongPress: () => onLongPressRow(item) } : {})}
       />
@@ -505,6 +511,7 @@ export function RosterView({
     );
   }, [
     activeConnectionId,
+    backendMarks,
     liveConnectionId,
     selectedThread,
     dismissRoster,

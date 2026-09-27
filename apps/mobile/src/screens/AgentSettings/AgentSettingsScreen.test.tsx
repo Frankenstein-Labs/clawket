@@ -581,6 +581,17 @@ describe('AgentSettingsView deep rendering', () => {
     mockedAcks.read.mockResolvedValue(new Set());
   });
 
+  it('lets a product Agent wear its official mark instead of a duplicate corner mark', () => {
+    const codex: ConnectionDescriptor = { ...connection, id: 'codex-one', backendKind: 'codex', label: 'Computer' };
+    const view = render(<AgentSettingsView {...props({
+      connection: codex,
+      agent: { ...agent, connectionId: codex.id, agentId: 'codex', name: 'Codex', emoji: undefined },
+      capabilities: { ...CAPABILITY_MATRIX.codex },
+    })} />);
+    expect(view.getByTestId('agent-settings-avatar-face')).toBeTruthy();
+    expect(view.queryByTestId('agent-settings-backend-mark')).toBeNull();
+  });
+
   it('does not render sections whose capability is false', () => {
     const disabled: Capabilities = {
       ...CAPABILITY_MATRIX.youmind,

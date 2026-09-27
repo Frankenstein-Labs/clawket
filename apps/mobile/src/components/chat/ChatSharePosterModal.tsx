@@ -33,6 +33,7 @@ import {
 import { useAppTheme } from '../../theme';
 import { extractDisplayAgentEmoji } from '../../utils/agent-emoji';
 import { getAgentInitials } from '../ui/AgentAvatar';
+import { isProductFacePlatform, PlatformDisc, type PlatformKind } from '../ui/PlatformMark';
 import { resolveAgentAvatarImageSource } from '../../utils/agent-avatar-uri';
 import { sanitizeDisplayText } from '../../utils/chat-message';
 import { PosterThemePicker } from '../poster/PosterThemePicker';
@@ -47,6 +48,8 @@ type Props = {
   agentName: string;
   agentEmoji?: string;
   agentAvatarUri?: string;
+  /** The Agent's backend: a product Agent signs the poster with its official mark, as in the app. */
+  agentPlatform?: PlatformKind | null;
   shareProductLabel?: string;
   messageText: string;
   modelLabel?: string;
@@ -76,6 +79,10 @@ const CHAT_MARKDOWN_FLAVOR = getChatMarkdownFlavor();
 // Close button + toggle + actions + margins
 const CHROME_HEIGHT = 36 + 44 + 52 + 48;
 
+// Matches the poster avatar box and the app's face proportion for official marks.
+const POSTER_AVATAR_SIZE = 56;
+const POSTER_FACE_GLYPH = 0.54;
+
 // ---- Component ----
 
 export function ChatSharePosterModal({
@@ -84,6 +91,7 @@ export function ChatSharePosterModal({
   agentName,
   agentEmoji,
   agentAvatarUri,
+  agentPlatform,
   shareProductLabel,
   messageText,
   modelLabel,
@@ -265,7 +273,12 @@ export function ChatSharePosterModal({
     <>
       {/* Agent Identity */}
       <View style={s.avatarSection}>
-        {agentAvatarSource ? (
+        {isProductFacePlatform(agentPlatform) ? (
+          <View testID="chat-share-poster-platform-face" style={[s.avatarFallback, s.avatarFace, { borderColor: theme.accentMuted }]}>
+            <PlatformDisc platform={agentPlatform} size={POSTER_AVATAR_SIZE} glyph={POSTER_FACE_GLYPH}
+              artworkColors={{ ground: C.bg, ink: C.text }} />
+          </View>
+        ) : agentAvatarSource ? (
           <Image source={agentAvatarSource} style={[s.avatar, { borderColor: theme.accent }]} />
         ) : (
           <View style={[s.avatarFallback, { backgroundColor: theme.accentSoft, borderColor: theme.accentMuted }]}>
@@ -427,6 +440,10 @@ const s = StyleSheet.create({
     borderWidth: BorderWidth.hairline,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  avatarFace: {
+    backgroundColor: C.bg,
+    overflow: 'hidden',
   },
   avatarEmoji: {
     fontSize: FontSize.display,

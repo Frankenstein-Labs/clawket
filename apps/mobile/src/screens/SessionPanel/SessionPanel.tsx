@@ -1,6 +1,8 @@
 import React, {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -30,6 +32,7 @@ import type { AgentDescriptor, ProjectDescriptor, Capabilities } from '@clawket/
 import { ProjectPicker } from './ProjectPicker';
 import { getConnectionRuntime, useConnections, useRoster } from '../../connection';
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
+import type { PlatformKind } from '../../components/ui/PlatformMark';
 import { Banner } from '../../components/ui/Banner';
 import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
 import { Button } from '../../components/ui/Button';
@@ -123,7 +126,12 @@ export type SessionPanelViewProps = Readonly<{
   onRetry?: () => MaybePromise;
   onOpenBridgeHelp?: () => void;
   onOpenPermission?: () => void;
+  /** The connection's backend: a product Agent wears its official mark in the pill, menu and main row. */
+  platform?: PlatformKind | null;
 }>;
+
+/** One connection per panel, so its tiles, pill and menu share one backend. */
+const SessionPanelPlatform = createContext<PlatformKind | null>(null);
 
 export type SessionPanelProps = Readonly<{
   connectionId?: string;
@@ -163,6 +171,7 @@ function SessionTile({
   agent,
 }: Readonly<{ row: SessionPanelRow; agent: AgentDescriptor | null }>): React.JSX.Element {
   const { theme } = useAppTheme();
+  const platform = useContext(SessionPanelPlatform);
   if (row.kind === 'main') {
     return (
       <AgentAvatar
@@ -171,6 +180,7 @@ function SessionTile({
         name={agent?.name ?? row.agentName}
         emoji={agent?.emoji}
         avatarUrl={agent?.avatarUrl}
+        platform={platform}
         variant="panel"
         status={row.hasActiveRun ? 'working' : 'idle'}
       />
@@ -400,6 +410,7 @@ function AgentPill({
 }>): React.JSX.Element {
   const { theme } = useAppTheme();
   const { t } = useTranslation('common');
+  const platform = useContext(SessionPanelPlatform);
   const content = (
     <>
       <AgentAvatar
@@ -408,6 +419,7 @@ function AgentPill({
         name={agent.name}
         emoji={agent.emoji}
         avatarUrl={agent.avatarUrl}
+        platform={platform}
         variant="header"
       />
       <Text style={[styles.agentName, { color: theme.colors.ink }]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
@@ -453,6 +465,7 @@ function AgentMenu({
 }>): React.JSX.Element {
   const { theme } = useAppTheme();
   const { t } = useTranslation('common');
+  const platform = useContext(SessionPanelPlatform);
   const card = useMemo(() => [
     styles.agentMenu,
     { backgroundColor: theme.colors.surfaceFloating },
@@ -488,6 +501,7 @@ function AgentMenu({
                 name={option.agent.name}
                 emoji={option.agent.emoji}
                 avatarUrl={option.agent.avatarUrl}
+                platform={platform}
                 variant="sheet"
               />
               <Text
@@ -729,6 +743,7 @@ export function SessionPanelView({
   onRetry,
   onOpenBridgeHelp,
   onOpenPermission,
+  platform = null,
 }: SessionPanelViewProps): React.JSX.Element {
   const { fontScale } = useWindowDimensions();
   const { t } = useTranslation('common');
@@ -905,7 +920,7 @@ export function SessionPanelView({
   const switchable = agentOptions.length > 1;
 
   return (
-    <>
+    <SessionPanelPlatform.Provider value={platform}>
       <Sheet
         testID="session-panel"
         snapPoints={['95%']}
@@ -1078,7 +1093,7 @@ export function SessionPanelView({
         onClose={() => setRenameRow(null)}
         onConfirm={renameSession}
       />
-    </>
+    </SessionPanelPlatform.Provider>
   );
 }
 
@@ -1169,6 +1184,7 @@ export function SessionPanel({
       }}
       onOpenBridgeHelp={onOpenBridgeHelp}
       onOpenPermission={onOpenPermission}
+      platform={group?.connection.backendKind ?? null}
     />
   );
 }

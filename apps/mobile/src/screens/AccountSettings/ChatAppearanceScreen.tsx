@@ -202,17 +202,16 @@ export function ChatAppearanceScreen({
   const connections = useConnections();
   // Preview the Agent the person is actually chatting with; the roster carries its local avatar.
   const previewAgent = useMemo<ChatAppearancePreviewAgent | null>(() => {
-    const rosterAgent = connections.roster
-      .find((group) => group.connection.id === connections.activeConnectionId)
-      ?.agents.find((candidate) => candidate.agent.agentId === currentAgentId)
-      ?.agent;
+    const activeGroup = connections.roster.find((group) => group.connection.id === connections.activeConnectionId);
+    const platform = activeGroup?.connection.backendKind;
+    const rosterAgent = activeGroup?.agents.find((candidate) => candidate.agent.agentId === currentAgentId)?.agent;
     if (rosterAgent) {
-      return { agentId: rosterAgent.agentId, name: rosterAgent.name, emoji: rosterAgent.emoji, avatarUrl: rosterAgent.avatarUrl };
+      return { agentId: rosterAgent.agentId, name: rosterAgent.name, emoji: rosterAgent.emoji, avatarUrl: rosterAgent.avatarUrl, platform };
     }
     const agent = agents.find((candidate) => candidate.id === currentAgentId);
     const name = resolveAgentDisplayName(agent);
     if (!agent || !name) return null;
-    return { agentId: agent.id, name, emoji: agent.identity?.emoji, avatarUrl: agent.identity?.avatarUrl };
+    return { agentId: agent.id, name, emoji: agent.identity?.emoji, avatarUrl: agent.identity?.avatarUrl, platform };
   }, [agents, connections.activeConnectionId, connections.roster, currentAgentId]);
 
   const initialSnapshotRef = useRef<AppearanceDraftSnapshot>({

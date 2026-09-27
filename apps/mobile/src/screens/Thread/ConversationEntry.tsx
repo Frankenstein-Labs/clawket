@@ -33,8 +33,8 @@ export function ConversationEntry({ navigation, route, locked, lockedReason = 'a
   const pending = useRef<RootStackParamList['Thread'] | null>(null);
   const scope = useRef({ connectionId, agentId, focused });
   scope.current = { connectionId, agentId, focused };
-  const rosterAgent = connections.roster.find(group => group.connection.id === connectionId)?.agents
-    .find(row => row.agent.agentId === agentId)?.agent;
+  const rosterGroup = connections.roster.find(group => group.connection.id === connectionId);
+  const rosterAgent = rosterGroup?.agents.find(row => row.agent.agentId === agentId)?.agent;
   const title = rosterAgent?.name ?? t('Sessions');
   // The picker rising over the page is the success moment; a failed connect hands over without a payoff.
   const loaderPhase = useLoadingHandoff(loading, connections.activeConnectionId === connectionId && connections.activeState === 'ready');
@@ -79,7 +79,8 @@ export function ConversationEntry({ navigation, route, locked, lockedReason = 'a
         accessibilityLabel={t('Back')} onPress={() => navigation.goBack()} />
       <View style={styles.pillSlot}>
         <HeaderPill testID="conversation-entry-header-pill" agentId={agentId} name={title} subtitle=""
-          emoji={rosterAgent?.emoji} avatarUrl={rosterAgent?.avatarUrl} />
+          emoji={rosterAgent?.emoji} avatarUrl={rosterAgent?.avatarUrl}
+          platform={rosterGroup?.connection.backendKind} />
       </View>
       <View style={styles.headerSpacer} pointerEvents="none" />
     </View>

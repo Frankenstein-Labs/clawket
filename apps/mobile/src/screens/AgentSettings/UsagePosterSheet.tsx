@@ -6,6 +6,7 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Sharing from 'expo-sharing';
 import type { AgentDescriptor } from '@clawket/agent-protocol';
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
+import type { PlatformKind } from '../../components/ui/PlatformMark';
 import { Banner } from '../../components/ui/Banner';
 import { Button } from '../../components/ui/Button';
 import { Sheet } from '../../components/ui/Sheet';
@@ -29,6 +30,8 @@ export type UsagePosterData = Readonly<{
 export type UsagePosterSheetProps = Readonly<{
   visible: boolean;
   agent: AgentDescriptor;
+  /** The Agent's backend, so a product Agent signs the poster with its official mark. */
+  platform?: PlatformKind | null;
   data: UsagePosterData;
   onClose: () => void;
 }>;
@@ -36,6 +39,7 @@ export type UsagePosterSheetProps = Readonly<{
 export function UsagePosterSheet({
   visible,
   agent,
+  platform,
   data,
   onClose,
 }: UsagePosterSheetProps): React.JSX.Element {
@@ -108,6 +112,7 @@ export function UsagePosterSheet({
               name={agent.name}
               emoji={agent.emoji}
               avatarUrl={agent.avatarUrl}
+              platform={platform}
               variant="settings"
             />
             <View style={styles.identityCopy}>

@@ -266,6 +266,23 @@ export function DesignSystemScreen({
                 <AgentAvatar key={variant} agentId="main" name="A" variant={variant} status="working" />
               ))}
             </View>
+            {/* Product Agents wear the official mark; an Agent with its own avatar carries it as a
+                corner badge when the roster mixes backends (owner decision 2026-09-27). */}
+            <View testID="design-system-platform-avatars" style={styles.actionRow}>
+              {(['claude-code', 'codex', 'pi', 'hermes', 'local-model'] as const).map((platform) => (
+                <AgentAvatar key={platform} agentId={platform} name={platform} platform={platform} variant="settings" />
+              ))}
+            </View>
+            <RosterRow
+              testID="design-system-platform-badge"
+              agentId="main"
+              name={t('Agent', { ns: 'common' })}
+              preview={t('Connected', { ns: 'settings' })}
+              platform="openclaw"
+              platformBadge
+              live
+              onPress={() => setSheetVisible(true)}
+            />
             <SettingsGroup testID="design-system-settings-group">
               <SettingsRow
                 title={t('Unified setting row')}

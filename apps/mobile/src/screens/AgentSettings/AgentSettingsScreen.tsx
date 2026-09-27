@@ -19,7 +19,7 @@ import type {
   ConnectionState,
 } from '@clawket/agent-protocol';
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
-import { PlatformMark } from '../../components/ui/PlatformMark';
+import { isProductFacePlatform, PlatformMark } from '../../components/ui/PlatformMark';
 import { SettingsIcon } from '../../components/ui/SettingsIcon';
 import { Banner } from '../../components/ui/Banner';
 import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
@@ -510,9 +510,10 @@ export function AgentSettingsView({
           >
             <View style={styles.profileAvatar}>
               <AgentAvatar testID="agent-settings-avatar" agentId={agent.agentId}
-                name={model.identity.name} emoji={agent.emoji} avatarUrl={agent.avatarUrl}
+                name={model.identity.name} emoji={agent.emoji} avatarUrl={agent.avatarUrl} platform={model.identity.backend}
                 variant="roster" status={model.identity.locked ? 'locked' : state === 'offline' ? 'offline' : 'idle'} />
-              {model.identity.locked ? null : (
+              {/* A product Agent's face already is the official mark (owner decision 2026-09-27). */}
+              {model.identity.locked || isProductFacePlatform(model.identity.backend) ? null : (
                 <View
                   testID="agent-settings-backend-mark"
                   accessibilityRole="image"

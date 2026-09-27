@@ -1,6 +1,7 @@
 import { isMainConversation } from '../../utils/session-preview';
 import {
   sessionActivityAt,
+  type BackendKind,
   type Capabilities,
   type ConnectionDescriptor,
 } from '@clawket/agent-protocol';
@@ -38,6 +39,8 @@ type SearchResultBase = Readonly<{
 
 export type AgentSearchResult = SearchResultBase & Readonly<{
   kind: 'agent';
+  /** Picks the official face for a product Agent, as on the roster. */
+  backendKind: BackendKind;
   emoji?: string;
   avatarUrl?: string;
 }>;
@@ -199,6 +202,7 @@ function buildAgentResults(
         id,
         kind: 'agent',
         connectionId: group.connection.id,
+        backendKind: group.connection.backendKind,
         agentId: agent.agentId,
         sessionKey: agent.mainSessionKey,
         title: agent.name,

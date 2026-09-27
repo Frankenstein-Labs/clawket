@@ -1,11 +1,13 @@
 import type { RunActivity } from '../../connection/run-activity';
-import { sessionActivityAt, type SessionDescriptor } from '@clawket/agent-protocol';
+import { sessionActivityAt, type BackendKind, type SessionDescriptor } from '@clawket/agent-protocol';
 import { compareAgentSummaries, type RosterConnectionGroup } from '../../connection';
 
 export type RosterDisplayRow = Readonly<{
   key: string;
   kind: 'agent' | 'pinned_session';
   connectionId: string;
+  /** The row's product: it picks the official face or corner mark on the avatar. */
+  backendKind: BackendKind;
   agentId: string;
   sessionKey: string;
   name: string;
@@ -75,6 +77,7 @@ function buildPinnedRows(
       key: `session:${group.connection.id}:${session.key}`,
       kind: 'pinned_session' as const,
       connectionId: group.connection.id,
+      backendKind: group.connection.backendKind,
       agentId: agent.agentId,
       sessionKey: session.key,
       name: sessionTitle(session),
@@ -132,6 +135,7 @@ export function buildRosterRows(
       key: `agent:${group.connection.id}:${agent.agentId}`,
       kind: 'agent',
       connectionId: group.connection.id,
+      backendKind: group.connection.backendKind,
       agentId: agent.agentId,
       sessionKey: agent.mainSessionKey,
       name: agent.name,
@@ -164,6 +168,36 @@ export function buildRosterRows(
   }
 
   return Object.freeze(rows);
+}
+
+/**
+ * Whether Agent rows carry their backend's corner mark (owner decision 2026-09-27): only when the
+ * roster mixes two or more backends. Counting backends rather than connections keeps a roster of
+ * several OpenClaw Gateways unmarked — every mark would be the same crab and tell nothing apart.
+ */
+export function resolveRosterBackendMarks(rows: ReadonlyArray<Pick<RosterDisplayRow, 'backendKind'>>): boolean {
+  return new Set(rows.map((row) => row.backendKind)).size >= 2;
+}
+
+/** Product names are brand names in every language; the local model has no brand. */
+const BACKEND_NAMES: Readonly<Record<BackendKind, string | null>> = {
+  openclaw: 'OpenClaw',
+  hermes: 'Hermes',
+  youmind: 'YouMind',
+  pi: 'Pi',
+  codex: 'Codex',
+  'claude-code': 'Claude Code',
+  'local-model': null,
+};
+
+/**
+ * The backend a screen reader adds after the Agent's name when the roster shows backend marks,
+ * unless the name already says it ("Claude Code", "Pi · project").
+ */
+export function rosterBackendAccessibilityName(row: Pick<RosterDisplayRow, 'backendKind' | 'name'>): string | null {
+  const brand = BACKEND_NAMES[row.backendKind];
+  if (!brand) return null;
+  return row.name.toLocaleLowerCase().startsWith(brand.toLocaleLowerCase()) ? null : brand;
 }
 
 /**

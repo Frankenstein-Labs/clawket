@@ -17,6 +17,7 @@ function row(
     key: `${kind}:connection:agent`,
     kind,
     connectionId: 'connection',
+    backendKind: 'openclaw',
     agentId: 'agent',
     sessionKey: 'agent:agent:main',
     name: 'Agent',

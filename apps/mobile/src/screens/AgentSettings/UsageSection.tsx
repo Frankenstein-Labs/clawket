@@ -324,6 +324,7 @@ export function UsageSection({
       <UsagePosterSheet
         visible={posterVisible}
         agent={agent}
+        platform={adapter.connection.backendKind}
         data={{
           cost: costLabel,
           costCaption: costCaption ?? undefined,

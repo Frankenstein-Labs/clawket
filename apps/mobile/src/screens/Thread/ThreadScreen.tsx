@@ -899,6 +899,8 @@ function ThreadScreenContent({
   const shareProductLabel = connections.connections.find((connection) => (
     connection.id === connectionId
   ))?.label;
+  // The route's own connection names the product, never the active adapter mid-switch.
+  const agentPlatform = connections.connections.find((connection) => connection.id === connectionId)?.backendKind ?? null;
 
   return (
     <>
@@ -922,6 +924,7 @@ function ThreadScreenContent({
         messageSubmittedAt={controller.messageSubmittedAt}
         agentEmoji={agentEmoji}
         agentAvatarUrl={agentAvatarUrl}
+        agentPlatform={agentPlatform}
         sessionTitle={currentSession?.title ?? currentSession?.label}
         projectPath={rosterSession?.project?.path}
         isMainSession={mainConversation}
@@ -1095,6 +1098,7 @@ function ThreadScreenContent({
         agentName={agentName}
         agentEmoji={agent?.identity?.emoji}
         agentAvatarUri={controller.agentAvatarUri ?? undefined}
+        agentPlatform={agentPlatform}
         shareProductLabel={shareProductLabel}
         onCloseShare={() => setShareMessage(null)}
         preview={{

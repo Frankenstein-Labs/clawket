@@ -34,8 +34,16 @@ import {
   type AgentAvatarStatus,
 } from './AgentAvatar';
 import { formatFloatingButtonBadgeCount } from './FloatingButton';
+import type { PlatformKind } from './PlatformMark';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+/**
+ * 84: four points tighter than the shared 88-point two-line row, leaving 14 above and below the
+ * 56-point avatar (owner decision 2026-09-27: 88 felt loose; 80 was tried first). Enlarged text
+ * still grows the row.
+ */
+export const ROSTER_ROW_MIN_HEIGHT = ControlSize.rosterRow - Space.xs;
 
 export type RosterRowProps = Readonly<{
   selected?: boolean;
@@ -49,6 +57,10 @@ export type RosterRowProps = Readonly<{
   pinned?: boolean;
   /** A conversation row's badge glyph (`resolveSessionTileIcon`); Agent rows have none. */
   sessionIcon?: LucideIcon;
+  /** The row's backend: product backends wear the official mark as the Agent's face. */
+  platform?: PlatformKind;
+  /** Put the backend's mark on an Agent's own avatar (the roster mixes two or more backends). */
+  platformBadge?: boolean;
   avatarStatus?: AgentAvatarStatus;
   attentionTone?: AgentAttentionTone;
   timeLabel?: string;
@@ -79,6 +91,8 @@ export function RosterRow({
   avatarUrl,
   pinned = false,
   sessionIcon,
+  platform,
+  platformBadge = false,
   avatarStatus = 'idle',
   attentionTone = 'bad',
   timeLabel,
@@ -115,6 +129,24 @@ export function RosterRow({
           ? 'idle'
           : avatarStatus;
 
+  // The preview line's trailing marker: lock, then a live attention request, then unread.
+  const marker = locked ? (
+    <Lock testID={testID ? `${testID}-lock-icon` : undefined} size={IconSize.sm}
+      color={theme.colors.inkTertiary} strokeWidth={BorderWidth.strong} />
+  ) : !cached && attention ? (
+    <View testID={testID ? `${testID}-attention` : undefined}
+      style={[styles.attentionDot, { backgroundColor: theme.colors.bad }]} />
+  ) : !cached && unreadCount > 0 ? (
+    <View testID={testID ? `${testID}-unread` : undefined}
+      style={[unreadIndicator === 'dot' ? styles.attentionDot : styles.unreadBadge, { backgroundColor: theme.colors.ink }]}>
+      {unreadIndicator === 'count' ? (
+        <Text style={[styles.unreadText, { color: theme.colors.canvas }]}>
+          {formatFloatingButtonBadgeCount(unreadCount)}
+        </Text>
+      ) : null}
+    </View>
+  ) : null;
+
   return (
     <AnimatedPressable
       testID={testID}
@@ -145,50 +177,46 @@ export function RosterRow({
           status={resolvedAvatarStatus}
           attentionTone={attentionTone}
           badgeIcon={sessionIcon}
+          platform={platform}
+          platformBadge={platformBadge}
           variant="roster"
         />
       </View>
+      {/* Two lines, each with its own trailing slot (owner decision 2026-09-27): the time sits on the
+          name's line and the unread / attention / lock marker on the preview's, so a badge never
+          pushes the time up and every row keeps the same right edge. */}
       <View style={styles.copy}>
-        <View style={styles.nameRow}>
-          {pinned ? (
-            <Pin
-              testID={testID ? `${testID}-pin-icon` : undefined}
-              size={IconSize.sm}
-              color={theme.colors.inkTertiary}
-              strokeWidth={BorderWidth.strong}
-            />
-          ) : null}
-          <Text style={[styles.name, { color: theme.colors.ink }]} numberOfLines={1}>
-            {name}
-          </Text>
-        </View>
-        <Text style={[styles.preview, { color: theme.colors.inkSecondary }]} numberOfLines={1}>
-          {preview}
-        </Text>
-      </View>
-      <View testID={testID ? `${testID}-trailing` : undefined} style={styles.trailing}>
-        {timeLabel ? (
-          <Text testID={testID ? `${testID}-time` : undefined}
-            style={[styles.time, { color: theme.colors.inkTertiary }]} numberOfLines={1} maxFontSizeMultiplier={1.3}>
-            {timeLabel}
-          </Text>
-        ) : null}
-        {locked ? (
-          <Lock testID={testID ? `${testID}-lock-icon` : undefined} size={IconSize.sm}
-            color={theme.colors.inkTertiary} strokeWidth={BorderWidth.strong} />
-        ) : !cached && attention ? (
-          <View testID={testID ? `${testID}-attention` : undefined}
-            style={[styles.attentionDot, { backgroundColor: theme.colors.bad }]} />
-        ) : !cached && unreadCount > 0 ? (
-          <View testID={testID ? `${testID}-unread` : undefined}
-            style={[unreadIndicator === 'dot' ? styles.attentionDot : styles.unreadBadge, { backgroundColor: theme.colors.ink }]}>
-            {unreadIndicator === 'count' ? (
-              <Text style={[styles.unreadText, { color: theme.colors.canvas }]}>
-                {formatFloatingButtonBadgeCount(unreadCount)}
-              </Text>
+        <View style={styles.line}>
+          <View style={styles.nameRow}>
+            {pinned ? (
+              <Pin
+                testID={testID ? `${testID}-pin-icon` : undefined}
+                size={IconSize.sm}
+                color={theme.colors.inkTertiary}
+                strokeWidth={BorderWidth.strong}
+              />
             ) : null}
+            <Text style={[styles.name, { color: theme.colors.ink }]} numberOfLines={1}>
+              {name}
+            </Text>
           </View>
-        ) : null}
+          {timeLabel ? (
+            <Text testID={testID ? `${testID}-time` : undefined}
+              style={[styles.time, { color: theme.colors.inkTertiary }]} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+              {timeLabel}
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.line}>
+          <Text style={[styles.preview, { color: theme.colors.inkSecondary }]} numberOfLines={1}>
+            {preview}
+          </Text>
+          {marker ? (
+            <View testID={testID ? `${testID}-trailing` : undefined} style={styles.marker}>
+              {marker}
+            </View>
+          ) : null}
+        </View>
       </View>
     </AnimatedPressable>
   );
@@ -196,7 +224,7 @@ export function RosterRow({
 
 const styles = StyleSheet.create({
   row: {
-    minHeight: ControlSize.rosterRow,
+    minHeight: ROSTER_ROW_MIN_HEIGHT,
     paddingVertical: Space.sm,
     paddingHorizontal: Space.lg,
     flexDirection: 'row',
@@ -213,6 +241,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: Space.xs,
   },
+  line: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm,
+  },
   name: {
     flexShrink: 1,
     fontSize: FontSize.body,
@@ -220,22 +253,26 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.semibold,
   },
   nameRow: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.xs,
   },
   preview: {
+    flex: 1,
+    minWidth: 0,
     fontSize: FontSize.secondary,
     lineHeight: LineHeight.secondary,
     fontWeight: FontWeight.regular,
   },
-  trailing: {
-    minWidth: Space.xl,
+  marker: {
+    flexShrink: 0,
     alignItems: 'flex-end',
     justifyContent: 'center',
-    gap: Space.xs,
   },
   time: {
+    flexShrink: 0,
     fontSize: FontSize.caption,
     lineHeight: LineHeight.caption,
     fontWeight: FontWeight.regular,

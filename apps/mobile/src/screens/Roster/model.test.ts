@@ -4,7 +4,13 @@ import type {
   SessionDescriptor,
 } from '@clawket/agent-protocol';
 import type { RosterConnectionGroup } from '../../connection';
-import { buildRosterRows, resolveRosterLiveConnectionId, resolveRosterPageState } from './model';
+import {
+  buildRosterRows,
+  resolveRosterBackendMarks,
+  resolveRosterLiveConnectionId,
+  resolveRosterPageState,
+  rosterBackendAccessibilityName,
+} from './model';
 
 const actions = { rename: true, reset: true, delete: true, pin: true };
 
@@ -292,5 +298,35 @@ describe('resolveRosterLiveConnectionId', () => {
     expect(live({ activeState: 'connecting' })).toBeNull();
     expect(live({ activeState: 'idle' })).toBeNull();
     expect(live({ activeState: 'ready', offline: true })).toBeNull();
+  });
+});
+
+describe('backend marks', () => {
+  it('carries each connection\'s backend on its Agent and conversation rows', () => {
+    const codex = group('two');
+    const rows = buildRosterRows([
+      group('one'),
+      { ...codex, connection: { ...codex.connection, backendKind: 'codex' } },
+    ], { pinnedSessionKeys: { 'one:main': ['agent:main:channel:general'] } });
+    expect(rows.filter((row) => row.connectionId === 'one').map((row) => row.backendKind))
+      .toEqual(['openclaw', 'openclaw', 'openclaw']);
+    expect(rows.filter((row) => row.kind === 'pinned_session').map((row) => row.backendKind)).toEqual(['openclaw']);
+    expect(rows.filter((row) => row.connectionId === 'two').every((row) => row.backendKind === 'codex')).toBe(true);
+  });
+
+  it('marks Agents only when the roster mixes backends, not merely connections', () => {
+    expect(resolveRosterBackendMarks([{ backendKind: 'openclaw' }, { backendKind: 'claude-code' }])).toBe(true);
+    // Two OpenClaw Gateways would wear the same crab on every row.
+    expect(resolveRosterBackendMarks(buildRosterRows([group('one'), group('two')]))).toBe(false);
+    expect(resolveRosterBackendMarks([{ backendKind: 'hermes' }])).toBe(false);
+    expect(resolveRosterBackendMarks([])).toBe(false);
+  });
+
+  it('names the backend for screen readers unless the Agent name already says it', () => {
+    expect(rosterBackendAccessibilityName({ backendKind: 'openclaw', name: 'Lucy' })).toBe('OpenClaw');
+    expect(rosterBackendAccessibilityName({ backendKind: 'hermes', name: 'Studio Mac' })).toBe('Hermes');
+    expect(rosterBackendAccessibilityName({ backendKind: 'claude-code', name: 'Claude Code' })).toBeNull();
+    expect(rosterBackendAccessibilityName({ backendKind: 'pi', name: 'Pi · project' })).toBeNull();
+    expect(rosterBackendAccessibilityName({ backendKind: 'local-model', name: 'Qwen' })).toBeNull();
   });
 });

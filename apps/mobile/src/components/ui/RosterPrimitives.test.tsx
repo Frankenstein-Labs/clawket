@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
+import type { ReactTestInstance } from 'react-test-renderer';
 import { View } from 'react-native';
 import { MessageCircle, Search } from 'lucide-react-native';
 import { builtInAccents } from '../../theme/accents';
@@ -28,7 +29,7 @@ import { HeaderPill } from './HeaderPill';
 import { createChatGlassStyle } from '../../features/chat-appearance/resolver';
 import { Companion } from './Companion';
 import { ProEntryButton, PRO_ENTRY_COMPANION_SIZE, PRO_ENTRY_HEIGHT, PRO_ENTRY_HIT_SLOP } from './ProEntryButton';
-import { RosterRow } from './RosterRow';
+import { ROSTER_ROW_MIN_HEIGHT, RosterRow } from './RosterRow';
 import { Skeleton } from './Skeleton';
 import { circleBadgeInset } from './StatusDot';
 import { SystemEventRow, SYSTEM_EVENT_ICON_SIZE } from './SystemEventRow';
@@ -304,6 +305,13 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
     expect(root.props.android_ripple).toBeUndefined();
   });
 
+  it('wears the official mark in the header pill for a product Agent', () => {
+    const result = render(<HeaderPill testID="header-pill" agentId="claude-code" name="Claude Code" subtitle=""
+      platform="claude-code" />);
+    expect(result.getByTestId('header-pill-avatar-face')).toBeTruthy();
+    expect(result.queryByText('CC')).toBeNull();
+  });
+
   it('floats the header pill on glass over a wallpaper', () => {
     const theme = activeTheme(scheme);
     const glass = createChatGlassStyle(theme);
@@ -340,7 +348,7 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
     expect(result.queryByTestId('header-pill-working')).toBeNull();
   });
 
-  it('renders a borderless 88pt roster row with tokenized pressed feedback', () => {
+  it('renders a borderless 84pt roster row with tokenized pressed feedback', () => {
     const theme = activeTheme(scheme);
     const result = render(
       <RosterRow
@@ -358,8 +366,11 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
     const root = result.getByTestId('roster-row');
     const resting = flattenStyle(root.props.style);
 
+    // Four points tighter than the shared two-line row: 14 above and below the avatar (owner decision 2026-09-27).
+    expect(ROSTER_ROW_MIN_HEIGHT).toBe(ControlSize.rosterRow - Space.xs);
+    expect(ROSTER_ROW_MIN_HEIGHT - AGENT_AVATAR_METRICS.roster.size).toBe(28);
     expect(resting).toMatchObject({
-      minHeight: ControlSize.rosterRow,
+      minHeight: ROSTER_ROW_MIN_HEIGHT,
       backgroundColor: theme.colors.canvas,
     });
     expect(resting.height).toBeUndefined();
@@ -401,6 +412,42 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
       unreadCount={1} unreadIndicator="dot" onPress={jest.fn()} />);
     expect(result.getByTestId('unread-unread')).toBeTruthy();
     expect(result.queryByText('1')).toBeNull();
+  });
+
+  it('keeps the time on the name line and the marker on the preview line', () => {
+    const lineOf = (node: ReactTestInstance): ReactTestInstance | null => {
+      let current = node.parent;
+      while (current) {
+        const style = typeof current.type === 'string' ? flattenStyle(current.props.style) : {};
+        if (style.flexDirection === 'row' && style.gap === Space.sm) return current;
+        current = current.parent;
+      }
+      return null;
+    };
+    const result = render(<RosterRow testID="grid" agentId="main" name="Main" preview="Reply" timeLabel="2h"
+      unreadCount={1} unreadIndicator="dot" onPress={jest.fn()} />);
+    const nameLine = lineOf(result.getByText('Main'));
+    const previewLine = lineOf(result.getByText('Reply'));
+    expect(nameLine).not.toBeNull();
+    expect(previewLine).not.toBe(nameLine);
+    // A badge below the time used to push it up the row; each line now owns its trailing slot.
+    expect(lineOf(result.getByTestId('grid-time'))).toBe(nameLine);
+    expect(lineOf(result.getByTestId('grid-trailing'))).toBe(previewLine);
+    expect(lineOf(result.getByTestId('grid-unread'))).toBe(previewLine);
+  });
+
+  it('passes the backend to the avatar: a product face, or a corner badge on an own avatar', () => {
+    const product = render(<RosterRow testID="product" agentId="codex" name="Codex" preview="Reply"
+      platform="codex" platformBadge onPress={jest.fn()} />);
+    expect(product.getByTestId('product-avatar-face')).toBeTruthy();
+    expect(product.queryByTestId('product-avatar-platform')).toBeNull();
+    const own = render(<RosterRow testID="own" agentId="main" name="Main" emoji="C" preview="Reply"
+      platform="openclaw" platformBadge onPress={jest.fn()} />);
+    expect(own.getByText('C')).toBeTruthy();
+    expect(own.getByTestId('own-avatar-platform')).toBeTruthy();
+    const single = render(<RosterRow testID="single" agentId="main" name="Main" preview="Reply"
+      platform="openclaw" onPress={jest.fn()} />);
+    expect(single.queryByTestId('single-avatar-platform')).toBeNull();
   });
 
   it('marks a live row on the avatar corner and yields that corner to attention and lock', () => {
@@ -657,6 +704,74 @@ describe('AgentAvatar states and motion', () => {
     expect(mockWithTiming).toHaveBeenCalledWith(1, { duration: Motion.duration.normal });
     later.rerender(<AgentAvatar testID="later" agentId="main" name="Main" status="idle" />);
     expect(later.queryByTestId('later-live')).toBeNull();
+  });
+
+  it('wears the official mark as the face of a product Agent', () => {
+    const theme = activeTheme('light');
+    const face = render(<AgentAvatar testID="cc" agentId="claude-code" name="Claude Code" emoji="C"
+      avatarUrl="https://cdn.example.invalid/a.png" platform="claude-code" />);
+    expect(face.getByTestId('cc-face')).toBeTruthy();
+    // The adapter-assigned emoji, initials and image give way to the product's own mark.
+    expect(face.queryByText('C')).toBeNull();
+    expect(face.queryByText('CC')).toBeNull();
+    expect(face.queryByTestId('cc-image')).toBeNull();
+    expect(flattenStyle(face.getByTestId('cc-fill').props.style).backgroundColor).toBe(theme.colors.surfaceFloating);
+    // A hairline edge keeps the white face from dissolving into the canvas.
+    const edges = face.UNSAFE_root.findAll((node) => typeof node.type === 'string'
+      && flattenStyle(node.props.style).borderColor === theme.colors.line
+      && flattenStyle(node.props.style).borderWidth === 1);
+    expect(edges).toHaveLength(1);
+
+    for (const platform of ['codex', 'pi', 'hermes', 'local-model'] as const) {
+      const other = render(<AgentAvatar testID="p" agentId={platform} name={platform} platform={platform} />);
+      expect(other.getByTestId('p-face')).toBeTruthy();
+      other.unmount();
+    }
+    // OpenClaw Agents and YouMind Sprites keep their own faces.
+    for (const platform of ['openclaw', 'youmind'] as const) {
+      const own = render(<AgentAvatar testID="own" agentId="main" name="Main" emoji="C" platform={platform} />);
+      expect(own.queryByTestId('own-face')).toBeNull();
+      expect(own.getByText('C')).toBeTruthy();
+      own.unmount();
+    }
+    const offline = render(<AgentAvatar testID="off" agentId="codex" name="Codex" platform="codex" status="offline" />);
+    expect(flattenStyle(offline.getByTestId('off-fill').props.style).filter).toEqual([{ saturate: 0.4 }]);
+  });
+
+  it('carries the backend badge on an own avatar and yields its corner to lock and attention', () => {
+    const theme = activeTheme('light');
+    const badge = render(<AgentAvatar testID="oc" agentId="main" name="Main" platform="openclaw" platformBadge />);
+    const ring = flattenStyle(badge.getByTestId('oc-platform').props.style);
+    // A canvas disc behind the mark cuts it out of the avatar, centred on the circle at 45°.
+    expect(ring).toMatchObject({ width: Space.xl, height: Space.xl, borderRadius: Radius.full, backgroundColor: theme.colors.canvas });
+    expect(ring.right).toBeCloseTo(circleBadgeInset(AGENT_AVATAR_METRICS.roster.size, Space.xl));
+    expect(ring.bottom).toBeCloseTo(ring.right as number);
+    // Grey, not white: a white disc vanished on the canvas (owner feedback 2026-09-27).
+    expect(flattenStyle(badge.getByTestId('oc-platform-mark').props.style)).toMatchObject({
+      width: IconSize.md, height: IconSize.md, borderRadius: Radius.full, backgroundColor: theme.colors.surface,
+    });
+    expect(badge.queryByTestId('oc-platform-live')).toBeNull();
+    expect(badge.queryByTestId('oc-live')).toBeNull();
+
+    // The live connection's badge rings in green instead of adding the separate dot.
+    const live = render(<AgentAvatar testID="live" agentId="main" name="Main" platform="openclaw" platformBadge status="live" />);
+    expect(flattenStyle(live.getByTestId('live-platform-live').props.style).backgroundColor).toBe(theme.colors.good);
+    expect(live.queryByTestId('live-live')).toBeNull();
+
+    const attention = render(<AgentAvatar testID="att" agentId="main" name="Main" platform="openclaw" platformBadge status="attention" />);
+    expect(attention.queryByTestId('att-platform')).toBeNull();
+    expect(attention.getByTestId('att-attention')).toBeTruthy();
+    const locked = render(<AgentAvatar testID="lock" agentId="main" name="Main" platform="openclaw" platformBadge status="locked" />);
+    expect(locked.queryByTestId('lock-platform')).toBeNull();
+    expect(locked.getByTestId('lock-locked')).toBeTruthy();
+
+    // A product face already is the mark, so it keeps the plain live dot.
+    const face = render(<AgentAvatar testID="face" agentId="codex" name="Codex" platform="codex" platformBadge status="live" />);
+    expect(face.queryByTestId('face-platform')).toBeNull();
+    expect(face.getByTestId('face-live')).toBeTruthy();
+    // Without a backend there is nothing to mark.
+    const unknown = render(<AgentAvatar testID="none" agentId="main" name="Main" platformBadge />);
+    expect(unknown.queryByTestId('none-platform')).toBeNull();
   });
 
   it('stops skeleton pulse animation when reduced motion is enabled', () => {

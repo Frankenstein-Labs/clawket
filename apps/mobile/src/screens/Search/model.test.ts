@@ -199,6 +199,10 @@ describe('global Search model', () => {
       'favorites',
     ]);
     expect(model.sections.find((section) => section.kind === 'agents')?.results).toHaveLength(2);
+    // Agent results carry their product so a product Agent shows the same official face as on the roster.
+    expect(model.sections.find((section) => section.kind === 'agents')?.results
+      .map((result) => [result.connectionId, result.kind === 'agent' ? result.backendKind : null]))
+      .toEqual(expect.arrayContaining([['home', 'openclaw'], ['travel', 'hermes']]));
     expect(model.sections.find((section) => section.kind === 'sessions')?.results).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ title: 'Cached launch', source: 'cache' }),

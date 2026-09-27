@@ -548,6 +548,8 @@ describe('RosterScreen', () => {
     const liveDot = (key: string) => view.queryByTestId(`roster-row-agent:${key}-avatar-live`);
 
     expect(liveDot('live:builder')).toBeTruthy();
+    // Two OpenClaw connections share one backend: no backend badge competes with the dot.
+    expect(view.queryByTestId('roster-row-agent:live:builder-avatar-platform')).toBeNull();
     // A pending approval keeps its red dot on the same corner.
     expect(view.getByTestId('roster-row-agent:live:main-avatar-attention')).toBeTruthy();
     expect(liveDot('live:main')).toBeNull();
@@ -588,6 +590,44 @@ describe('RosterScreen', () => {
     expect(liveDot('live:builder')).toBeNull();
     expect(view.getByTestId('roster-row-agent:live:builder').props.accessibilityLabel)
       .toBe('Builder, 1h ago, Unread messages');
+  });
+
+  it('wears official faces for product Agents and marks own avatars only when backends mix', () => {
+    const product = (id: string, backendKind: ConnectionDescriptor['backendKind']): RosterConnectionGroup => {
+      const source = group(id, 'cache', [{ ...agent(id, 'main'), name: 'Claude Code', emoji: undefined }]);
+      return { ...source, connection: { ...source.connection, backendKind } };
+    };
+    mockRoster = [group('live', 'live', [agent('live', 'main'), agent('live', 'builder')]), product('cc', 'claude-code')];
+    mockConnections = snapshot({
+      connections: [connection('live'), mockRoster[1].connection],
+      roster: mockRoster,
+    });
+    const view = render(<RosterScreen {...props({ pinnedSessionKeys: { 'live:builder': ['agent:builder:main:channel:ops'] } })} />);
+    const node = (key: string, part: string) => view.queryByTestId(`roster-row-agent:${key}-avatar-${part}`);
+
+    // The product Agent's face is its official mark; it needs no badge.
+    expect(node('cc:main', 'face')).toBeTruthy();
+    expect(node('cc:main', 'platform')).toBeNull();
+    // OpenClaw Agents keep their own avatars and carry the OpenClaw mark; the live connection's rings green.
+    expect(view.getByText('C')).toBeTruthy();
+    expect(node('live:builder', 'platform')).toBeTruthy();
+    expect(node('live:builder', 'platform-live')).toBeTruthy();
+    expect(node('live:builder', 'live')).toBeNull();
+    // A pending approval still takes the corner.
+    expect(node('live:main', 'platform')).toBeNull();
+    expect(node('live:main', 'attention')).toBeTruthy();
+    expect(view.getByTestId('roster-row-agent:live:builder').props.accessibilityLabel)
+      .toBe('Builder, OpenClaw, Connected, 1h ago, Unread messages');
+    // A conversation shown on home follows its Agent row without a badge of its own.
+    expect(view.getByTestId('roster-row-session:live:agent:builder:main:channel:ops-avatar-overlay')).toBeTruthy();
+    expect(view.queryByTestId('roster-row-session:live:agent:builder:main:channel:ops-avatar-platform')).toBeNull();
+
+    // One backend: every mark would be the same, so none appears; the product face stays.
+    mockRoster = [product('cc', 'claude-code')];
+    mockConnections = snapshot({ connections: [mockRoster[0].connection], activeConnectionId: 'cc', roster: mockRoster });
+    view.rerender(<RosterScreen {...props()} />);
+    expect(node('cc:main', 'face')).toBeTruthy();
+    expect(view.getByTestId('roster-row-agent:cc:main').props.accessibilityLabel).not.toContain('Claude Code, Claude Code');
   });
 
   it('renders the registry-provided semantic subtitle instead of the latest session preview', () => {

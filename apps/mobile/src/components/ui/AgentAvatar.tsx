@@ -29,6 +29,7 @@ import {
   Space,
 } from '../../theme/tokens';
 import { resolveAgentAvatarImageSource } from '../../utils/agent-avatar-uri';
+import { isProductFacePlatform, PlatformDisc, type PlatformKind } from './PlatformMark';
 import { circleBadgeInset, StatusDot } from './StatusDot';
 
 export type AgentAvatarVariant = 'roster' | 'header' | 'settings' | 'sheet' | 'panel';
@@ -77,6 +78,9 @@ export const AGENT_AVATAR_METRICS: Readonly<Record<AgentAvatarVariant, AvatarMet
 };
 
 const AVATAR_MUTED_SATURATION = 0.4;
+/** Share of the circle a bare official mark spans: on a face, and inside the smaller corner badge. */
+const FACE_GLYPH = 0.54;
+const BADGE_GLYPH = 0.72;
 
 export type AgentAvatarProps = Readonly<{
   agentId: string;
@@ -91,6 +95,19 @@ export type AgentAvatarProps = Readonly<{
    * conversation that stands in for its Agent (a roster conversation row).
    */
   badgeIcon?: LucideIcon;
+  /**
+   * The Agent's backend. On a product backend (`isProductFacePlatform`) the
+   * official mark is the face in place of emoji, image and initials (owner
+   * decision 2026-09-27); other backends keep the Agent's own avatar.
+   */
+  platform?: PlatformKind | null;
+  /**
+   * Carry the backend's official mark on the bottom-right of an Agent's own
+   * avatar; the roster asks for it when its rows mix two or more backends.
+   * Lock and attention take that corner first, and a live Agent's badge rings
+   * in `good` instead of adding the separate live dot.
+   */
+  platformBadge?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }>;
@@ -127,6 +144,8 @@ export function AgentAvatar({
   status = 'idle',
   attentionTone = 'warn',
   badgeIcon: BadgeIcon,
+  platform,
+  platformBadge = false,
   style,
   testID,
 }: AgentAvatarProps): React.JSX.Element {
@@ -177,6 +196,12 @@ export function AgentAvatar({
   const doneDotStyle = useAnimatedStyle(() => ({ opacity: doneOpacity.value }));
   const liveDotStyle = useAnimatedStyle(() => ({ opacity: liveOpacity.value }));
   const isMuted = status === 'offline' || status === 'locked';
+  const mutedFilter = isMuted ? [{ saturate: AVATAR_MUTED_SATURATION }] : undefined;
+  const productFace = isProductFacePlatform(platform);
+  // One corner, one marker: lock and attention outrank the backend badge, which in turn carries the live state.
+  const badgePlatform = platformBadge && !productFace && status !== 'locked' && status !== 'attention'
+    ? platform ?? null
+    : null;
   const statusDotColor = attentionTone === 'bad' ? theme.colors.bad : theme.colors.warn;
   // The lock badge shares the dots' corner: centred on the circle at 45°.
   const lockPosition = useMemo(() => {
@@ -188,7 +213,12 @@ export function AgentAvatar({
     const inset = circleBadgeInset(metrics.size, IconSize.md);
     return { top: inset, right: inset };
   }, [metrics.size]);
-  const resolvedAvatarSource = !emoji ? resolveAgentAvatarImageSource(avatarUrl) : null;
+  // The backend badge shares the status corner and its geometry.
+  const platformBadgePosition = useMemo(() => {
+    const inset = circleBadgeInset(metrics.size, Space.xl);
+    return { right: inset, bottom: inset };
+  }, [metrics.size]);
+  const resolvedAvatarSource = !emoji && !productFace ? resolveAgentAvatarImageSource(avatarUrl) : null;
 
   return (
     <View
@@ -207,24 +237,39 @@ export function AgentAvatar({
           styles.fill,
           {
             borderRadius: metrics.radius,
-            backgroundColor: paletteColor,
-            filter: isMuted ? [{ saturate: AVATAR_MUTED_SATURATION }] : undefined,
+            backgroundColor: productFace ? theme.colors.surfaceFloating : paletteColor,
+            filter: mutedFilter,
           },
         ]}
       >
-        {content ? (
-          <Text numberOfLines={1} allowFontScaling={false} style={textStyle}>
-            {content}
-          </Text>
-        ) : null}
-        {resolvedAvatarSource ? (
-          <Image
-            testID={testID ? `${testID}-image` : undefined}
-            source={resolvedAvatarSource}
-            resizeMode="cover"
-            style={styles.image}
-          />
-        ) : null}
+        {productFace ? (
+          <>
+            <PlatformDisc
+              testID={testID ? `${testID}-face` : undefined}
+              platform={platform}
+              size={metrics.size}
+              glyph={FACE_GLYPH}
+            />
+            {/* The white face would dissolve into the canvas without its hairline edge. */}
+            <View pointerEvents="none" style={[styles.faceEdge, { borderRadius: metrics.radius, borderColor: theme.colors.line }]} />
+          </>
+        ) : (
+          <>
+            {content ? (
+              <Text numberOfLines={1} allowFontScaling={false} style={textStyle}>
+                {content}
+              </Text>
+            ) : null}
+            {resolvedAvatarSource ? (
+              <Image
+                testID={testID ? `${testID}-image` : undefined}
+                source={resolvedAvatarSource}
+                resizeMode="cover"
+                style={styles.image}
+              />
+            ) : null}
+          </>
+        )}
       </View>
       {/* A grey disc cut out by a canvas ring: a white disc vanished on the
           canvas and floated off the box corner (owner feedback 2026-09-27). */}
@@ -254,7 +299,34 @@ export function AgentAvatar({
           circle={metrics.size}
         />
       ) : null}
-      {status === 'done' ? (
+      {badgePlatform ? (
+        // A canvas disc behind the mark cuts it out of the avatar; the live connection's badge fades
+        // that ring to `good`, the same green the live dot and "My connections" use.
+        <View
+          testID={testID ? `${testID}-platform` : undefined}
+          pointerEvents="none"
+          style={[
+            styles.platformBadge,
+            platformBadgePosition,
+            { backgroundColor: theme.colors.canvas, filter: mutedFilter },
+          ]}
+        >
+          {status === 'live' ? (
+            <Animated.View
+              testID={testID ? `${testID}-platform-live` : undefined}
+              style={[styles.platformLiveRing, { backgroundColor: theme.colors.good }, liveDotStyle]}
+            />
+          ) : null}
+          <PlatformDisc
+            testID={testID ? `${testID}-platform-mark` : undefined}
+            platform={badgePlatform}
+            size={IconSize.md}
+            glyph={BADGE_GLYPH}
+            ground="surface"
+          />
+        </View>
+      ) : null}
+      {status === 'done' && !badgePlatform ? (
         <Animated.View pointerEvents="none" style={[styles.statusLayer, doneDotStyle]}>
           <StatusDot
             testID={testID ? `${testID}-done` : undefined}
@@ -264,7 +336,7 @@ export function AgentAvatar({
           />
         </Animated.View>
       ) : null}
-      {status === 'live' ? (
+      {status === 'live' && !badgePlatform ? (
         <Animated.View pointerEvents="none" style={[styles.statusLayer, liveDotStyle]}>
           <StatusDot
             testID={testID ? `${testID}-live` : undefined}
@@ -310,6 +382,30 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     width: '100%',
     height: '100%',
+  },
+  faceEdge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  platformBadge: {
+    position: 'absolute',
+    width: Space.xl,
+    height: Space.xl,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  platformLiveRing: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: Radius.full,
   },
   // Carries a dot's fade; the dot itself sits on the avatar's corner.
   statusLayer: {

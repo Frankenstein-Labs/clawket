@@ -2,8 +2,8 @@ import React from 'react';
 import { render } from '@testing-library/react-native';
 import { buildTheme } from '../../theme/theme';
 import { builtInAccents } from '../../theme/accents';
-import { ControlSize } from '../../theme/tokens';
-import { PlatformMark } from './PlatformMark';
+import { ControlSize, Radius } from '../../theme/tokens';
+import { isProductFacePlatform, PlatformDisc, PlatformMark } from './PlatformMark';
 
 let mockScheme: 'light' | 'dark' = 'light';
 
@@ -12,6 +12,7 @@ jest.mock('react-native', () => {
   return {
     Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Image: (props: Record<string, unknown>) => ReactRuntime.createElement('Image', props),
+    View: ({ children, ...props }: Record<string, unknown>) => ReactRuntime.createElement('View', props, children),
     StyleSheet: { create: <T extends Record<string, unknown>>(styles: T) => styles, flatten: (style: unknown) => style },
   };
 });
@@ -64,6 +65,60 @@ describe('PlatformMark', () => {
     }
     const local = render(<PlatformMark platform="local-model" balanced />);
     expect(local.getByTestId('platform-mark-local-model').props).toMatchObject({ width: 41, height: 41 });
+  });
+
+  it('names the backends whose Agent is the product itself', () => {
+    for (const platform of ['hermes', 'codex', 'claude-code', 'pi', 'local-model'] as const) {
+      expect(isProductFacePlatform(platform)).toBe(true);
+    }
+    // OpenClaw Agents and YouMind Sprites have identities of their own.
+    for (const platform of ['openclaw', 'youmind', null, undefined] as const) {
+      expect(isProductFacePlatform(platform)).toBe(false);
+    }
+  });
+
+  it('fits official artwork to a disc: app tiles fill it, bare marks span the glyph share', () => {
+    const imageOf = (element: React.ReactElement) => {
+      const view = render(element);
+      const props = view.UNSAFE_getByType('Image' as never).props as { style: { width: number; height: number } };
+      view.unmount();
+      return props.style;
+    };
+    // App artwork covers 81% of its box, so the tile is drawn past the circle to hide its corners and shadow.
+    expect(imageOf(<PlatformDisc platform="codex" size={56} glyph={0.54} />).width).toBeCloseTo((56 / 0.81) * 1.02);
+    expect(imageOf(<PlatformDisc platform="youmind" size={20} glyph={0.72} />).width).toBeCloseTo(20 * 1.02);
+    // A bare mark's visible part spans the glyph share of the diameter, with optical corrections.
+    expect(imageOf(<PlatformDisc platform="claude-code" size={56} glyph={0.54} />).width * 0.85).toBeCloseTo(56 * 0.54);
+    expect(imageOf(<PlatformDisc platform="openclaw" size={20} glyph={0.72} />).width * 0.92).toBeCloseTo(20 * 0.72 * 1.08);
+    expect(imageOf(<PlatformDisc platform="pi" size={56} glyph={0.54} />).width * 0.59).toBeCloseTo(56 * 0.54 * 0.92);
+
+    const { colors } = buildTheme('light', 'light', builtInAccents.iceBlue);
+    const face = render(<PlatformDisc testID="face" platform="claude-code" size={56} glyph={0.54} />);
+    expect(Object.assign({}, ...(face.getByTestId('face').props.style as object[]))).toMatchObject({
+      width: 56, height: 56, borderRadius: Radius.full, overflow: 'hidden', backgroundColor: colors.surfaceFloating,
+    });
+    const badge = render(<PlatformDisc testID="badge" platform="openclaw" size={20} glyph={0.72} ground="surface" />);
+    expect(Object.assign({}, ...(badge.getByTestId('badge').props.style as object[])).backgroundColor).toBe(colors.surface);
+  });
+
+  it('draws the local-model chip alone on a disc and keeps exported artwork out of dark mode', () => {
+    mockScheme = 'dark';
+    const { colors } = buildTheme('dark', 'dark', builtInAccents.iceBlue);
+    const themed = render(<PlatformDisc platform="local-model" size={56} glyph={0.54} />);
+    // The disc is the quiet ground, so the chooser tile is not drawn again inside it.
+    expect(themed.UNSAFE_queryAllByType('Rect' as never)).toHaveLength(0);
+    const glyph = themed.getByTestId('platform-disc-local-model-glyph');
+    expect(glyph.props).toMatchObject({ width: 56 * 0.54, height: 56 * 0.54 });
+    const path = themed.UNSAFE_getByType('Path' as never).props as { stroke: string; strokeWidth: number };
+    expect(path.stroke).toBe(colors.ink);
+    // The outline draws 1.4 points wide whatever the glyph size (26 viewBox units across the glyph).
+    expect(path.strokeWidth * (56 * 0.54) / 26).toBeCloseTo(1.4);
+    themed.unmount();
+
+    const poster = render(<PlatformDisc testID="poster" platform="local-model" size={56} glyph={0.54}
+      artworkColors={{ ground: '#FFFFFF', ink: '#111113' }} />);
+    expect(Object.assign({}, ...(poster.getByTestId('poster').props.style as object[])).backgroundColor).toBe('#FFFFFF');
+    expect((poster.UNSAFE_getByType('Path' as never).props as { stroke: string }).stroke).toBe('#111113');
   });
 
   it('uses the bare Claude spark, not the circular-backed model-picker artwork', () => {

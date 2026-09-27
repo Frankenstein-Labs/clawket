@@ -111,6 +111,7 @@ function SearchResultLeading({ result }: Readonly<{ result: SearchResult }>): Re
         name={result.title}
         emoji={result.emoji}
         avatarUrl={result.avatarUrl}
+        platform={result.backendKind}
         status={result.lockedReason ? 'locked' : result.source === 'cache' ? 'offline' : 'idle'}
       />
     );
