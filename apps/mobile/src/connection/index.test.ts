@@ -805,6 +805,8 @@ describe('ConnectionCoordinator', () => {
   it('connects only the active adapter and serves inactive roster rows from cache', async () => {
     const harness = await createHarness();
     await harness.cache.set('beta', [agent('beta')], [session('beta', 30)]);
+    // This device already tracked alpha and last read it before its latest activity.
+    await harness.watermarks.markRead('alpha', 'agent:main:main', 10);
 
     await harness.coordinator.start();
 
@@ -1362,6 +1364,20 @@ describe('ConnectionCoordinator', () => {
     });
     expect(harness.coordinator.getAdapter('alpha')).toBeNull();
     expect(harness.coordinator.getAdapter('beta')?.state).toBe('ready');
+  });
+
+  it('takes a never-tracked connection\'s first live snapshot as its read baseline', async () => {
+    const harness = await createHarness();
+    await harness.coordinator.start();
+    // History from before pairing was read elsewhere: no unread dot on a new phone.
+    expect(harness.coordinator.getSnapshot().roster.find((group) => group.connection.id === 'alpha')?.unreadCount).toBe(0);
+    expect(await harness.watermarks.get('alpha')).toEqual({ 'agent:main:main': 20 });
+
+    // Activity after the baseline is unread as usual.
+    harness.adapters[0]!.listSessions = async () => [session('alpha', 60)];
+    await harness.coordinator.refreshRoster();
+    expect(harness.coordinator.getSnapshot().roster.find((group) => group.connection.id === 'alpha')?.unreadCount).toBe(1);
+    expect(await harness.watermarks.get('alpha')).toEqual({ 'agent:main:main': 20 });
   });
 
   it('updates unread state when a thread is opened without affecting cached connections', async () => {

@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import type { AgentAdapter } from '@clawket/agent-protocol';
 import { useTranslation } from 'react-i18next';
+import { Check } from 'lucide-react-native';
 
 import { ProGate } from '../../components/pro/ProGate';
 import { Banner } from '../../components/ui/Banner';
@@ -257,13 +258,17 @@ export function LogsSection({
         contentContainerStyle={styles.filters}
         showsHorizontalScrollIndicator={false}
       >
+        {/* Toggles, all on by default: a checked outline pill is shown, bare grey text is hidden.
+            Six ink pills read as six primary actions and hid which levels were on (device review 2026-09-27). */}
         {LOG_LEVELS.map((level) => (
           <Button
             key={level}
             testID={`agent-logs-filter-${level}`}
             label={levelLabels[level]}
             size="sm"
-            variant={levelFilters[level] ? 'primary' : 'secondary'}
+            variant={levelFilters[level] ? 'outline' : 'text'}
+            icon={levelFilters[level] ? Check : undefined}
+            accessibilityState={{ selected: levelFilters[level] }}
             onPress={() => toggleLevel(level)}
           />
         ))}

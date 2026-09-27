@@ -9,8 +9,8 @@ import {
 
 describe('Onboarding route model', () => {
   it('uses the environment-specific pairing command and official documentation', () => {
-    expect(getOnboardingPairingCommand('production')).toBe('npx @p697/clawket pair');
-    expect(getOnboardingPairingCommand('preview')).toBe('npx @p697/clawket pair --preview');
+    expect(getOnboardingPairingCommand('production')).toBe('npx @p697/clawket@latest pair');
+    expect(getOnboardingPairingCommand('preview')).toBe('npx @p697/clawket@latest pair --preview');
     expect(ONBOARDING_DOCUMENTATION_URLS.openclaw).toBe('https://docs.openclaw.ai/install');
     expect(ONBOARDING_DOCUMENTATION_URLS.hermes).toContain('hermes-agent.nousresearch.com/docs/');
     // The local-model "See how to start it" action lands on the feature document, not the repository root.

@@ -30,6 +30,7 @@ import {
   Space,
 } from '../../theme/tokens';
 import { relativeTime } from '../../utils/chat-message';
+import { useRelativeTimeTranslator } from '../../hooks/useRelativeTimeTranslator';
 import {
   loadSearchMessageDetail,
   type SearchMessageDetail,
@@ -83,6 +84,7 @@ function MessageDetailView({
   onViewInThread: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation('common');
+  const translateRelativeTime = useRelativeTimeTranslator();
   const { theme } = useAppTheme();
   const contentInsets = useMemo(() => ({ paddingBottom: bottomInset + Space.xl }), [bottomInset]);
   // The title yields its slot to connection state so the header never grows.
@@ -156,7 +158,7 @@ function MessageDetailView({
               </Text>
               {detail.timestampMs ? (
                 <Text style={[styles.detailMeta, { color: theme.colors.inkSecondary }]}>
-                  {relativeTime(detail.timestampMs)}
+                  {relativeTime(detail.timestampMs, translateRelativeTime)}
                 </Text>
               ) : null}
             </View>

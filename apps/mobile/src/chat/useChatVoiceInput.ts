@@ -121,9 +121,11 @@ export function useChatVoiceInput(options: Props) {
     const t = latest.current.t;
     analyticsEvents.chatVoiceInputFailed({ code: error.code, stage: error.code === 'speech_permission' ? 'permissions' : error.code === 'speech_capture_failed' ? 'start' : 'recognition', request_id: error.requestId || undefined });
     const retryAfterMs = error.remainingRetryMs;
+    // A permission denial is fully explained by its sentence and the Settings action; the diagnostic
+    // code line is for failures support may need to trace.
     const detail = [t(speechErrorCopy(error), { ns: 'chat' }),
       retryAfterMs ? t('Try again in {{seconds}} seconds.', { ns: 'chat', seconds: Math.ceil(retryAfterMs / 1000) }) : '',
-      `${error.code}${error.requestId ? ` · ${error.requestId}` : ''}`].filter(Boolean).join('\n');
+      error.code === 'speech_permission' ? '' : `${error.code}${error.requestId ? ` · ${error.requestId}` : ''}`].filter(Boolean).join('\n');
     Alert.alert(t('Voice input failed', { ns: 'chat' }), detail, error.code === 'speech_permission'
       ? [{ text: t('Cancel', { ns: 'common' }), style: 'cancel' }, { text: t('Settings', { ns: 'common' }), onPress: () => { void Linking.openSettings(); } }]
       : [{ text: t('Keep audio', { ns: 'chat' }), style: 'cancel' }, ...(retry ? [{ text: t('Retry', { ns: 'common' }), onPress: retry }] : [])]);
@@ -150,6 +152,10 @@ export function useChatVoiceInput(options: Props) {
         if (!permissionGranted.current) {
           const existing = await getRecordingPermissionsAsync();
           if (!current(op)) return;
+          // Once the system will not ask again, requesting shows nothing on iOS, and on Android it
+          // briefly backgrounds the app, which cancels this attempt before its error is reported: the
+          // mic did nothing at all (device review 2026-09-27). Explain and offer Settings instead.
+          if (!existing.granted && existing.canAskAgain === false) throw new SpeechError('speech_permission');
           const permission = existing.granted ? existing : await requestRecordingPermissionsAsync();
           if (!current(op)) return;
           permissionGranted.current = permission.granted;

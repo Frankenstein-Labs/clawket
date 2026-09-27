@@ -347,7 +347,7 @@ function SkillDetailSheet({
           {installed ? (
             <>
               <SettingsRow style={styles.detailRow}
-                title={t('Enabled', { ns: 'settings' })}
+                title={canToggle ? t('Enable', { ns: 'settings' }) : t('Enabled', { ns: 'settings' })}
                 trailing={canToggle ? <SkillSwitch skill={installed} testID="agent-skill-toggle" disabled={!online || Boolean(busyKey)} busy={busyKey === itemKey} onToggle={onToggle} /> : undefined}
                 value={canToggle ? undefined : installed.always ? t('Always on', { ns: 'settings' }) : t(installed.disabled ? 'Disabled' : 'Enabled', { ns: 'settings' })}
               />

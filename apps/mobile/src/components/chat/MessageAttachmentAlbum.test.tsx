@@ -33,7 +33,7 @@ jest.mock('react-native', () => {
 });
 
 jest.mock('./ChatPresentation', () => ({
-  useConversationTheme: () => ({ colors: { surface: '#f2f2f4' } }),
+  useConversationTheme: () => ({ colors: { surface: '#f2f2f4', line: '#e6e6ea' } }),
 }));
 
 function flattenStyle(value: unknown): Record<string, unknown> {
@@ -157,5 +157,22 @@ describe('MessageAttachmentAlbum', () => {
       <MessageAttachmentAlbum uris={[]} maxWidth={WIDTH} align="end" label="0 attachments" formatTileLabel={label} />,
     );
     expect(view.toJSON()).toBeNull();
+  });
+
+  it('outlines the album with a hairline so white screenshots keep their edge', () => {
+    const view = render(
+      <MessageAttachmentAlbum
+        testID="album"
+        uris={['white.png']}
+        metas={[{ uri: 'white.png', width: 1080, height: 2340 }]}
+        maxWidth={WIDTH}
+        align="end"
+        label="1 attachment"
+        formatTileLabel={label}
+      />,
+    );
+    const edge = view.getByTestId('album-edge');
+    expect(edge.props.pointerEvents).toBe('none');
+    expect(flattenStyle(edge.props.style)).toMatchObject({ borderRadius: Radius.bubble, borderWidth: 1, borderColor: '#e6e6ea', position: 'absolute' });
   });
 });

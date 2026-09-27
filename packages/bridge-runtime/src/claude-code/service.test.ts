@@ -36,6 +36,38 @@ beforeEach(() => {
 });
 afterEach(async () => { for (const service of services.splice(0)) await service.stop(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 describe('Claude service durable send and ownership boundary', () => {
+  it('shows the accepted user message, then the completed assistant reply without persisting transcript text', async () => {
+    const { service } = fixture();
+    const row = await request(service, 'sessions.create') as { key: string };
+    await request(service, 'chat.send', { sessionKey: row.key, text: '## Question', idempotencyKey: 'preview' });
+    expect((await request(service, 'sessions.list') as any[])[0].preview).toBe('Question');
+    const session = mocks.starts.mock.calls.at(-1)![1] as EventEmitter;
+    session.emit('settled', { text: '**Latest reply**', timestampMs: 1234 });
+    expect((await request(service, 'sessions.list') as any[])[0]).toMatchObject({ preview: 'Latest reply', lastActivityAt: 1234 });
+  });
+  it('clears the ephemeral preview when a Bridge-owned conversation is reset', async () => {
+    const { service } = fixture();
+    const row = await request(service, 'sessions.create') as { key: string };
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'Before reset', idempotencyKey: 'reset-preview' });
+    const session = mocks.starts.mock.calls.at(-1)![1] as EventEmitter & { activeRun?: unknown };
+    session.activeRun = undefined;
+    session.emit('settled', { text: 'Old reply', timestampMs: Date.now() });
+    await request(service, 'sessions.reset', { sessionKey: row.key });
+    expect((await request(service, 'sessions.list') as any[])[0].preview).toBeUndefined();
+  });
+  it('restores an owned conversation preview from native history after Bridge restart', async () => {
+    const { service, open } = fixture();
+    const row = await request(service, 'sessions.create') as { key: string };
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'Old question', idempotencyKey: 'restart-preview' });
+    await service.stop();
+    mocks.history.mockResolvedValue([{ uuid: 'reply', type: 'assistant', timestamp: '2026-09-27T10:01:00.000Z',
+      message: { content: [{ type: 'text', text: 'Recovered answer' }] } }]);
+    const restarted = open();
+    expect((await request(restarted, 'sessions.list') as any[])[0])
+      .toMatchObject({ preview: 'Recovered answer', lastActivityAt: Date.parse('2026-09-27T10:01:00.000Z') });
+    await request(restarted, 'sessions.list');
+    expect(mocks.history).toHaveBeenCalledTimes(1);
+  });
   it('does not create an empty conversation when connecting or reading model choices', async () => {
     const { service } = fixture(); await service.health(); await request(service, 'models.list');
     expect(await request(service, 'sessions.list')).toEqual([]);
@@ -144,6 +176,24 @@ describe('Claude service durable send and ownership boundary', () => {
     expect(mocks.send).toHaveBeenCalledTimes(1);
     await request(restarted, 'chat.send', { ...input, idempotencyKey: 'native-two' });
     expect(mocks.starts.mock.calls.at(-1)?.[0].resume).toBe(nativeId);
+  });
+  it('prefers a newer native reply over the last phone preview without rereading an unchanged transcript', async () => {
+    const { project, service } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native title', lastModified: 1 }]);
+    mocks.history.mockResolvedValue([{ uuid: 'first', type: 'user', timestamp: '2026-09-27T08:00:00.000Z', message: { content: 'Original' } }]);
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string; preview: string }>;
+    expect(row.preview).toBe('Original');
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'Phone turn', idempotencyKey: 'native-preview' });
+    expect((await request(service, 'sessions.list') as any[])[0].preview).toBe('Phone turn');
+    const session = mocks.starts.mock.calls.at(-1)![1] as EventEmitter & { activeRun?: unknown };
+    session.activeRun = undefined;
+    session.emit('settled', { text: 'Phone reply', timestampMs: Date.now() });
+    const desktopTime = Date.now() + 60_000;
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native title', lastModified: 2 }]);
+    mocks.history.mockResolvedValue([{ uuid: 'later', type: 'assistant', timestamp: new Date(desktopTime).toISOString(), message: { content: 'Desktop reply' } }]);
+    expect((await request(service, 'sessions.list') as any[])[0].preview).toBe('Desktop reply');
+    await request(service, 'sessions.list');
+    expect(mocks.history).toHaveBeenCalledTimes(2);
   });
 
   it.each(['busy', 'idle', 'waiting', 'unknown'])('keeps %s native owners read-only with a precise reason', async status => {

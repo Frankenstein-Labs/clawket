@@ -117,10 +117,17 @@ export function upcomingRuns(schedule: CronSchedule, now = Date.now()): Date[] {
   }
 }
 
-export function formatCronDate(timestamp: number | undefined, locale?: string, timezone?: string): string {
+/**
+ * One date style for every Cron surface (job list, run history, run record, editor): month, day and
+ * minutes, with the year only when it is not this one. Run history used `toLocaleString`, whose year
+ * and seconds read differently from the job list beside it and ignored the in-app language.
+ */
+export function formatCronDate(timestamp: number | undefined, locale?: string, timezone?: string, now: number = Date.now()): string {
   if (timestamp === undefined || !Number.isFinite(timestamp)) return '—';
   try {
+    const sameYear = new Date(timestamp).getFullYear() === new Date(now).getFullYear();
     return new Intl.DateTimeFormat(locale, {
+      ...(sameYear ? {} : { year: 'numeric' as const }),
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', ...(timezone ? { timeZone: timezone } : {}),
     }).format(timestamp);
   } catch {

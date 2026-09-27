@@ -3,7 +3,7 @@ import { fireEvent, render } from '@testing-library/react-native';
 import { Text } from 'react-native';
 import { builtInAccents } from '../../theme/accents';
 import { buildTheme } from '../../theme/theme';
-import { BorderWidth, ControlSize, FontSize, Shadow, Space } from '../../theme/tokens';
+import { ControlSize, FontSize, Space } from '../../theme/tokens';
 import { ScreenHeader } from './ScreenHeader';
 
 let mockScheme: 'light' | 'dark' = 'light';
@@ -62,7 +62,7 @@ describe.each(['light', 'dark'] as const)('ScreenHeader in %s', (scheme) => {
   beforeEach(() => { mockScheme = scheme; });
   const theme = () => buildTheme(scheme, scheme, builtInAccents.iceBlue);
 
-  it('lays every page header out the same way: 16-point edge, white 44-point back circle, 8 above and below', () => {
+  it('lays every page header out the same way: 16-point edge, plain 44-point back icon, 8 above and below', () => {
     const onBack = jest.fn();
     const view = render(<ScreenHeader testID="page" title="Agent profile" topInset={47} onBack={onBack} />);
     expect(flattenStyle(view.getByTestId('page').props.style)).toMatchObject({
@@ -71,11 +71,11 @@ describe.each(['light', 'dark'] as const)('ScreenHeader in %s', (scheme) => {
     const back = view.getByTestId('page-back');
     expect(flattenStyle(back.props.style)).toMatchObject({
       width: ControlSize.floatingButton, height: ControlSize.floatingButton, borderRadius: ControlSize.floatingButton / 2,
-      backgroundColor: theme().colors.surfaceFloating,
+      backgroundColor: 'transparent',
     });
-    // Pure white lifted by the floating shadow in light; the floating surface with a hairline in dark.
-    if (scheme === 'light') expect(flattenStyle(back.props.style)).toMatchObject(Shadow.floating);
-    else expect(flattenStyle(back.props.style)).toMatchObject({ borderWidth: BorderWidth.hairline, borderColor: theme().colors.line });
+    // A plain icon like the roster header's: no white disc, shadow or hairline in either theme (owner decision 2026-09-27).
+    expect(flattenStyle(back.props.style).shadowOpacity ?? 0).toBe(0);
+    expect(flattenStyle(back.props.style).borderWidth ?? 0).toBe(0);
     expect(back.props.accessibilityLabel).toBe('Back');
     fireEvent.press(back);
     expect(onBack).toHaveBeenCalledTimes(1);
@@ -85,7 +85,7 @@ describe.each(['light', 'dark'] as const)('ScreenHeader in %s', (scheme) => {
     expect(flattenStyle(title.props.style)).toMatchObject({ fontSize: FontSize.title, textAlign: 'center' });
   });
 
-  it('uses the same white close circle for modal presentation and honors explicit test hooks', () => {
+  it('uses the same plain close icon for modal presentation and honors explicit test hooks', () => {
     const view = render(
       <ScreenHeader testID="modal" backTestID="modal-close" titleTestID="modal-heading" title="Draft" topInset={47}
         onBack={jest.fn()} dismissStyle="close" titleNumberOfLines={2} backAccessibilityLabel="Dismiss" />,
@@ -94,7 +94,7 @@ describe.each(['light', 'dark'] as const)('ScreenHeader in %s', (scheme) => {
     expect(flattenStyle(view.getByTestId('modal').props.style).paddingTop).toBe(Space.lg);
     const close = view.getByTestId('modal-close');
     expect(close.props.accessibilityLabel).toBe('Dismiss');
-    expect(flattenStyle(close.props.style).backgroundColor).toBe(theme().colors.surfaceFloating);
+    expect(flattenStyle(close.props.style).backgroundColor).toBe('transparent');
     expect(view.getByTestId('modal-heading').props.numberOfLines).toBe(2);
     expect(view.queryByTestId('modal-back')).toBeNull();
   });

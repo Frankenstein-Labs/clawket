@@ -25,6 +25,7 @@ import {
   BorderWidth,
   FontSize,
   FontWeight,
+  IconSize,
   LineHeight,
   PresentationColor,
   Radius,
@@ -327,8 +328,16 @@ export function ChatSharePosterModal({
         </View>
 
         <View style={[s.container, { width: posterWidth + 40 }]} pointerEvents="box-none">
-          <TouchableOpacity style={s.closeBtn} onPress={onClose} activeOpacity={0.7}>
-            <X size={20} color={C.chromeTextSecondary} strokeWidth={2} />
+          <TouchableOpacity
+            testID="chat-share-poster-close"
+            accessibilityRole="button"
+            accessibilityLabel={t('Close', { ns: 'common' })}
+            style={s.closeBtn}
+            onPress={onClose}
+            activeOpacity={0.7}
+            hitSlop={Space.xs}
+          >
+            <X size={IconSize.md} color={C.chromeText} strokeWidth={2} />
           </TouchableOpacity>
 
           <ScrollView
@@ -399,12 +408,16 @@ const s = StyleSheet.create({
   container: {
     alignItems: 'center',
   },
+  // A 30%-white X floated past the poster's corner and was hard to find over photos (device review
+  // 2026-09-27): a filled control aligned with the poster's right edge reads as the way out.
   closeBtn: {
     position: 'absolute',
-    top: -36,
-    right: 0,
-    width: 32,
-    height: 32,
+    top: -44,
+    right: 20,
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
+    backgroundColor: PresentationColor.mediaControl,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
@@ -512,7 +525,8 @@ const s = StyleSheet.create({
   toggleLabel: {
     fontSize: FontSize.caption,
     fontWeight: FontWeight.semibold,
-    color: PresentationColor.onMediaBorder,
+    // 30% white read as a disabled hint over the scrim (iOS review 2026-09-27).
+    color: C.chromeText,
   },
   // Actions
   actions: {

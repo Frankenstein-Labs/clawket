@@ -82,7 +82,7 @@ export function ToolsSection({
   const catalogLabels = useMemo<Record<string, string>>(() => ({
     Minimal: t('Minimal tools', { ns: 'settings' }),
     Coding: t('Coding tools', { ns: 'settings' }),
-    Messaging: t('Messaging', { ns: 'settings' }),
+    Messaging: t('Messaging tools', { ns: 'settings' }),
     Full: t('All tools', { ns: 'settings' }),
     Files: t('Files', { ns: 'common' }),
     Runtime: t('Execution tools', { ns: 'settings' }),

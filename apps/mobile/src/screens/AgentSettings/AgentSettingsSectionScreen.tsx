@@ -520,7 +520,7 @@ export function AgentSettingsSectionScreen({
             <FloatingButton
               testID="agent-skills-discover"
               icon={Compass}
-              appearance="quiet"
+              appearance="plain"
               accessibilityLabel={t('Discover')}
               onPress={() => {
                 if (connection) analyticsEvents.settingsRowOpened({ row: 'skills.discover', locked: false, backend: connection.backendKind });
@@ -530,14 +530,14 @@ export function AgentSettingsSectionScreen({
               }}
             />
           ) : section === 'cron' && agent && supported && !sectionLocked && adapter?.capabilities.cronCreate && adapter.management?.cron?.add ? (
-            <FloatingButton testID="agent-cron-new" icon={Plus} appearance="ink"
+            <FloatingButton testID="agent-cron-new" icon={Plus} appearance="plain"
               accessibilityLabel={t('New cron job', { ns: 'config' })} disabled={runtime.activeState !== 'ready'}
               onPress={() => {
                 analyticsEvents.cronCreateTapped({ source: 'cron_header' });
                 navigation.push('AgentSettingsSection', { connectionId, agentId, section: 'cron', action: 'create-cron' });
               }} />
           ) : section === 'usage' && agent && supported && !sectionLocked && adapter?.management?.usage?.sessions ? (
-            <FloatingButton testID="agent-usage-share" icon={Share} appearance="quiet"
+            <FloatingButton testID="agent-usage-share" icon={Share} appearance="plain"
               accessibilityLabel={t('Share', { ns: 'settings' })}
               onPress={() => setUsagePosterRequest((value) => value + 1)} />
           ) : undefined}

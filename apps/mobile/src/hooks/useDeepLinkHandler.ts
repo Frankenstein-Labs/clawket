@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import { NavigationContainerRefWithCurrent } from '@react-navigation/native';
 import {
@@ -13,6 +12,8 @@ import type { RootStackParamList } from '../navigation/root-stack';
 import { useGatewayScanner } from '../contexts/GatewayScannerContext';
 import { analyticsEvents } from '../services/analytics/events';
 import { recordSuccessfulSendForAutomaticReview } from '../services/auto-app-review';
+import i18n from '../i18n';
+import { showNoticeAlert } from '../utils/notice-alert';
 
 export type DeepLinkDeps = {
   rootNavigationRef: NavigationContainerRefWithCurrent<RootStackParamList>;
@@ -99,7 +100,7 @@ async function executeAction(
     }
     case 'agent': {
       if (!activeConnectionId) {
-        Alert.alert('Connection Required', 'Connect to an Agent before sending this message.');
+        showNoticeAlert(i18n.t('Connection required', { ns: 'common' }), i18n.t('Connect to an Agent before sending this message.', { ns: 'common' }));
         break;
       }
       const sessionKey = action.sessionKey ?? mainSessionKey;
@@ -115,7 +116,7 @@ async function executeAction(
         ? activeAdapter
         : getConnectionRuntime().getAdapter(activeConnectionId);
       if (!adapter) {
-        Alert.alert('Send Failed', 'Connection is not ready. Please try again in the thread.');
+        showNoticeAlert(i18n.t('Send failed', { ns: 'common' }), i18n.t('Connection is not ready. Please try again in the thread.', { ns: 'common' }));
         break;
       }
       try {
@@ -131,13 +132,13 @@ async function executeAction(
         });
         void recordSuccessfulSendForAutomaticReview();
       } catch {
-        Alert.alert('Send Failed', 'Connection is not ready. Please try again in the thread.');
+        showNoticeAlert(i18n.t('Send failed', { ns: 'common' }), i18n.t('Connection is not ready. Please try again in the thread.', { ns: 'common' }));
       }
       break;
     }
     case 'session': {
       if (!activeConnectionId) {
-        Alert.alert('Connection Required', 'Connect to an Agent before opening this session.');
+        showNoticeAlert(i18n.t('Connection required', { ns: 'common' }), i18n.t('Connect to an Agent before opening this session.', { ns: 'common' }));
         break;
       }
       if (rootNavigationRef.isReady()) {
@@ -192,7 +193,7 @@ async function executeAction(
           source: 'deeplink',
         });
       } catch {
-        Alert.alert('Connection Failed', 'Could not save this connection. Try again.');
+        showNoticeAlert(i18n.t('Connection failed', { ns: 'common' }), i18n.t('Could not save this connection. Try again.', { ns: 'config' }));
       }
       break;
     }

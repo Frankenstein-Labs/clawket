@@ -162,6 +162,10 @@ When the installed native run handler positively supports session-history resume
 
 `clawket.files.list/read` offers bounded assistant-referenced files from the same session under verified local workspaces (Hermes: configured local terminal cwd and outputs). Keep opaque expiring handles, per-session scope, regular-file/size/type checks, and mutation detection on every chunk. Never accept a caller-provided filesystem path, spool file bytes, or add cloud storage. OpenClaw exposes this only on authenticated isolated loopback Gateway channels with native history/workspace read capability. Dispose handles on channel shutdown; Hermes clears them on reset/delete/stop.
 
+## Session previews
+
+Codex, Claude Code and Pi session previews show the last visible user or assistant message (never tools, thoughts, system events or a native first-prompt/title shortcut). Normalize whitespace/Markdown to at most 160 Unicode characters; an image-only user turn uses `📷`. Keep preview activity tied to the chosen message. Native catalog enrichment is bounded to recently active sessions and cached by native update version; large Claude transcripts use a bounded read-only tail rather than full SDK parsing. A failed tail read must not break session listing. Claude previews remain ephemeral metadata, not persisted native transcripts. See `../../docs/3.1/session-previews.md`.
+
 ## Pi RPC runtime
 
 `src/pi/` owns independent Pi RPC processes and private sessions for an explicitly configured project. Preserve the installed Pi's configuration and trust; never add automatic approval flags. Native JSONL v3 sessions (including an explicit native session directory) are read-only and can only be copied into a private branch. Remote requests use opaque session IDs, never filesystem paths or arbitrary RPC commands. Ordinary extension questions are not execution approvals.

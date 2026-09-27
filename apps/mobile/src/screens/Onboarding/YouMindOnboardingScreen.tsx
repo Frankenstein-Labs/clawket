@@ -41,7 +41,7 @@ export function YouMindOnboardingScreen({
         <FloatingButton
           testID="youmind-onboarding-back"
           icon={ChevronLeft}
-          appearance="surface"
+          appearance="plain"
           accessibilityLabel={t('Back', { ns: 'common' })}
           onPress={onBack}
         />

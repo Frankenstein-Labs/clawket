@@ -3,6 +3,7 @@ import { useBridgeUpgrade } from './src/features/app-updates/useBridgeUpgrade';
 import { ConversationExportSheet } from './src/features/sharing/ConversationExportSheet';
 import { isMainConversation } from './src/utils/session-preview';
 import { ManualSessions, useManualSessions } from './src/services/manual-sessions';
+import { FreshSessions } from './src/services/fresh-sessions';
 import { IncomingShareCoordinator } from './src/features/sharing/IncomingShareCoordinator';
 import 'react-native-get-random-values';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1332,6 +1333,8 @@ function AppContent({
       presentPaywall(canAccessConnection(row.connectionId) ? 'agents' : 'gatewayConnections');
       return;
     }
+    // Any explicit action (rename, pin, export, delete) means this session is no longer an abandoned new one.
+    FreshSessions.settle(row.connectionId, row.agentId, row.key);
     if (action === 'export') {
       if (connections.activeAdapter?.connection.id !== row.connectionId) return;
       if (!canExportSession(row)) {
@@ -1368,9 +1371,18 @@ function AppContent({
       const params = current?.name === 'Thread' ? current.params as RootStackParamList['Thread'] : undefined;
       const agent = getConnectionRuntime().getSnapshot().roster.find(group => group.connection.id === row.connectionId)
         ?.agents.find(item => item.agent.agentId === row.agentId)?.agent;
-      if (agent?.entryMode === 'sessions' && params?.connectionId === row.connectionId && params.sessionKey === row.key) {
-        sessionPanelRef.current?.close();
-        rootNavigationRef.dispatch(StackActions.replace('Thread', { ...params, sessionKey: '' }));
+      if (params?.connectionId === row.connectionId && params.sessionKey === row.key) {
+        // A deleted conversation cannot stay on screen: a sessions-first Agent returns to its picker,
+        // every other Agent to its main conversation (device review 2026-09-27: Hermes kept showing
+        // the deleted session's messages under a plain "Hermes" header).
+        const fallback = agent?.entryMode === 'sessions' ? '' : agent?.mainSessionKey;
+        if (fallback !== undefined) {
+          sessionPanelRef.current?.close();
+          rootNavigationRef.dispatch(StackActions.replace('Thread', { ...params, sessionKey: fallback }));
+          if (fallback) setThreadContext((context) => (context?.connectionId === row.connectionId && context.sessionKey === row.key
+            ? { ...context, sessionKey: fallback }
+            : context));
+        }
       }
     }
   }, [canAccessConnection, canAccessRosterAgent, presentPaywall, connections.activeAdapter, canExportSession]);

@@ -19,7 +19,7 @@ import {
   useSwipeableRowGroup,
   type SwipeableRowAction,
 } from '../../components/ui/SwipeableRow';
-import { resolveConnectionPresence, translateConnectionPresence } from './connection-details';
+import { resolveConnectionPresence, summarizeConnectionAgents, translateConnectionPresence } from './connection-details';
 
 type Props = {
   onBack: () => void;
@@ -72,7 +72,7 @@ export function ConnectionsScreen({ onBack, onAdd, onOpen, onPause, onResume, on
                   {presence === 'online' ? <StatusDot testID={`connection-list-${connection.id}-live`}
                     color={colors.good} ringColor={colors.surfaceFloating} /> : null}
                 </View>}
-                subtitle={runtime.roster.find((group) => group.connection.id === connection.id)?.agents.map(({ agent }) => agent.name).join(' · ')}
+                subtitle={summarizeConnectionAgents(connection.label, runtime.roster.find((group) => group.connection.id === connection.id)?.agents.map(({ agent }) => agent.name) ?? [])}
                 value={translateConnectionPresence(t, presence)}
                 showChevron onPress={() => onOpen(connection.id)} />
             </SwipeableRow>

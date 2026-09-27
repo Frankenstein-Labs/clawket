@@ -17,6 +17,7 @@ import { CompositionSafeBottomSheetTextInput } from '../../components/ui/Composi
 import { Button } from '../../components/ui/Button';
 import { LoadingState } from '../../components/ui/LoadingState';
 import { createChatMarkdownStyle, getChatMarkdownFlavor, openChatMarkdownLink } from '../../components/chat/chatMarkdown';
+import { useMarkdownSelectionMenu } from '../../components/chat/useMarkdownSelectionMenu';
 import { ConversationArchives, conversationArchiveTitle, searchConversationArchives, type ArchiveFilter, type ConversationArchive } from '../../services/conversation-archives';
 import { formatConversationExport } from '../../services/conversation-export';
 import { useAppTheme } from '../../theme';
@@ -29,6 +30,7 @@ export function ConversationArchiveSheet({ visible, suspended = false, isPro, on
   const { t } = useTranslation(['chat', 'common']);
   const { theme } = useAppTheme();
   const markdownStyle = useMemo(() => createChatMarkdownStyle(theme.colors, FontSize.body), [theme.colors]);
+  const selectionMenu = useMarkdownSelectionMenu();
   const [entries, setEntries] = useState<ConversationArchive[] | null>(null);
   const [selected, setSelected] = useState<ConversationArchive | null>(null);
   const [query, setQuery] = useState('');
@@ -153,7 +155,7 @@ export function ConversationArchiveSheet({ visible, suspended = false, isPro, on
       ListHeaderComponent={<View style={styles.meta}>{caption(t('Saved on this device'))}{caption(new Date(selected.savedAt).toLocaleString())}</View>}
       renderItem={({ item }) => <View style={styles.message}>
         {caption(item.role === 'user' ? t('User') : t('Assistant'))}
-        <EnrichedMarkdownText markdown={item.text} markdownStyle={markdownStyle} flavor={getChatMarkdownFlavor()} selectable onLinkPress={openChatMarkdownLink} />
+        <EnrichedMarkdownText markdown={item.text} markdownStyle={markdownStyle} flavor={getChatMarkdownFlavor()} selectable selectionMenuConfig={selectionMenu} onLinkPress={openChatMarkdownLink} />
         {item.attachments.length ? caption(item.attachments.join('\n')) : null}
       </View>} />
       : <BottomSheetScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">

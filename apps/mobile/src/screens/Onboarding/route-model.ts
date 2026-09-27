@@ -4,10 +4,11 @@ import type {
   ConnectionState,
 } from '@clawket/agent-protocol';
 import type { RelayServiceEnvironment } from '../../types';
-import type {
-  OnboardingConnectionPhase,
-  OnboardingStatus,
-  PairableBackendKind,
+import {
+  PAIRING_COMMAND,
+  type OnboardingConnectionPhase,
+  type OnboardingStatus,
+  type PairableBackendKind,
 } from './model';
 
 export const ONBOARDING_DOCUMENTATION_URLS: Readonly<Record<PairableBackendKind, string>> = Object.freeze({
@@ -76,8 +77,8 @@ export function getOnboardingPairingCommand(
   environment: RelayServiceEnvironment,
 ): string {
   return environment === 'preview'
-    ? 'npx @p697/clawket pair --preview'
-    : 'npx @p697/clawket pair';
+    ? `${PAIRING_COMMAND} --preview`
+    : PAIRING_COMMAND;
 }
 
 export function resolveOnboardingAdapterError(error: unknown): AdapterErrorCode {

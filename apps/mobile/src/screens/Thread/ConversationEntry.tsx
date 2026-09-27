@@ -75,7 +75,7 @@ export function ConversationEntry({ navigation, route, locked, lockedReason = 'a
   return <View testID="conversation-entry" style={[styles.page, { backgroundColor: theme.colors.canvas }]}>
     {/* The chat's own header and loading state, so entry, picker and thread never swap chrome. */}
     <View style={[styles.header, { paddingTop: insets.top + Space.sm }]}>
-      <FloatingButton testID="conversation-entry-back" icon={ChevronLeft} appearance="surface"
+      <FloatingButton testID="conversation-entry-back" icon={ChevronLeft} appearance="plain"
         accessibilityLabel={t('Back')} onPress={() => navigation.goBack()} />
       <View style={styles.pillSlot}>
         <HeaderPill testID="conversation-entry-header-pill" agentId={agentId} name={title} subtitle=""

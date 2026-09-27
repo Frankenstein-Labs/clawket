@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { usePreventRemove, type NavigationAction } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -31,7 +31,7 @@ import { deviceTimeZone, formatCronDate, scheduleDraft, scheduleFromDraft, upcom
 import { CronScheduleFields, CronSchedulePreview } from './CronScheduleFields';
 import { CronRunSheet } from './CronRunSheet';
 import { cronTemplates } from './cron-templates';
-import { useCronJobs } from './useCronJobs';
+import { markCronJobCreated, useCronJobs } from './useCronJobs';
 import { useCronModels } from './useCronModels';
 
 type Props = Readonly<{
@@ -50,6 +50,8 @@ type Page = 'templates' | 'form' | 'prompt' | 'schedule' | 'advanced';
 /** The edit page shows the newest runs only; Load more pages in tens. */
 const RUNS_FIRST_PAGE = 3;
 const RUNS_PAGE = 10;
+/** A forced run is recorded only when it finishes; re-read the history a few times after Run now. */
+const RUN_FOLLOW_DELAYS_MS = [3_000, 8_000, 20_000] as const;
 
 export function CronEditorScreen(props: Props): React.JSX.Element {
   const identity = useRef({ adapter: props.adapter, revision: 0 });
@@ -81,12 +83,18 @@ function CronEditor({ adapter, agent, online, reconnecting = false, jobId, initi
   const [pendingLeave, setPendingLeave] = useState<NavigationAction | 'templates' | null>(null);
   const [leaving, setLeaving] = useState(false);
   const leaveAction = useRef<NavigationAction | null>(null);
-  const createdNotice = useRef<string | null>(null);
   const [runs, setRuns] = useState<ReadonlyArray<CronRunLogEntry>>([]);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [runOffset, setRunOffset] = useState<number | null>(null);
   const [runsBusy, setRunsBusy] = useState(false);
   const [runRefresh, setRunRefresh] = useState(0);
+  const [runFollow, setRunFollow] = useState(0);
+  useEffect(() => {
+    // Otherwise "No runs yet" stays under "Run requested" until a manual refresh (device review 2026-09-27).
+    if (!runFollow) return;
+    const timers = RUN_FOLLOW_DELAYS_MS.map(delay => setTimeout(() => setRunRefresh(value => value + 1), delay));
+    return () => timers.forEach(clearTimeout);
+  }, [runFollow]);
   const [selectedRun, setSelectedRun] = useState<CronRunLogEntry | null>(null);
   const runRequest = useRef(0);
   const operations = adapter.management?.cron;
@@ -119,16 +127,6 @@ function CronEditor({ adapter, agent, online, reconnecting = false, jobId, initi
   });
   useEffect(() => {
     if (!leaving) return;
-    if (createdNotice.current) {
-      const title = createdNotice.current;
-      createdNotice.current = null;
-      // Present on the previous screen after the native pop animation finishes.
-      const unsubscribe = navigation.addListener('transitionEnd', event => {
-        if (!event.data.closing) return;
-        unsubscribe();
-        Alert.alert(title);
-      });
-    }
     if (leaveAction.current) navigation.dispatch(leaveAction.current);
     else navigation.goBack();
   }, [leaving, navigation]);
@@ -210,7 +208,8 @@ function CronEditor({ adapter, agent, online, reconnecting = false, jobId, initi
       analyticsEvents.cronSaveSucceeded({ is_editing: Boolean(original), payload_kind: saved.payload.kind,
         schedule_kind: saved.schedule.kind, has_model_override: saved.payload.kind === 'agentTurn' && Boolean(saved.payload.model),
         delivery_mode: saved.delivery?.mode ?? 'none', source: 'guided_editor' });
-      if (!original) createdNotice.current = t('Scheduled task created');
+      // The list confirms the new task itself: job definitions, new row first and marked.
+      if (!original) markCronJobCreated(agent, saved.id);
       setLeaving(true);
     } catch (reason) {
       if (data.isCurrent()) setError(message(reason));
@@ -228,6 +227,7 @@ function CronEditor({ adapter, agent, online, reconnecting = false, jobId, initi
       if (!data.isCurrent()) return;
       setNotice(t('Run requested. Check the run history.'));
       setRunRefresh(value => value + 1);
+      setRunFollow(value => value + 1);
     } catch (reason) {
       if (data.isCurrent()) setError(message(reason));
     } finally {
@@ -341,7 +341,7 @@ function CronEditor({ adapter, agent, online, reconnecting = false, jobId, initi
               <SettingsDivider inset="content" />
               <SettingsRow title={describeScheduleHuman(original!.schedule, t)} subtitle={scheduleSubtitle(form)} />
               <SettingsDivider inset="content" />
-              <SettingsRow title={t('Enabled')} value={original!.enabled ? t('Enabled') : t('Paused')} />
+              <SettingsRow title={t('Status')} value={original!.enabled ? t('Enabled') : t('Paused')} />
             </SettingsGroup>
           </> : <>
             <SettingsGroup testID="cron-edit-task">
@@ -354,7 +354,7 @@ function CronEditor({ adapter, agent, online, reconnecting = false, jobId, initi
               <SettingsRow testID="cron-edit-schedule" title={describeScheduleHuman(scheduleFromDraft(form.time), t)} subtitle={scheduleSubtitle(form)}
                 disabled={locked} showChevron onPress={() => setPage('schedule')} />
               <SettingsDivider inset="content" />
-              <SettingsRow title={t('Enabled')} trailing={<ThemedSwitch testID="agent-cron-enabled" accessibilityLabel={t('Enabled')} value={form.task.enabled} disabled={locked} onValueChange={enabled => patch({ enabled })} />} />
+              <SettingsRow title={t('Enable')} trailing={<ThemedSwitch testID="agent-cron-enabled" accessibilityLabel={t('Enable')} value={form.task.enabled} disabled={locked} onValueChange={enabled => patch({ enabled })} />} />
             </SettingsGroup>
             <SettingsGroup testID="cron-edit-options">
               {showModel ? <>

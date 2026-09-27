@@ -190,3 +190,23 @@ export async function withManagementDeadline<T>(request: Promise<T>): Promise<T>
     clearTimeout(timer);
   }
 }
+
+/**
+ * The readable title of a Doctor check. OpenClaw reports findings as `checkId` + `message`; showing
+ * the id (`core/doctor/security`, twice) told a person nothing (device review 2026-09-27). The row
+ * reads the message's first sentence without the `WARNING:` prefix; the id stays in the detail.
+ */
+export function diagnosticCheckTitle(check: Readonly<{ name: string; message?: string }>): string {
+  const first = check.message?.split('\n').map((line) => line.trim()).find(Boolean);
+  if (!first) return check.name;
+  const text = first.replace(/^(?:warning|error|info|note)\s*[:：]\s*/i, '').trim();
+  const sentence = text.match(/^.+?[.。!?！？](?=\s|$)/u)?.[0] ?? text;
+  return sentence.length > 120 ? `${sentence.slice(0, 119).trimEnd()}…` : sentence || check.name;
+}
+
+/** Detail body for a Doctor check: the full guidance, then the check id for reference. */
+export function diagnosticCheckDetail(check: Readonly<{ name: string; message?: string }>): string {
+  const message = check.message?.trim() ?? '';
+  return message ? `${message}\n\n${check.name}` : check.name;
+}
+

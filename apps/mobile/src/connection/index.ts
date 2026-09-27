@@ -118,7 +118,7 @@ type ConnectionCredentialStorePort = Pick<
 type UnreadWatermarksPort = Pick<
   UnreadWatermarks,
   'clearConnection' | 'get' | 'markOpened' | 'markPromptSucceeded'
->;
+> & Partial<Pick<UnreadWatermarks, 'seedIfUnset'>>;
 
 export interface ConnectionCoordinatorOptions {
   store?: ConnectionStorePort;
@@ -962,11 +962,14 @@ export class ConnectionCoordinator {
     const readyRevision = entry.readyRevision;
     try {
       const sessionSnapshotRevision = entry.sessionSnapshotRevision;
-      const [agents, sessions, watermarks] = await Promise.all([
+      const [agents, sessions] = await Promise.all([
         entry.adapter.listAgents(),
         entry.adapter.listSessions(),
-        this.watermarks.get(entry.connectionId),
       ]);
+      // A never-tracked connection takes this first snapshot as its read baseline.
+      const watermarks = this.watermarks.seedIfUnset
+        ? await this.watermarks.seedIfUnset(entry.connectionId, sessions)
+        : await this.watermarks.get(entry.connectionId);
       if (
         this.active !== entry
         || entry.adapter.state !== 'ready'

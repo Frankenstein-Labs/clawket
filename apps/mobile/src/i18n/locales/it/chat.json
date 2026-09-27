@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "La cartella del progetto di questa conversazione non è disponibile sul computer.",
   "Check again": "Verifica di nuovo",
   "Not sent · tap to review": "Non inviato · tocca per controllare",
-  "This model does not accept images. Choose another model or remove the photo.": "Questo modello non supporta le immagini. Scegli un altro modello o rimuovi la foto."
+  "This model does not accept images. Choose another model or remove the photo.": "Questo modello non supporta le immagini. Scegli un altro modello o rimuovi la foto.",
+  "Copy as Markdown": "Copia come Markdown",
+  "Copy image URL": "Copia URL immagine",
+  "Copy {{total}} image URLs": "Copia {{total}} URL immagine"
 }

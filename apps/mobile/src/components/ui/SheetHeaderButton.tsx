@@ -15,6 +15,7 @@ export type SheetHeaderButtonProps = Readonly<{
  * The one icon-button chrome for a sheet header: the close action and any
  * trailing action share it so both corners read as the same control. Pass it
  * through `Sheet`'s `headerRight`; do not hand-roll a `FloatingButton` there.
+ * A plain icon, like page headers and the roster (owner decision 2026-09-27).
  */
 export function SheetHeaderButton({
   icon,
@@ -29,7 +30,7 @@ export function SheetHeaderButton({
       icon={icon}
       onPress={onPress}
       accessibilityLabel={accessibilityLabel}
-      appearance="quiet"
+      appearance="plain"
       disabled={disabled}
       badge={badge}
       testID={testID}

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { AgentAdapter, SessionDescriptor } from '@clawket/agent-protocol';
+import { FreshSessions } from './fresh-sessions';
 
 const STORAGE_KEY = 'clawket.manual-sessions.v1';
 export type ManualSessionEntry = Readonly<{ connectionId: string; agentId: string; key: string }>;
@@ -45,6 +46,8 @@ export const ManualSessions = {
       // returned session instead of creating another empty conversation.
       attempt.session ??= await adapter.createSession!(agentId, options);
       await ManualSessions.remember({ connectionId: adapter.connection.id, agentId, key: attempt.session.key });
+      // Leaving it before anything is sent discards it (see FreshSessions).
+      FreshSessions.mark(adapter.connection.id, agentId, attempt.session.key);
       scoped.delete(operationKey);
       return attempt.session;
     })();

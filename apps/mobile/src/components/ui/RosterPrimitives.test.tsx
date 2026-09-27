@@ -480,8 +480,10 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
     expect(attention.queryByTestId('row-avatar-live')).toBeNull();
     attention.unmount();
 
+    // One lock per row: the trailing marker, not a second badge on the avatar.
     const locked = row({ locked: true });
-    expect(locked.getByTestId('row-avatar-locked')).toBeTruthy();
+    expect(locked.queryByTestId('row-avatar-locked')).toBeNull();
+    expect(locked.getByTestId('row-lock-icon')).toBeTruthy();
     expect(locked.queryByTestId('row-avatar-live')).toBeNull();
     locked.unmount();
 
@@ -764,6 +766,10 @@ describe('AgentAvatar states and motion', () => {
     const locked = render(<AgentAvatar testID="lock" agentId="main" name="Main" platform="openclaw" platformBadge status="locked" />);
     expect(locked.queryByTestId('lock-platform')).toBeNull();
     expect(locked.getByTestId('lock-locked')).toBeTruthy();
+    // Without its own lock badge the corner goes back to the backend mark.
+    locked.rerender(<AgentAvatar testID="lock" agentId="main" name="Main" platform="openclaw" platformBadge status="locked" lockBadge={false} />);
+    expect(locked.queryByTestId('lock-locked')).toBeNull();
+    expect(locked.getByTestId('lock-platform')).toBeTruthy();
 
     // A product face already is the mark, so it keeps the plain live dot.
     const face = render(<AgentAvatar testID="face" agentId="codex" name="Codex" platform="codex" platformBadge status="live" />);

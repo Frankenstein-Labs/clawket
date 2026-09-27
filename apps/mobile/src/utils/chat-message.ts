@@ -277,6 +277,31 @@ export function sanitizeSilentPreviewText(text: string | null | undefined): stri
   return trimmed;
 }
 
+/**
+ * One quiet line for list previews (roster rows, session lists): Markdown block
+ * markers, emphasis, code ticks and link syntax are dropped, lines joined and
+ * whitespace collapsed. Hermes sends raw message text, so a list reply read as
+ * "- Apple - Banana 1. Red" (device review 2026-09-27). Single `*` and `_` stay:
+ * they are common in identifiers.
+ */
+export function formatPreviewLine(text: string | null | undefined): string | undefined {
+  const clean = sanitizeSilentPreviewText(text);
+  if (!clean) return undefined;
+  // Some bridges flatten the text before sending it: a one-line preview that opens with a list
+  // marker is a flattened list, so its inline " - " and " 2. " markers are list markers too.
+  const flattenedList = !/\n/.test(clean) && /^\s*(?:[-*+]|\d{1,3}[.)])\s+\S/.test(clean);
+  const line = (flattenedList ? clean.replace(/\s(?:[-*+]|\d{1,3}[.)])\s+(?=\S)/g, ' ') : clean).split(/\r?\n/)
+    .map((row) => row
+      .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+(?:\[[ xX]\]\s+)?|\d{1,3}[.)]\s+)/, '')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/\*\*|~~|`+/g, ''))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return line || undefined;
+}
+
 export function extractImageUris(content: unknown): string[] | undefined {
   if (!Array.isArray(content)) return undefined;
   const uris: string[] = [];

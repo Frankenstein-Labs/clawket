@@ -4,6 +4,7 @@ import {
   formatConnectionLastReady,
   parseConnectionServerHost,
   resolveConnectionPresence,
+  summarizeConnectionAgents,
   translateConnectionPresence,
 } from './connection-details';
 
@@ -30,6 +31,7 @@ describe('buildConnectionDetailRows', () => {
         bridgeCapabilities: ['bridge.capabilities.v2', 'hermes.multi-session.v2'],
       },
       locale: 'en-US',
+      now: Date.UTC(2027, 0, 2),
     });
     expect(rows.map((row) => row.id)).toEqual([
       'backend', 'transport', 'environment', 'server', 'bridge-version', 'bridge-capabilities', 'last-ready',
@@ -38,9 +40,9 @@ describe('buildConnectionDetailRows', () => {
       expect.objectContaining({ id: 'backend', valueKey: 'OpenClaw', titleNamespace: 'config' }),
       expect.objectContaining({ id: 'transport', valueKey: 'Relay' }),
       expect.objectContaining({ id: 'environment', valueKey: 'Preview', titleNamespace: 'settings' }),
-      expect.objectContaining({ id: 'server', value: 'relay.example' }),
+      expect.objectContaining({ id: 'server', value: 'relay.example', wide: true }),
       expect.objectContaining({ id: 'bridge-version', value: '2026.9.5' }),
-      expect.objectContaining({ id: 'bridge-capabilities', value: 'bridge.capabilities.v2, hermes.multi-session.v2' }),
+      expect.objectContaining({ id: 'bridge-capabilities', value: '2', detail: 'bridge.capabilities.v2\nhermes.multi-session.v2' }),
       expect.objectContaining({ id: 'last-ready', value: expect.stringContaining('2026') }),
     ]));
   });
@@ -60,7 +62,9 @@ describe('buildConnectionDetailRows', () => {
 
 describe('formatConnectionLastReady', () => {
   it('formats a timestamp and falls back to a dash for missing or corrupt input', () => {
-    expect(formatConnectionLastReady(Date.UTC(2026, 8, 5, 7, 30), 'en-US')).toContain('2026');
+    expect(formatConnectionLastReady(Date.UTC(2026, 8, 5, 7, 30), 'en-US', Date.UTC(2027, 0, 2))).toContain('2026');
+    // This year's date drops the year so it fits the trailing value on one line.
+    expect(formatConnectionLastReady(Date.UTC(2026, 8, 5, 7, 30), 'en-US', Date.UTC(2026, 8, 27))).not.toContain('2026');
     expect(formatConnectionLastReady(null, 'en-US')).toBe('—');
     expect(formatConnectionLastReady(Number.NaN, 'en-US')).toBe('—');
     expect(formatConnectionLastReady(-5, 'en-US')).toBe('—');
@@ -99,5 +103,17 @@ describe('resolveConnectionPresence', () => {
     expect(translateConnectionPresence(t, 'connecting')).toBe('common:Connecting');
     expect(translateConnectionPresence(t, 'offline')).toBe('common:Offline');
     expect(translateConnectionPresence(t, 'not_connected')).toBe('common:Not connected');
+  });
+});
+
+describe('summarizeConnectionAgents', () => {
+  it('lists the Agents only when they add something to the connection label', () => {
+    expect(summarizeConnectionAgents('lucy', ['Lucy', 'lalala', 'Atlas'])).toBe('Lucy · lalala · Atlas');
+    expect(summarizeConnectionAgents('Hermes', ['Hermes'])).toBeUndefined();
+    expect(summarizeConnectionAgents('Codex · Computer', ['Codex'])).toBeUndefined();
+    expect(summarizeConnectionAgents('Pi · Chats', ['Pi · Chats'])).toBeUndefined();
+    expect(summarizeConnectionAgents('Studio Mac', ['Hermes'])).toBe('Hermes');
+    expect(summarizeConnectionAgents('lucy', [])).toBeUndefined();
+    expect(summarizeConnectionAgents('lucy', ['  '])).toBeUndefined();
   });
 });

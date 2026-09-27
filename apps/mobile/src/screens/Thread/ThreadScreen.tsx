@@ -11,6 +11,8 @@ import { Alert, Keyboard, Text, View } from 'react-native';
 import { createReplyConversation, replyConversationDraft } from '../../services/reply-conversation';
 import { readSkillDraft } from '../../chat/skill-draft';
 import { ManualSessions, useManualSession } from '../../services/manual-sessions';
+import { FreshSessions } from '../../services/fresh-sessions';
+import { StorageService } from '../../services/storage';
 import { RunInputSheet } from './components/RunInputSheet';
 import { DraftRecoverySheet } from './components/DraftRecoverySheet';
 import { useVoiceShortcut } from './useVoiceShortcut';
@@ -639,6 +641,25 @@ function ThreadScreenContent({
   if (projection) previewSnapshot.current = projection.snapshot;
   else if (!sessionPreview) previewSnapshot.current = null;
   const visibleMessages = sessionPreview ? projection?.messages ?? [] : controller.listData;
+  // A session this app just created is discarded when the reader leaves it with nothing sent and the
+  // composer untouched, so new sessions never pile up empty (owner decision 2026-09-27). Only the
+  // controller's own session counts: right after a switch it still holds the previous session's rows.
+  const ownSession = controller.sessionKey === sessionKey;
+  const hasMessages = ownSession && visibleMessages.length > 0;
+  useEffect(() => {
+    if (hasMessages) FreshSessions.settle(connectionId, agentId, sessionKey);
+  }, [agentId, connectionId, hasMessages, sessionKey]);
+  const leaveState = useRef({ hasMessages, composer: '' });
+  leaveState.current = { hasMessages, composer: ownSession ? controller.input : '' };
+  useEffect(() => () => {
+    if (leaveState.current.hasMessages) return;
+    if (!FreshSessions.takeAbandoned(connectionId, agentId, sessionKey, leaveState.current.composer)) return;
+    const adapter = getConnectionRuntime().getSnapshot().activeAdapter;
+    if (adapter?.connection.id !== connectionId || !adapter.deleteSession) return;
+    void adapter.deleteSession(sessionKey)
+      .then(() => StorageService.setComposerDraft(agentId, sessionKey, '', connectionId))
+      .catch(() => undefined);
+  }, [agentId, connectionId, sessionKey]);
   const previewEventScope = useRef<string | null>(null);
   useEffect(() => {
     if (!sessionPreview || !previewReady || !focused || !analyticsBackend) return;

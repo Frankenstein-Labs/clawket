@@ -606,9 +606,11 @@ function ThreadMessageActionsContent({
           style={StyleSheet.absoluteFill}
         />
       </Animated.View>
+      {/* The lifted message takes touches so its text can be selected here (Telegram style);
+          the list rows themselves are not selectable. */}
       <Animated.View
         testID={`${testID}-message`}
-        pointerEvents={scrollEnabled ? 'auto' : 'none'}
+        pointerEvents="auto"
         style={[styles.clone, { width: cloneWidth }, cloneStyle]}
       >
         <ScrollView

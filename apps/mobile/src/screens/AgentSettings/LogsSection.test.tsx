@@ -99,15 +99,17 @@ jest.mock('../../components/ui/Button', () => {
   const ReactRuntime = require('react');
   const { Pressable, Text } = require('react-native');
   return {
-    Button: ({ testID, label, disabled, loading, onPress }: {
+    Button: ({ testID, label, disabled, loading, onPress, variant, accessibilityState }: {
       testID?: string;
       label: string;
       disabled?: boolean;
       loading?: boolean;
       onPress?: () => void;
+      variant?: string;
+      accessibilityState?: Record<string, unknown>;
     }) => ReactRuntime.createElement(
       Pressable,
-      { testID, disabled: disabled || loading, onPress: disabled || loading ? undefined : onPress },
+      { testID, variant, accessibilityState, disabled: disabled || loading, onPress: disabled || loading ? undefined : onPress },
       ReactRuntime.createElement(Text, null, label),
     ),
   };
@@ -221,8 +223,11 @@ describe('LogsSection', () => {
     expect(view.getByText('Bridge closed')).toBeTruthy();
     expect(view.getByText('Gateway ready')).toBeTruthy();
 
+    // Every level starts shown as a checked outline toggle; a hidden level reads as plain text.
+    expect(view.getByTestId('agent-logs-filter-info').props).toMatchObject({ variant: 'outline', accessibilityState: { selected: true } });
     fireEvent.press(view.getByTestId('agent-logs-filter-info'));
     expect(view.queryByText('Gateway ready')).toBeNull();
+    expect(view.getByTestId('agent-logs-filter-info').props).toMatchObject({ variant: 'text', accessibilityState: { selected: false } });
     fireEvent.changeText(view.getByTestId('agent-logs-search-input'), 'bridge');
     expect(view.getByText('Bridge closed')).toBeTruthy();
 

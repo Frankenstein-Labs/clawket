@@ -927,12 +927,16 @@ export function SessionPanelView({
         visible={visible}
         title={t('Sessions')}
         titleContent={viewAgent ? (
-          <AgentPill
-            agent={viewAgent}
-            switchable={switchable}
-            expanded={agentMenuOpen}
-            onPress={() => setAgentMenuOpen((current) => !current)}
-          />
+          // The Sheet renders through Gorhom's portal, where the context above it is gone
+          // (device review 2026-09-27: Codex showed "CO" initials), so provide it again inside.
+          <SessionPanelPlatform.Provider value={platform}>
+            <AgentPill
+              agent={viewAgent}
+              switchable={switchable}
+              expanded={agentMenuOpen}
+              onPress={() => setAgentMenuOpen((current) => !current)}
+            />
+          </SessionPanelPlatform.Provider>
         ) : undefined}
         closeAccessibilityLabel={t('Close sessions')}
         onClose={onClose}
@@ -951,6 +955,7 @@ export function SessionPanelView({
           />
         ) : undefined}
       >
+        <SessionPanelPlatform.Provider value={platform}>
         <View style={styles.body}>
           {projects ? <View style={[styles.searchWrap, { alignItems: 'flex-start' }]}><Button variant="text" size="sm" icon={Folder} label={projects.find(p => p.id === projectId)?.name ?? t('All projects')} onPress={() => { Keyboard.dismiss(); setProjectPicker('filter'); }} testID="codex-project-filter" /></View> : null}
           {createError ? <Banner message={t('Save Failed')} /> : null}
@@ -1073,6 +1078,7 @@ export function SessionPanelView({
             />
           ) : null}
         </View>
+        </SessionPanelPlatform.Provider>
       </Sheet>
 
       {projects ? <ProjectPicker visible={projectPicker !== null && visible} projects={projects} selected={projectId} creating={projectPicker === 'create'} onClose={() => setProjectPicker(null)} onSelect={id => { const create = projectPicker === 'create'; setProjectPicker(null); if (create && id) createInProject(id); else setProjectId(id); }} /> : null}

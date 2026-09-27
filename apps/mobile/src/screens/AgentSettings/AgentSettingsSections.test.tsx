@@ -529,6 +529,8 @@ describe('AgentSettings functional sections', () => {
     expect(view.getByText('Always on')).toBeTruthy();
     fireEvent.press(view.getByTestId('agent-skill-installed-builder'));
     expect(view.getByTestId('agent-skill-toggle').props.value).toBe(true);
+    // A switch row is labelled with the action, never with a state it may contradict.
+    expect(view.getByText('Enable')).toBeTruthy();
     expect(view.getByText('Unavailable')).toBeTruthy();
   });
 
@@ -737,12 +739,21 @@ describe('AgentSettings functional sections', () => {
     // The list never reads a document itself.
     expect(get).not.toHaveBeenCalled();
 
-    fireEvent.changeText(view.getByTestId('agent-files-search-input'), 'soul');
-    expect(view.queryByTestId('agent-file-MEMORY.md')).toBeNull();
-    expect(view.getByTestId('agent-file-SOUL.md')).toBeTruthy();
-    fireEvent.changeText(view.getByTestId('agent-files-search-input'), 'nothing');
-    expect(view.getByTestId('agent-files-empty')).toBeTruthy();
+    // Two core files need no search field; a long workspace list gets one.
+    expect(view.queryByTestId('agent-files-search-input')).toBeNull();
     view.unmount();
+
+    const many = [...files, ...['AGENTS.md', 'TOOLS.md', 'HEARTBEAT.md', 'IDENTITY.md', 'NOTES.md'].map((name) => ({ name, path: `/${name}`, missing: false, size: 1 }))];
+    const searchable = render(
+      <FilesSection adapter={adapterWith({ management: { agents: { files: { list: jest.fn(async () => many), get, set } } } })} agent={agent} online onOpenFile={onOpenFile} />,
+    );
+    await waitFor(() => expect(searchable.getByTestId('agent-files-search-input')).toBeTruthy());
+    fireEvent.changeText(searchable.getByTestId('agent-files-search-input'), 'soul');
+    expect(searchable.queryByTestId('agent-file-MEMORY.md')).toBeNull();
+    expect(searchable.getByTestId('agent-file-SOUL.md')).toBeTruthy();
+    fireEvent.changeText(searchable.getByTestId('agent-files-search-input'), 'nothing');
+    expect(searchable.getByTestId('agent-files-empty')).toBeTruthy();
+    searchable.unmount();
 
     const readOnly = render(
       <FilesSection

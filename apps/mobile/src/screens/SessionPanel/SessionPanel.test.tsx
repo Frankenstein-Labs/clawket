@@ -124,12 +124,20 @@ jest.mock('../../connection', () => ({
   useRoster: jest.fn(),
 }));
 
+// On device the Sheet renders through Gorhom's portal, where context from above it is gone. A test can
+// switch the mock to that mode: it hands the header and body to `mockPortaledSheet` instead of rendering them.
+let mockPortaledSheet: { titleContent: unknown; children: unknown } | null = null;
+let mockPortalMode = false;
 jest.mock('../../components/ui/Sheet', () => {
   const ReactRuntime = require('react');
   const { Text, View } = require('react-native');
   return {
-    Sheet: ({ visible, testID, title, titleContent, headerRight, children, onAfterClose, snapPoints }: Record<string, unknown>) => (
-      visible
+    Sheet: ({ visible, testID, title, titleContent, headerRight, children, onAfterClose, snapPoints }: Record<string, unknown>) => {
+      if (mockPortalMode && visible && testID === 'session-panel') {
+        mockPortaledSheet = { titleContent, children };
+        return null;
+      }
+      return visible
         ? ReactRuntime.createElement(
           View,
           { testID, onAfterClose, snapPoints },
@@ -137,8 +145,8 @@ jest.mock('../../components/ui/Sheet', () => {
           headerRight,
           children,
         )
-        : null
-    ),
+        : null;
+    },
   };
 });
 
@@ -357,6 +365,24 @@ function chooseAfterDismiss(view: ReturnType<typeof render>, action: string) {
   expect(view.queryByTestId('session-panel-confirm')).toBeNull();
   act(() => afterClose());
 }
+
+describe('SessionPanelView portal', () => {
+  afterEach(() => {
+    mockPortalMode = false;
+    mockPortaledSheet = null;
+  });
+
+  it('keeps the product face on the Agent pill when the sheet renders outside the panel tree', () => {
+    mockPortalMode = true;
+    render(<SessionPanelView {...props({ platform: 'codex' })} />);
+    expect(mockPortaledSheet).not.toBeNull();
+    // A separate root, like the portal host: the provider around <Sheet> is not an ancestor here.
+    const portal = render(<>{mockPortaledSheet?.titleContent as React.ReactNode}{mockPortaledSheet?.children as React.ReactNode}</>);
+    const pillAvatar = portal.UNSAFE_getAllByType('AgentAvatar' as unknown as React.ComponentType)
+      .find((node) => node.props.testID === 'session-panel-agent-pill-avatar');
+    expect(pillAvatar?.props.platform).toBe('codex');
+  });
+});
 
 describe('SessionPanelView', () => {
   let consoleErrorSpy: jest.SpyInstance;

@@ -1,6 +1,7 @@
 import type { RunActivity } from '../../connection/run-activity';
 import { sessionActivityAt, type BackendKind, type SessionDescriptor } from '@clawket/agent-protocol';
 import { compareAgentSummaries, type RosterConnectionGroup } from '../../connection';
+import { formatPreviewLine } from '../../utils/chat-message';
 
 export type RosterDisplayRow = Readonly<{
   key: string;
@@ -50,7 +51,15 @@ export type RosterModelOptions = Readonly<{
   canAccessAgent?: (connectionId: string, agentId: string) => boolean;
 }>;
 
+/**
+ * The conversation's own title, as the Session Panel shows it. OpenClaw's `channel` names the
+ * platform (`slack`), not the conversation, so `#channel` made every Slack conversation shown on
+ * home read `#slack` (device review 2026-09-27); it stays only as the fallback for an untitled one.
+ * The platform itself is the avatar badge.
+ */
 function sessionTitle(session: SessionDescriptor): string {
+  const title = session.title?.trim();
+  if (title && title !== session.key) return title;
   const channel = session.channel?.trim();
   if (channel) return channel.startsWith('#') ? channel : `#${channel}`;
   return session.title;
@@ -84,7 +93,7 @@ function buildPinnedRows(
       avatarName: agent.name,
       ...(agent.emoji ? { emoji: agent.emoji } : {}),
       ...(agent.avatarUrl ? { avatarUrl: agent.avatarUrl } : {}),
-      ...(session.preview ? { preview: session.preview } : {}),
+      ...optionalPreview(session.preview),
       sessionKind: session.kind,
       ...(session.channel?.trim() ? { sessionChannel: session.channel.trim() } : {}),
       ...(session.project ? { sessionProject: true } : {}),
@@ -98,6 +107,12 @@ function buildPinnedRows(
       agentPinned,
       allowedActions: { ...session.allowedActions },
     }));
+}
+
+/** List rows show one plain line: Markdown markers from raw message text are dropped. */
+function optionalPreview(text: string | undefined): { preview?: string } {
+  const preview = formatPreviewLine(text);
+  return preview ? { preview } : {};
 }
 
 function isAgentPinned(
@@ -144,9 +159,7 @@ export function buildRosterRows(
       ...(agent.avatarUrl ? { avatarUrl: agent.avatarUrl } : {}),
       ...(summary.subtitle
         ? { subtitle: summary.subtitle }
-        : summary.preview
-          ? { preview: summary.preview }
-          : {}),
+        : optionalPreview(summary.preview)),
       lastActivityAt: summary.lastActivityAt,
       syncedAt: cached ? group.syncedAt : null,
       unreadCount: cached ? 0 : summary.unreadCount,

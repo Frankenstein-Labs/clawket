@@ -1,6 +1,6 @@
 import type { SessionDescriptor } from '@clawket/agent-protocol';
 import { SessionInfo } from '../../types';
-import { sanitizeSilentPreviewText, sessionLabel } from '../../utils/chat-message';
+import { formatPreviewLine, sessionLabel } from '../../utils/chat-message';
 
 /** Shared list-mode projection used by the 3.0 SessionPanel. */
 
@@ -82,7 +82,7 @@ export function buildSessionBoardRows(
     .map((session) => {
       const updatedAt = session.updatedAt ?? 0;
       const title = sessionLabel(session, { currentAgentName: options?.currentAgentName });
-      const preview = sanitizeSilentPreviewText(session.lastMessagePreview)?.replace(/\s+/g, ' ').trim() ?? '';
+      const preview = formatPreviewLine(session.lastMessagePreview) ?? '';
       const channelLabel = normalizeChannelLabel(session.channel);
       const modelLabel = resolveModelLabel(session);
       const kind = resolveKind(session);
@@ -129,7 +129,7 @@ export function buildSessionDescriptorBoardRows(
       const updatedAt = session.updatedAt ?? 0;
       const channelLabel = normalizeChannelLabel(session.channel);
       const modelLabel = session.model?.trim() || null;
-      const preview = sanitizeSilentPreviewText(session.preview)?.replace(/\s+/g, ' ').trim() ?? '';
+      const preview = formatPreviewLine(session.preview) ?? '';
       const searchableText = [
         session.key,
         session.title,

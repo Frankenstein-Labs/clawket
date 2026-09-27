@@ -430,6 +430,13 @@ export function resolveThreadHeaderName(
   return `${agentName} · ${normalizedTitle}`;
 }
 
+/** Home-relative like a shell prompt, so the header shows the project rather than `/Users/<name>`. */
+export function displayProjectPath(path: string): string {
+  return path.trim()
+    .replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~')
+    .replace(/^[A-Za-z]:\\Users\\[^\\]+(?=\\|$)/, '~');
+}
+
 export type ThreadHeaderSubtitleInput = Readonly<{
   projectPath?: string | null;
   capabilities: Capabilities;
@@ -459,7 +466,7 @@ export function resolveThreadHeaderSubtitle({
 }: ThreadHeaderSubtitleInput): string {
   if (state.kind === 'offline') return offlineLabel;
   if (isRunning) return activityLabel?.trim() || thinkingLabel;
-  if (projectPath?.trim() && (state.kind === 'ready' || state.kind === 'empty')) return projectPath.trim();
+  if (projectPath?.trim() && (state.kind === 'ready' || state.kind === 'empty')) return displayProjectPath(projectPath);
   if (!capabilities.models) return '';
 
   const normalizedModel = model?.trim() ?? '';

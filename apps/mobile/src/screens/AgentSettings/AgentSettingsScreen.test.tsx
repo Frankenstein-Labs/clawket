@@ -252,12 +252,13 @@ describe('AgentSettingsView deep rendering', () => {
     expect(flattenStyle(view.getByTestId('agent-settings-screen').props.style)).toMatchObject({
       backgroundColor: lightColors.canvasGrouped,
     });
-    // The canonical page header owns the safe-area inset, the 16-point edge and the quiet back circle.
+    // The canonical page header owns the safe-area inset, the 16-point edge and a plain back icon
+    // like the roster header's (owner decision 2026-09-27).
     expect(flattenStyle(view.getByTestId('agent-settings-header').props.style)).toMatchObject({
       paddingTop: 24 + Space.sm, paddingHorizontal: Space.lg, paddingBottom: Space.sm, backgroundColor: lightColors.canvasGrouped,
     });
     expect(flattenStyle(view.getByTestId('agent-settings-back').props.style)).toMatchObject({
-      borderRadius: ControlSize.floatingButton / 2, backgroundColor: lightColors.surfaceFloating,
+      borderRadius: ControlSize.floatingButton / 2, backgroundColor: 'transparent',
     });
     expect(flattenStyle(view.getByTestId('agent-settings-title').props.style)).toMatchObject({
       color: lightColors.ink,
@@ -590,6 +591,19 @@ describe('AgentSettingsView deep rendering', () => {
     })} />);
     expect(view.getByTestId('agent-settings-avatar-face')).toBeTruthy();
     expect(view.queryByTestId('agent-settings-backend-mark')).toBeNull();
+  });
+
+  it('shows a placeholder for counts still loading and a dash only once the read ended without one', () => {
+    const summary = { cronJobCount: 0, fileCount: 2 };
+    const view = render(<AgentSettingsView {...props({ summary, summaryLoading: true })} />);
+    expect(view.getByTestId('agent-settings-stat-models-loading')).toBeTruthy();
+    expect(view.queryByTestId('agent-settings-stat-models-value')).toBeNull();
+    // Known values render as soon as they arrive, even while other counts are loading.
+    expect(view.getByTestId('agent-settings-stat-files-value').props.children).toBe('2');
+
+    view.rerender(<AgentSettingsView {...props({ summary, summaryLoading: false })} />);
+    expect(view.queryByTestId('agent-settings-stat-models-loading')).toBeNull();
+    expect(view.getByTestId('agent-settings-stat-models-value').props.children).toBe('—');
   });
 
   it('does not render sections whose capability is false', () => {

@@ -36,7 +36,8 @@ import {
   Radius,
   Space,
 } from '../../theme/tokens';
-import { relativeTime } from '../../utils/chat-message';
+import { cronSessionName, relativeTime } from '../../utils/chat-message';
+import { useRelativeTimeTranslator } from '../../hooks/useRelativeTimeTranslator';
 import {
   SEARCH_FAVORITES_PREVIEW_LIMIT,
   shouldShowSearchFilters,
@@ -128,6 +129,13 @@ function SearchResultLeading({ result }: Readonly<{ result: SearchResult }>): Re
   );
 }
 
+function displaySessionTitle(result: SearchResult, t: (key: string, options?: Record<string, unknown>) => string): string {
+  if (result.title === result.sessionKey) return t('New session');
+  if (!result.sessionKey.includes(':cron:')) return result.title;
+  const name = cronSessionName(result.title);
+  return name ? t('Scheduled task: {{name}}', { name }) : t('Scheduled task');
+}
+
 function SearchResultRow({
   result,
   query,
@@ -138,6 +146,7 @@ function SearchResultRow({
   onPress: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation('common');
+  const translateRelativeTime = useRelativeTimeTranslator();
   const { theme } = useAppTheme();
   const themedStyles = useMemo(() => createThemedStyles(theme.colors), [theme.colors]);
   const fallbackTitle = result.kind === 'agent'
@@ -150,19 +159,22 @@ function SearchResultRow({
   const secondary = result.kind === 'message' || result.kind === 'favorite'
     ? result.text
     : result.subtitle;
+  // Session titles read as in the Session Panel and Thread header: a scheduled run drops the
+  // Gateway's English `Automation:` prefix and an untitled session never shows its internal key.
+  const title = result.kind === 'session' ? displaySessionTitle(result, t) : result.title;
 
   return (
     <Pressable
       testID={`search-result-${result.kind}-${result.id}`}
       accessibilityRole="button"
-      accessibilityLabel={result.title || fallbackTitle}
+      accessibilityLabel={title || fallbackTitle}
       onPress={onPress}
       style={({ pressed }) => [styles.resultRow, pressed ? themedStyles.resultPressed : null]}
     >
       <SearchResultLeading result={result} />
       <View style={styles.resultCopy}>
         <HighlightedText
-          value={result.title || fallbackTitle}
+          value={title || fallbackTitle}
           query={query}
           style={[styles.resultTitle, { color: theme.colors.ink }]}
         />
@@ -185,7 +197,7 @@ function SearchResultRow({
         ) : null}
         {result.updatedAt ? (
           <Text style={[styles.resultTime, { color: theme.colors.inkTertiary }]}>
-            {relativeTime(result.updatedAt)}
+            {relativeTime(result.updatedAt, translateRelativeTime)}
           </Text>
         ) : null}
       </View>
@@ -447,7 +459,7 @@ export function SearchView({
         <FloatingButton
           testID="search-back"
           icon={ChevronLeft}
-          appearance="surface"
+          appearance="plain"
           accessibilityLabel={t('Back')}
           onPress={onBack}
         />
@@ -460,7 +472,7 @@ export function SearchView({
           onChangeText={onChangeQuery}
           placeholder={t('Agents, sessions, and messages')}
         />
-        {onOpenArchives ? <FloatingButton icon={Archive} appearance="surface" accessibilityLabel={t('Saved conversations', { ns: 'chat' })} onPress={onOpenArchives} testID="search-archives" /> : null}
+        {onOpenArchives ? <FloatingButton icon={Archive} appearance="plain" accessibilityLabel={t('Saved conversations', { ns: 'chat' })} onPress={onOpenArchives} testID="search-archives" /> : null}
       </View>
       <ScrollView
         testID="search-scroll"

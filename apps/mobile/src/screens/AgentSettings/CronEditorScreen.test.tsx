@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react-
 import { CAPABILITY_MATRIX, resolveCapabilities, type AgentAdapter, type AgentDescriptor, type CronJob } from '@clawket/agent-protocol';
 import { CronEditorScreen } from './CronEditorScreen';
 import { CronSection } from './CronSection';
+import { takeCreatedCronJob } from './useCronJobs';
 
 const mockPreventRemove = jest.fn();
 jest.mock('@react-navigation/native', () => ({ usePreventRemove: (...args: unknown[]) => mockPreventRemove(...args) }));
@@ -13,6 +14,7 @@ jest.mock('react-native', () => {
     ReactRuntime.createElement(name, { ...props, ref, style: typeof style === 'function' ? style({ pressed: false }) : style }, children));
   return {
     Alert: { alert: jest.fn() },
+    AccessibilityInfo: { announceForAccessibility: jest.fn() },
     Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Pressable: host('Pressable'), View: host('View'), Text: host('Text'), TextInput: host('TextInput'), ScrollView: host('ScrollView'), ActivityIndicator: host('ActivityIndicator'),
     Modal: ({ visible, children }: { visible: boolean; children: React.ReactNode }) => visible ? children : null,
@@ -116,13 +118,10 @@ describe('guided Cron management', () => {
     if (backend === 'hermes') expect(schedule.tz).toBeUndefined();
     else expect(schedule.tz).toBeTruthy();
     await waitFor(() => expect(setupData.navigation.goBack).toHaveBeenCalledTimes(1));
+    // The list confirms the new task in place; no alert interrupts the return.
     expect(Alert.alert).not.toHaveBeenCalled();
-    const listener = (setupData.navigation.addListener as jest.Mock).mock.calls[0][1];
-    act(() => listener({ data: { closing: false } }));
-    expect(Alert.alert).not.toHaveBeenCalled();
-    act(() => listener({ data: { closing: true } }));
-    expect(Alert.alert).toHaveBeenCalledWith('Scheduled task created');
-    expect((setupData.navigation.addListener as jest.Mock).mock.results[0].value).toHaveBeenCalledTimes(1);
+    expect(takeCreatedCronJob(agent)).toBe('created');
+    expect(takeCreatedCronJob(agent)).toBeNull();
   });
 
   it('carries a Thread prompt directly into the form and leaves future new tasks blank', async () => {
@@ -274,6 +273,30 @@ describe('guided Cron management', () => {
     await waitFor(() => expect(data.remove).toHaveBeenCalledWith('daily'));
   });
 
+  it('re-reads the run history after Run now until the finished run can be recorded', async () => {
+    const data = setup();
+    const view = render(<CronEditorScreen {...data} agent={agent} online jobId="daily" />);
+    await waitFor(() => expect(view.getByTestId('agent-cron-name')).toBeTruthy());
+    await waitFor(() => expect(data.runs).toHaveBeenCalledTimes(1));
+    jest.useFakeTimers();
+    try {
+      await act(async () => { fireEvent.press(view.getByTestId('agent-cron-run')); });
+      expect(data.run).toHaveBeenCalledWith('daily', 'force');
+      expect(data.runs).toHaveBeenCalledTimes(2);
+      await act(async () => { jest.advanceTimersByTime(3_000); });
+      expect(data.runs).toHaveBeenCalledTimes(3);
+      await act(async () => { jest.advanceTimersByTime(5_000); });
+      expect(data.runs).toHaveBeenCalledTimes(4);
+      await act(async () => { jest.advanceTimersByTime(12_000); });
+      expect(data.runs).toHaveBeenCalledTimes(5);
+      view.unmount();
+      await act(async () => { jest.advanceTimersByTime(60_000); });
+      expect(data.runs).toHaveBeenCalledTimes(5);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('shows OpenClaw-owned monitors as read-only in the list and details', async () => {
     const monitor = { ...existing, id: 'review', name: 'skill-collection-review-main',
       payload: { kind: 'skillCollectionReview' } } as unknown as CronJob;
@@ -286,6 +309,7 @@ describe('guided Cron management', () => {
 
     const detail = render(<CronEditorScreen {...data} agent={agent} online jobId="review" />);
     await waitFor(() => expect(detail.getByTestId('cron-system-owned-details')).toBeTruthy());
+    expect(detail.getByText('Status')).toBeTruthy();
     expect(detail.getByText('OpenClaw manages this task. You cannot delete it here; to stop future reviews, turn off automatic skill reviews in OpenClaw settings.')).toBeTruthy();
     expect(detail.queryByTestId('cron-prompt-summary')).toBeNull();
     expect(detail.queryByTestId('agent-cron-save')).toBeNull();
@@ -380,6 +404,37 @@ describe('guided Cron management', () => {
     await waitFor(() => expect(list.getByText('Refresh failed')).toBeTruthy());
     expect(list.getByText('Acknowledged name')).toBeTruthy();
   }, RENAME_TEST_TIMEOUT);
+
+  it('returns from creating a task to the job definitions with the new task first and briefly marked', async () => {
+    const data = setup();
+    const list = render(<CronSection adapter={data.adapter} agent={agent} online refreshKey={0} onCreate={jest.fn()} onEdit={jest.fn()} />);
+    await waitFor(() => expect(list.getByTestId('agent-cron-tabs-jobs')).toBeTruthy());
+    // With tasks the page lands on the run records.
+    expect(list.queryByTestId('agent-cron-job-list')).toBeNull();
+    const editor = render(<CronEditorScreen {...data} agent={agent} online initialPrompt="Summarize my inbox" />);
+    fireEvent.changeText(editor.getByTestId('agent-cron-name'), 'Inbox');
+    fireEvent.press(editor.getByTestId('agent-cron-save'));
+    await waitFor(() => expect(data.navigation.goBack).toHaveBeenCalledTimes(1));
+    editor.unmount();
+    jest.useFakeTimers();
+    try {
+      list.rerender(<CronSection adapter={data.adapter} agent={agent} online refreshKey={1} onCreate={jest.fn()} onEdit={jest.fn()} />);
+      await act(async () => { await Promise.resolve(); });
+      const rows = within(list.getByTestId('agent-cron-job-list')).getAllByTestId(/^agent-cron-job-(?!list$)[a-z]+$/).map((row) => row.props.testID);
+      expect(rows[0]).toBe('agent-cron-job-created');
+      expect(list.getByTestId('agent-cron-job-created-new')).toBeTruthy();
+      expect(require('react-native').AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith('Scheduled task created');
+      act(() => { jest.advanceTimersByTime(2_400); });
+      expect(list.queryByTestId('agent-cron-job-created-new')).toBeNull();
+      // Later returns keep the order and the page the reader is on.
+      list.rerender(<CronSection adapter={data.adapter} agent={agent} online refreshKey={2} onCreate={jest.fn()} onEdit={jest.fn()} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(within(list.getByTestId('agent-cron-job-list')).getAllByTestId(/^agent-cron-job-(?!list$)[a-z]+$/)[0]!.props.testID).toBe('agent-cron-job-created');
+      expect(list.queryByTestId('agent-cron-job-created-new')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   it('offers the model row outside advanced settings on create and stores the picked reference', async () => {
     const data = setup('openclaw');

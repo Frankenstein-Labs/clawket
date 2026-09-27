@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useTranslation } from 'react-i18next';
 import type { AgentAdapter, AgentDescriptor, CronJob, CronRunLogEntry, HeartbeatSettings } from '@clawket/agent-protocol';
@@ -14,13 +15,13 @@ import { ListSkeleton } from '../../components/ui/ListSkeleton';
 import { ThemedSwitch } from '../../components/ui/ThemedSwitch';
 import { useAppTheme } from '../../theme';
 import { describeScheduleHuman } from '../../utils/cron';
-import { ControlSize, FontSize, FontWeight, IconSize, LineHeight, Space } from '../../theme/tokens';
+import { ControlSize, FontSize, FontWeight, IconSize, LineHeight, Motion, Radius, Space } from '../../theme/tokens';
 import { CronFailureAckService } from '../../services/cron-failure-acks';
 import { cronFailureRunEntry, failedCronJobs } from './cron-failures';
 import { cronJobModel, cronModelLabel, cronRunStatus, filterAgentCronRuns, isSystemOwnedCronJob } from './cron-model';
 import { formatCronDate } from './cron-schedule';
 import { CronRunSheet } from './CronRunSheet';
-import { useCronJobs } from './useCronJobs';
+import { takeCreatedCronJob, useCronJobs } from './useCronJobs';
 
 // The heartbeat form can outgrow the screen: fixed detents plus the
 // Gorhom-integrated scroll view (a plain ScrollView in a dynamic-height sheet
@@ -49,7 +50,7 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const operations = adapter.management?.cron;
-  const { jobs, loading, error: loadError, reload, accept, invalidate, isCurrent } = useCronJobs(adapter, agent, online, refreshKey);
+  const { jobs, loading, error: loadError, reload, accept, invalidate, isCurrent, lead } = useCronJobs(adapter, agent, online, refreshKey);
   // The page lands on the run records (owner decision 2026-09-19): what a scheduled task did
   // matters more often than how it is configured. Only an Agent with no jobs yet opens on the job
   // list, where the empty state offers creation. The landing tab is settled once the job list is
@@ -58,6 +59,21 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
   const landingView = useRef<'jobs' | 'runs' | null>(null);
   if (landingView.current === null && jobs) landingView.current = jobs.length && operations?.runs ? 'runs' : 'jobs';
   const view = chosenView ?? landingView.current ?? 'jobs';
+  // Returning from the editor with a new task shows it: job definitions, the new row first and
+  // briefly marked, instead of the run records the page otherwise lands on (owner decision 2026-09-27).
+  const [freshJobId, setFreshJobId] = useState<string | null>(null);
+  useEffect(() => {
+    const created = takeCreatedCronJob({ connectionId: agent.connectionId, agentId: agent.agentId });
+    if (!created) return;
+    setView('jobs');
+    lead(created);
+    setFreshJobId(created);
+    AccessibilityInfo.announceForAccessibility(t('Scheduled task created', { ns: 'settings' }));
+    const timer = setTimeout(() => setFreshJobId(null), FRESH_JOB_MARK_MS);
+    return () => { clearTimeout(timer); setFreshJobId(null); };
+    // `t` and `lead` are stable for this list; only a focus (refreshKey) delivers a new task.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.agentId, agent.connectionId, refreshKey]);
   const [runs, setRuns] = useState<ReadonlyArray<CronRunLogEntry>>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [runsLoading, setRunsLoading] = useState(false);
@@ -160,6 +176,7 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
             <Button label={t('Refresh')} variant="ghost" size="sm" disabled={!online || loading || Boolean(busy)} onPress={() => { void reload(); }} />
           </View>
           <View testID="agent-cron-job-list">{jobs?.map(job => <View key={job.id} style={rowStyles.row}>
+            {freshJobId === job.id ? <FreshJobMark testID={`agent-cron-job-${job.id}-new`} color={theme.colors.surface} /> : null}
             <Pressable testID={`agent-cron-job-${job.id}`} accessibilityRole="button" accessibilityLabel={job.name}
               style={rowStyles.content} onPress={() => onEdit(job.id)}>
               <View style={rowStyles.titleRow}><Text style={[styles.runText, rowStyles.title]}>{job.name}</Text><ChevronRight size={IconSize.sm} color={theme.colors.inkTertiary} /></View>
@@ -176,7 +193,7 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
                 </Text> : null}
             </Pressable>
             {operations?.update && !isSystemOwnedCronJob(job) ? <View style={rowStyles.switchTarget}><ThemedSwitch testID={`agent-cron-switch-${job.id}`}
-              value={job.enabled} disabled={!online || Boolean(busy)} accessibilityLabel={`${t('Enabled', { ns: 'settings' })}: ${job.name}`}
+              value={job.enabled} disabled={!online || Boolean(busy)} accessibilityLabel={`${t('Enable', { ns: 'settings' })}: ${job.name}`}
               accessibilityState={{ disabled: !online || Boolean(busy), busy: busy === job.id }} onValueChange={() => { void toggle(job); }} /></View> : null}
           </View>)}</View>
         </View>
@@ -187,13 +204,13 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
         {failedRuns.length ? <View testID="agent-cron-failed" style={styles.failedGroup}>
           <Text testID="agent-cron-failed-count" style={[styles.fieldLabel, { color: theme.colors.bad }]}>{t('{{count}} failed', { ns: 'settings', count: failedRuns.length })}</Text>
           {failedRuns.map((run) => <SettingsRow key={`failed:${run.jobId}`} testID={`agent-cron-failed-${run.jobId}`}
-            title={run.jobName ?? run.jobId} subtitle={formatTimestamp(run.runAtMs ?? run.ts)} value={t('Failed', { ns: 'settings' })}
+            title={run.jobName ?? run.jobId} subtitle={formatCronDate(run.runAtMs ?? run.ts, i18n?.resolvedLanguage)} value={t('Failed', { ns: 'settings' })}
             attention showChevron onPress={() => setSelectedRun(run)} />)}
         </View> : null}
         {runsLoading && !runs.length ? <CronLoading /> : null}
         {visibleRuns.map((run, index) => <SettingsRow key={`${run.jobId}:${run.ts}:${index}`} testID={`agent-cron-run-${run.jobId}-${run.ts}`}
           title={run.jobName ?? jobs?.find(job => job.id === run.jobId)?.name ?? run.jobId}
-          subtitle={formatTimestamp(run.runAtMs ?? run.ts)} value={translateCronRunStatus(cronRunStatus(run), t)}
+          subtitle={formatCronDate(run.runAtMs ?? run.ts, i18n?.resolvedLanguage)} value={translateCronRunStatus(cronRunStatus(run), t)}
           attention={run.status === 'error'} showChevron onPress={() => setSelectedRun(run)} />)}
         {!runsLoading && !visibleRuns.length && !failedRuns.length ? <Text testID="agent-cron-runs-empty" style={styles.emptyText}>{t('No runs yet', { ns: 'settings' })}</Text> : null}
         {nextOffset !== null ? <Button testID="cron-runs-more" label={t('Load more', { ns: 'settings' })} variant="ghost" loading={runsLoading} disabled={!online}
@@ -212,8 +229,24 @@ function translateCronRunStatus(status: ReturnType<typeof cronRunStatus>, t: Ret
   if (status === 'Skipped') return t('Skipped', { ns: 'settings' });
   return t('Unknown', { ns: 'common' });
 }
+/** The new task's mark holds, then fades; the whole cue ends within this. */
+const FRESH_JOB_MARK_MS = 2_400;
+const FRESH_JOB_HOLD_MS = 1_400;
+
+function FreshJobMark({ color, testID }: Readonly<{ color: string; testID: string }>): React.JSX.Element {
+  const reduceMotion = useReducedMotion();
+  const opacity = useSharedValue(1);
+  useEffect(() => {
+    opacity.value = withDelay(FRESH_JOB_HOLD_MS, withTiming(0, { duration: reduceMotion ? 0 : Motion.duration.slow * 2 }));
+  }, [opacity, reduceMotion]);
+  const fade = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  return <Animated.View testID={testID} pointerEvents="none" style={[rowStyles.fresh, { backgroundColor: color }, fade]} />;
+}
+
 const rowStyles = StyleSheet.create({
   row: { minHeight: ControlSize.rosterRow, paddingVertical: Space.lg, flexDirection: 'row', gap: Space.md, alignItems: 'flex-start' },
+  // Bleeds into the page gutter so the text keeps its column while the row reads as marked.
+  fresh: { position: 'absolute', top: Space.xs, bottom: Space.xs, left: -Space.md, right: -Space.md, borderRadius: Radius.card },
   content: { flex: 1, gap: Space.xs },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: Space.sm },
   title: { flexShrink: 1, fontWeight: FontWeight.semibold },
@@ -359,10 +392,6 @@ function heartbeatDraft(settings: HeartbeatSettings | null): HeartbeatSettings {
   };
 }
 
-function formatTimestamp(value?: number): string {
-  if (!value || !Number.isFinite(value)) return '—';
-  return new Date(value).toLocaleString();
-}
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) return error.message;

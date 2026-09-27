@@ -12,7 +12,7 @@ export function FlowHeader({ onBack, title, right, testID }: { onBack?: () => vo
   const { theme: { colors } } = useAppTheme();
   const { t } = useTranslation('common');
   return <View style={styles.header}>
-    <View style={styles.slot}>{onBack ? <FloatingButton testID={testID} icon={ChevronLeft} appearance="surface" onPress={onBack} accessibilityLabel={t('Back')} /> : null}</View>
+    <View style={styles.slot}>{onBack ? <FloatingButton testID={testID} icon={ChevronLeft} appearance="plain" onPress={onBack} accessibilityLabel={t('Back')} /> : null}</View>
     <Text numberOfLines={1} style={[styles.headerTitle, { color: colors.inkSecondary }]}>{title}</Text>
     <View style={styles.slot}>{right}</View>
   </View>;

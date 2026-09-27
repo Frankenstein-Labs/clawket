@@ -406,8 +406,8 @@ function translatePaywallSubtitle(
   t: Translate,
 ): string {
   switch (key) {
-    case 'OpenClaw and Hermes together, ready whenever you are.':
-      return t('OpenClaw and Hermes together, ready whenever you are.');
+    case 'Use the Agents on all your computers from one app.':
+      return t('Use the Agents on all your computers from one app.');
     case 'Agents beyond main are a Pro feature.':
       return t('Agents beyond main are a Pro feature.');
     case 'Read complete channel, task and subagent conversations, and reply where supported.':

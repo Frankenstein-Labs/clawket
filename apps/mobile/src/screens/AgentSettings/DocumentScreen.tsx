@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View, type TextInput } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { usePreventRemove, type NavigationAction } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,6 +15,7 @@ import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { createChatMarkdownStyle, getChatMarkdownFlavor, openChatMarkdownLink } from '../../components/chat/chatMarkdown';
+import { useMarkdownSelectionMenu } from '../../components/chat/useMarkdownSelectionMenu';
 import { useAppTheme } from '../../theme';
 import { FontSize, LineHeight, Space } from '../../theme/tokens';
 import { formatCronDate } from './cron-schedule';
@@ -71,6 +72,7 @@ function DocumentPage({
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const markdownStyle = useMemo(() => createChatMarkdownStyle(theme.colors, FontSize.body), [theme.colors]);
+  const selectionMenu = useMarkdownSelectionMenu();
   const [content, setContent] = useState<DocumentContent | null>(null);
   const [loading, setLoading] = useState(source !== null);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -98,6 +100,15 @@ function DocumentPage({
   // A listed-but-absent file has nothing to read: the page opens as its editor.
   const creating = editing && content?.missing === true;
   const dirty = editing && content !== null && draft !== content.content;
+  const inputRef = useRef<TextInput>(null);
+  const editorTouched = useRef(false);
+  useEffect(() => { if (editing) editorTouched.current = false; }, [editing]);
+  // Android applies the source after mount by inserting it at the caret, which leaves caret and
+  // scroll at the end of a long file. Until the reader touches the editor, every layout of the
+  // loaded text puts the caret back at the top, like the reader (device review 2026-09-27).
+  const keepEditorAtTop = useCallback(() => {
+    if (Platform.OS === 'android' && !creating && !editorTouched.current) inputRef.current?.setSelection?.(0, 0);
+  }, [creating]);
 
   const load = useCallback(async () => {
     const document = sourceRef.current;
@@ -265,10 +276,13 @@ function DocumentPage({
             <View style={styles.notice}><Banner testID="document-version-limit" message={t('This file is too large for version history.', { ns: 'settings' })} /></View>
           ) : null}
           <CompositionSafeTextInput
+            ref={inputRef}
             testID="document-input"
             accessibilityLabel={title}
             value={draft}
             onChangeText={setDraft}
+            onFocus={() => { editorTouched.current = true; }}
+            onContentSizeChange={keepEditorAtTop}
             multiline
             scrollEnabled
             autoFocus={creating}
@@ -310,6 +324,7 @@ function DocumentPage({
                     markdownStyle={markdownStyle}
                     flavor={getChatMarkdownFlavor()}
                     selectable
+                    selectionMenuConfig={selectionMenu}
                     onLinkPress={openChatMarkdownLink}
                   />}
                 </View>

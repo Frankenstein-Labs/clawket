@@ -62,14 +62,15 @@ export function ConfirmationModal({
         <View testID={`${testID}-card`} style={styles.card}>
           <View style={styles.header}>
             <View style={styles.sideSlot} />
-            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            {/* Two lines: pairing names a computer (`Connect to Claude Code · Computer?`), which one line cut off. */}
+            <Text testID={`${testID}-title`} style={styles.title} numberOfLines={2}>{title}</Text>
             <View style={styles.sideSlot}>
               <FloatingButton
                 testID={`${testID}-close`}
                 icon={X}
                 onPress={onClose}
                 accessibilityLabel={cancelLabel}
-                appearance="quiet"
+                appearance="plain"
               />
             </View>
           </View>

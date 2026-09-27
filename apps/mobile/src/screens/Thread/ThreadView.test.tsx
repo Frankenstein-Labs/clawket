@@ -564,22 +564,24 @@ describe('ThreadView', () => {
 
   it('uses the fixed header subtitle for a project path and gives transient states priority', () => {
     const projectPath = '/Users/example/projects/a-very-long-project-name';
+    const shown = '~/projects/a-very-long-project-name';
     const props = createProps({ projectPath, contextUsed: 46, contextWindow: 100 });
     const view = render(<ThreadView {...props} />);
-    expect(view.getByText(projectPath).props).toMatchObject({ numberOfLines: 1, ellipsizeMode: 'middle' });
+    // Home-relative on screen; the full path stays in the accessibility hint.
+    expect(view.getByText(shown).props).toMatchObject({ numberOfLines: 1, ellipsizeMode: 'middle' });
     expect(view.getByTestId('thread-screen-header-pill').props.accessibilityHint).toBe(projectPath);
     expect(flattenStyle(view.getByTestId('thread-screen-header-pill').props.style).height).toBe(ControlSize.pill);
     expect(view.queryByText('Context remaining: 54%')).toBeNull();
     view.rerender(<ThreadView {...props} isRunning />);
-    expect(view.queryByText(projectPath)).toBeNull();
+    expect(view.queryByText(shown)).toBeNull();
     expect(view.getByTestId('thread-screen-header-pill-working')).toBeTruthy();
     view.rerender(<ThreadView {...props} state={{ kind: 'reconnecting' }} />);
-    expect(view.queryByText(projectPath)).toBeNull();
+    expect(view.queryByText(shown)).toBeNull();
     expect(view.getByText('Reconnecting…')).toBeTruthy();
     view.rerender(<ThreadView {...props} state={{ kind: 'offline' }} />);
-    expect(view.queryByText(projectPath)).toBeNull();
+    expect(view.queryByText(shown)).toBeNull();
     view.rerender(<ThreadView {...props} />);
-    expect(view.getByText(projectPath)).toBeTruthy();
+    expect(view.getByText(shown)).toBeTruthy();
   });
 
   it('uses the saved text size and stamps replies with their time instead of a model label', () => {
@@ -1369,7 +1371,8 @@ describe('ThreadView', () => {
     expect(markdown.props).toMatchObject({
       flavor: 'github',
       markdown: '**Ready** — [open docs](https://example.com/docs)',
-      selectable: true,
+      // A long press in the list belongs to the message actions; text is selected on the lifted clone.
+      selectable: false,
       streamingAnimation: false,
     });
     expect(markdown.props.markdownStyle.paragraph.fontSize).toBe(FontSize.body);
@@ -1629,6 +1632,9 @@ describe('ThreadView', () => {
     expect(clone.queryByText('Recorded model')).toBeNull();
     expect(clone.getByTestId(`thread-bubble-${message.id}`)).toBeTruthy();
     expect(clone.getByTestId(`thread-favorite-${message.id}`)).toBeTruthy();
+    // Telegram style: the lifted message is where text can be selected.
+    expect(clone.getByTestId(`thread-markdown-${message.id}`).props.selectable).toBe(true);
+    expect(view.getByTestId(`thread-markdown-${message.id}`).props.selectable).toBe(false);
     // The row owns no vertical padding: the timeline rhythm lives outside the
     // measured row, so the clone and the list row share one geometry.
     const cloneTree = clone.toJSON();
@@ -1817,8 +1823,11 @@ describe('ThreadView', () => {
       .toEqual({ disabled: true });
   });
 
-  it('renders earlier-history loading through the canonical skeleton', () => {
+  it('renders earlier-history loading through the canonical skeleton once the reader scrolls', () => {
     const view = render(<ThreadView {...createProps({ loadingMoreHistory: true })} />);
+    // A short conversation pages by itself on open; no placeholder pushes its rows around.
+    expect(view.queryByTestId('thread-screen-history-more')).toBeNull();
+    act(() => { view.getByTestId('thread-screen-timeline').props.onScrollBeginDrag?.(); });
     expect(view.getByTestId('thread-screen-history-more')).toBeTruthy();
   });
 
@@ -2148,8 +2157,9 @@ describe.each(['light', 'dark'] as const)('immersive wallpaper in %s', (scheme) 
     expect(flattenStyle(view.getByTestId('thread-screen-timeline').props.contentContainerStyle))
       .toMatchObject({ paddingTop: headerHeight + Space.lg });
     // Navigation controls are white floating circles, like every other page header.
-    expect(flattenStyle(view.getByTestId('thread-screen-back').props.style).backgroundColor).toBe(theme().colors.surfaceFloating);
-    expect(flattenStyle(view.getByTestId('thread-screen-sessions').props.style).backgroundColor).toBe(theme().colors.surfaceFloating);
+    // Plain header icons like the roster's (owner decision 2026-09-27); glass stays for wallpapers.
+    expect(flattenStyle(view.getByTestId('thread-screen-back').props.style).backgroundColor).toBe('transparent');
+    expect(flattenStyle(view.getByTestId('thread-screen-sessions').props.style).backgroundColor).toBe('transparent');
     expect(flattenStyle(view.getByTestId('thread-screen-header-pill').props.style).backgroundColor).toBe(theme().colors.surface);
     expect(flattenStyle(view.getByTestId('thread-screen-composer-region').props.style).backgroundColor).toBe(theme().colors.canvas);
     expect(view.queryByTestId('thread-screen-composer-scrim')).toBeNull();

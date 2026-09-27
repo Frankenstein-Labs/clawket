@@ -3,6 +3,7 @@ import { Alert, Linking, Modal } from 'react-native';
 import { Camera } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import i18n from '../i18n';
+import { showNoticeAlert } from '../utils/notice-alert';
 import { useAppContext } from './AppContext';
 import { useGatewayOverlay } from './GatewayOverlayContext';
 import { ConfirmationModal } from '../components/ui/ConfirmationModal';
@@ -90,7 +91,7 @@ export function GatewayScannerProvider({ children }: { children: React.ReactNode
     }
     lastPairingAlertRef.current = { message, atMs: now };
     hideOverlay();
-    Alert.alert(i18n.t('Connection failed', { ns: 'common' }), message);
+    showNoticeAlert(i18n.t('Connection failed', { ns: 'common' }), message);
   }, [hideOverlay]);
 
   const connectFromScan = useCallback(async (payload: GatewayScanPayload): Promise<boolean> => {
@@ -248,7 +249,7 @@ export function GatewayScannerProvider({ children }: { children: React.ReactNode
     try {
       const barcodes = await Camera.scanFromURLAsync(pickerResult.assets[0].uri, ['qr']);
       if (barcodes.length === 0) {
-        Alert.alert(
+        showNoticeAlert(
           i18n.t('No QR Code Found', { ns: 'config' }),
           i18n.t('The selected image does not contain a recognizable QR code.', { ns: 'config' }),
         );
@@ -257,7 +258,7 @@ export function GatewayScannerProvider({ children }: { children: React.ReactNode
 
       const parsed = parseQRPayload(barcodes[0].data);
       if (!parsed) {
-        Alert.alert(
+        showNoticeAlert(
           i18n.t('Invalid QR Code', { ns: 'config' }),
           i18n.t('This QR code does not contain valid connection info.', { ns: 'config' }),
         );
@@ -266,7 +267,7 @@ export function GatewayScannerProvider({ children }: { children: React.ReactNode
 
       await resolvedOptions.onScanned(parsed);
     } catch {
-      Alert.alert(
+      showNoticeAlert(
         i18n.t('Scan Failed', { ns: 'config' }),
         i18n.t('Could not decode the QR code from this image.', { ns: 'config' }),
       );

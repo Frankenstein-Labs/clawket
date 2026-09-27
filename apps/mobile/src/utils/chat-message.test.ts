@@ -22,6 +22,7 @@ import {
   stripGatewayPrefixes,
   sessionLabel,
   relativeTime,
+  formatPreviewLine,
 } from './chat-message';
 
 describe('stableMessageId', () => {
@@ -661,4 +662,22 @@ it('renders the exact installed-skill instruction as a concise reference without
   expect(sanitizeUserMessageText(text)).toBe('Summarize\n\n📎 report.pdf');
   const malformed = 'Example\n\n<clawket-document-context>\nnot json\n</clawket-document-context>';
   expect(sanitizeUserMessageText(malformed)).toContain('not json');
+});
+
+describe('formatPreviewLine', () => {
+  it('drops Markdown markers from raw message text and keeps one plain line', () => {
+    expect(formatPreviewLine('- Apple\n- Banana\n- Mango\n\n1. Red\n2. Blue\n3. Green'))
+      .toBe('Apple Banana Mango Red Blue Green');
+    expect(formatPreviewLine('## Plan\n> quoted **bold** `code` ~~old~~ [docs](https://example.com) ![chart](a.png)'))
+      .toBe('Plan quoted bold code old docs chart');
+    expect(formatPreviewLine('- [x] shipped\n* [ ] pending')).toBe('shipped pending');
+    // Hermes flattens the reply before sending its preview.
+    expect(formatPreviewLine('- Apple - Banana - Mango 1. Red 2. Blue 3. Green')).toBe('Apple Banana Mango Red Blue Green');
+  });
+
+  it('keeps identifiers, inline dashes and numbers that are not list markers', () => {
+    expect(formatPreviewLine('HERMES_QA_0927 is ready - version 2.1 at 10:30')).toBe('HERMES_QA_0927 is ready - version 2.1 at 10:30');
+    expect(formatPreviewLine('   ')).toBeUndefined();
+    expect(formatPreviewLine(undefined)).toBeUndefined();
+  });
 });

@@ -301,7 +301,7 @@ describe('OnboardingRoute', () => {
     }));
     render(<OnboardingRoute {...createProps()} />);
     expect(mockScreenProps?.environment).toBe('preview');
-    expect(mockScreenProps?.pairingCommand).toBe('npx @p697/clawket pair --preview');
+    expect(mockScreenProps?.pairingCommand).toBe('npx @p697/clawket@latest pair --preview');
 
     await act(async () => {
       await mockScreenProps?.onSubmitPairing({

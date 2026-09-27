@@ -95,9 +95,19 @@ describe('Agent Settings log model', () => {
   });
 
   it('formats ISO, embedded, absent, and malformed timestamps', () => {
-    expect(formatLogTime('2024-01-15T10:20:30Z')).toBe('10:20:30');
+    const local = (iso: string) => {
+      const date = new Date(iso);
+      return [date.getHours(), date.getMinutes(), date.getSeconds()].map((part) => String(part).padStart(2, '0')).join(':');
+    };
+    expect(formatLogTime('2024-01-15T10:20:30Z')).toBe(local('2024-01-15T10:20:30Z'));
     expect(formatLogTime('prefix 12:34:56 suffix')).toBe('12:34:56');
     expect(formatLogTime()).toBe('--:--:--');
     expect(formatLogTime('not a date')).toBe('--:--:--');
+  });
+
+  it('shows one tail in one zone when entries carry different offsets', () => {
+    // The same instant written with the Gateway's +08:00 and as UTC must read the same.
+    expect(formatLogTime('2026-09-27T16:34:55.079+08:00')).toBe(formatLogTime('2026-09-27T08:34:55.079Z'));
+    expect(formatLogTime(String(Date.parse('2026-09-27T08:34:55Z')))).toBe(formatLogTime('2026-09-27T08:34:55Z'));
   });
 });

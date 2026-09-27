@@ -100,15 +100,22 @@ export function filterLogEntries(
   });
 }
 
+/**
+ * Local wall-clock time of a log entry. OpenClaw mixes offsets in one tail (`+08:00` entries beside
+ * UTC `Z` ones), so copying the digits out of the string showed 16:34 and 17:34 for the same minute
+ * (device review 2026-09-27). A full timestamp converts to the phone's zone; only a bare clock time,
+ * which carries no zone, is shown as written.
+ */
 export function formatLogTime(value?: string | null): string {
   if (!value) return '--:--:--';
-  const direct = value.match(/\d{2}:\d{2}:\d{2}/)?.[0];
-  if (direct) return direct;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '--:--:--';
-  return [date.getHours(), date.getMinutes(), date.getSeconds()]
-    .map((part) => String(part).padStart(2, '0'))
-    .join(':');
+  const hasDate = /\d{4}-\d{2}-\d{2}/.test(value) || /^\d{10,}$/.test(value.trim());
+  const date = hasDate ? new Date(/^\d+$/.test(value.trim()) ? Number(value.trim()) : value) : null;
+  if (date && !Number.isNaN(date.getTime())) {
+    return [date.getHours(), date.getMinutes(), date.getSeconds()]
+      .map((part) => String(part).padStart(2, '0'))
+      .join(':');
+  }
+  return value.match(/\d{2}:\d{2}:\d{2}/)?.[0] ?? '--:--:--';
 }
 
 function normalizeLevel(value: unknown): LogLevel | null {

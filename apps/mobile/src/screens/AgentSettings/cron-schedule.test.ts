@@ -1,4 +1,4 @@
-import { scheduleDraft, scheduleFromDraft, upcomingRuns, validateSchedule } from './cron-schedule';
+import { formatCronDate, scheduleDraft, scheduleFromDraft, upcomingRuns, validateSchedule } from './cron-schedule';
 import { buildCronJobPatch, cronDraftFromJob, validateCronDraft } from './cron-model';
 import type { CronJob, CronSchedule } from '@clawket/agent-protocol';
 
@@ -69,3 +69,17 @@ describe('structured Cron schedules', () => {
     expect({ ...job, ...patch }).toMatchObject({ deleteAfterRun: true, wakeMode: 'next-heartbeat', sessionTarget: 'isolated' });
   });
 });
+
+describe('formatCronDate', () => {
+  const at = Date.UTC(2026, 8, 27, 1, 41, 7);
+  it('uses the job-list style everywhere and adds the year only for another year', () => {
+    const thisYear = formatCronDate(at, 'en-US', 'UTC', Date.UTC(2026, 11, 1));
+    expect(thisYear).toContain('Sep 27');
+    expect(thisYear).not.toContain('2026');
+    expect(thisYear).not.toMatch(/:07/);
+    expect(formatCronDate(at, 'en-US', 'UTC', Date.UTC(2027, 0, 2))).toContain('2026');
+    expect(formatCronDate(undefined, 'en-US')).toBe('—');
+    expect(formatCronDate(Number.NaN, 'en-US')).toBe('—');
+  });
+});
+

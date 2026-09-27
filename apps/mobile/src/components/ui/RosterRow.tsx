@@ -117,8 +117,8 @@ export function RosterRow({
       [selected ? theme.colors.surface : theme.colors.canvas, theme.colors.surface],
     ),
   }), [selected ? theme.colors.surface : theme.colors.canvas, theme.colors.surface]);
-  // One corner, one marker: lock, then a live row's attention, then the live
-  // dot; cached rows otherwise stay quiet.
+  // A locked row mutes its avatar and ends in one trailing lock; the avatar
+  // corner keeps attention, then the live dot; cached rows otherwise stay quiet.
   const resolvedAvatarStatus: AgentAvatarStatus = locked
     ? 'locked'
     : attention && !cached
@@ -179,6 +179,7 @@ export function RosterRow({
           badgeIcon={sessionIcon}
           platform={platform}
           platformBadge={platformBadge}
+          lockBadge={false}
           variant="roster"
         />
       </View>

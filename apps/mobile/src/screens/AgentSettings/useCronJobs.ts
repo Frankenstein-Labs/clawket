@@ -5,6 +5,22 @@ import { loadAgentCronJobs } from './cron-model';
 // In-memory, adapter- and Agent-scoped cache for native stack navigation/offline reads.
 const cache = new WeakMap<AgentAdapter, Map<string, ReadonlyArray<CronJob>>>();
 
+type AgentScope = Pick<AgentDescriptor, 'connectionId' | 'agentId'>;
+// A job the editor just created, consumed once by that Agent's list when it regains focus: the
+// list opens its job definitions with the new row first and marked (owner decision 2026-09-27).
+const createdJobs = new Map<string, string>();
+
+export function markCronJobCreated(agent: AgentScope, jobId: string): void {
+  createdJobs.set(`${agent.connectionId}:${agent.agentId}`, jobId);
+}
+
+export function takeCreatedCronJob(agent: AgentScope): string | null {
+  const key = `${agent.connectionId}:${agent.agentId}`;
+  const jobId = createdJobs.get(key) ?? null;
+  createdJobs.delete(key);
+  return jobId;
+}
+
 export function useCronJobs(adapter: AgentAdapter, agent: AgentDescriptor, online: boolean, refreshKey = 0) {
   const key = `${agent.connectionId}:${agent.agentId}`;
   const scope = useMemo(() => ({}), [adapter, key]);
@@ -12,6 +28,7 @@ export function useCronJobs(adapter: AgentAdapter, agent: AgentDescriptor, onlin
   currentScope.current = scope;
   const mounted = useRef(true);
   const generation = useRef(0);
+  const leadingJobId = useRef<string | null>(null);
   const [jobs, setJobs] = useState<ReadonlyArray<CronJob> | null>(() => cache.get(adapter)?.get(key) ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -37,7 +54,8 @@ export function useCronJobs(adapter: AgentAdapter, agent: AgentDescriptor, onlin
       // Preserve the visible order across refreshes and status mutations.
       const previous = cache.get(adapter)?.get(key) ?? [];
       const positions = new Map(previous.map((job, index) => [job.id, index]));
-      publish([...result].sort((a, b) => (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER)));
+      const rank = (job: CronJob) => job.id === leadingJobId.current ? -1 : positions.get(job.id) ?? Number.MAX_SAFE_INTEGER;
+      publish([...result].sort((a, b) => rank(a) - rank(b)));
       setError(null);
     } catch (reason) {
       if (isCurrent() && generation.current === request) setError(reason);
@@ -65,5 +83,13 @@ export function useCronJobs(adapter: AgentAdapter, agent: AgentDescriptor, onlin
     publish((cache.get(adapter)?.get(key) ?? []).filter(job => job.id !== id));
     setLoading(false);
   }, [adapter, invalidate, isCurrent, key, publish]);
-  return { jobs, loading, error, reload, accept, remove, invalidate, isCurrent };
+  /** Moves a just-created job to the top and keeps it there across later refreshes. */
+  const lead = useCallback((id: string) => {
+    if (!isCurrent()) return;
+    leadingJobId.current = id;
+    const existing = cache.get(adapter)?.get(key) ?? [];
+    const job = existing.find(value => value.id === id);
+    if (job) publish([job, ...existing.filter(value => value.id !== id)]);
+  }, [adapter, isCurrent, key, publish]);
+  return { jobs, loading, error, reload, accept, remove, invalidate, isCurrent, lead };
 }

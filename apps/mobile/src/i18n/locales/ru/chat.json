@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "Папка проекта этого разговора недоступна на компьютере.",
   "Check again": "Проверить снова",
   "Not sent · tap to review": "Не отправлено · нажмите для просмотра",
-  "This model does not accept images. Choose another model or remove the photo.": "Эта модель не поддерживает изображения. Выберите другую модель или удалите фото."
+  "This model does not accept images. Choose another model or remove the photo.": "Эта модель не поддерживает изображения. Выберите другую модель или удалите фото.",
+  "Copy as Markdown": "Копировать как Markdown",
+  "Copy image URL": "Копировать URL изображения",
+  "Copy {{total}} image URLs": "Копировать URL изображений: {{total}}"
 }

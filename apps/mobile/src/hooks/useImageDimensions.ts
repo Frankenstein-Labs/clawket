@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Image } from 'react-native';
 import type { ImageMeta } from '../types/chat';
+import { readDataUriImageSize } from '../utils/data-uri-image-size';
 
 /**
  * Module-level cache for resolved image dimensions.
@@ -57,6 +58,14 @@ export function useImageDimensions(
         const cached = dimensionCache.get(uri);
         if (cached) {
           results.push({ uri, ...cached });
+          continue;
+        }
+
+        // Inline history images: Android's getSize cannot fetch `data:` URIs, so read the header.
+        const inline = uri.startsWith('data:') ? readDataUriImageSize(uri) : null;
+        if (inline) {
+          dimensionCache.set(uri, inline);
+          results.push({ uri, ...inline });
           continue;
         }
 

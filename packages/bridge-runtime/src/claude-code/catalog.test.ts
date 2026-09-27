@@ -28,7 +28,8 @@ describe('Claude project and native session discovery', () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toMatchObject({ source: 'native', canContinue: false, allowedActions: { delete: false, reset: false } });
     await expect(catalog.history('unlisted-client-id')).rejects.toThrow('Unknown');
-    expect(sdk.getSessionMessages).not.toHaveBeenCalled();
+    expect(sdk.getSessionMessages).toHaveBeenCalledTimes(1);
+    expect(sdk.getSessionMessages).toHaveBeenCalledWith(row(project, 1).sessionId, { dir: expect.stringContaining('/project') });
   });
 
   it('discovers more than one page, hides native IDs and keeps a missing project visible', async () => {
@@ -67,5 +68,17 @@ describe('Claude project and native session discovery', () => {
     sdk.listSessions.mockRejectedValueOnce(new Error('fixture failure'));
     await expect(catalog.discover()).rejects.toThrow();
     await expect(catalog.history(first.sessions[0].key)).resolves.toMatchObject({ messages: [] });
+  });
+  it('shows the latest visible native reply and reuses the cached transcript while unchanged', async () => {
+    const { project, sdk } = await fixture();
+    sdk.listSessions.mockResolvedValue([row(project, 1)]);
+    sdk.getSessionMessages.mockResolvedValue([
+      { uuid: 'first', type: 'user', timestamp: '2026-09-27T10:00:00.000Z', message: { content: 'First prompt' } },
+      { uuid: 'last', type: 'assistant', timestamp: '2026-09-27T10:01:00.000Z', message: { content: [{ type: 'text', text: '**Latest reply**' }] } },
+    ]);
+    const catalog = new ClaudeCatalog({ project, device: false }, sdk, async () => []);
+    expect((await catalog.discover()).sessions[0]).toMatchObject({ preview: 'Latest reply', lastActivityAt: Date.parse('2026-09-27T10:01:00.000Z') });
+    await catalog.discover();
+    expect(sdk.getSessionMessages).toHaveBeenCalledTimes(1);
   });
 });

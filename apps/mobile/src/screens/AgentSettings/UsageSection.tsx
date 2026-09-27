@@ -29,6 +29,7 @@ import {
   formatUsageCost,
   formatUsageDayLabel,
   formatUsageTokens,
+  formatUsageAxisValue,
   formatUsageValue,
   getUsageDateRange,
   hasUsageData,
@@ -229,6 +230,7 @@ export function UsageSection({
                 setSelectedDate(point.date);
               }}
               formatValue={(value) => formatUsageValue(value, measure)}
+              formatAxisValue={(value) => formatUsageAxisValue(value, measure)}
               formatDayLabel={formatUsageDayLabel}
               todayLabel={t('Today', { ns: 'settings' })}
               accessibilityLabel={measureLabel}

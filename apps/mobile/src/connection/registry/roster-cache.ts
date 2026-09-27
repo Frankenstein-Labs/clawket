@@ -307,7 +307,8 @@ function buildAgentSummary(
   const previewText = previewSession?.preview;
   const sourceTitle = previewSession && previewSession.key !== agent.mainSessionKey
     ? previewSession.channel || previewSession.title : undefined;
-  const preview = previewText && sourceTitle ? `${sourceTitle}: ${previewText}` : previewText
+  const messageFirst = agent.entryMode === 'sessions' || agent.agentId === 'pi';
+  const preview = previewText && sourceTitle && !messageFirst ? `${sourceTitle}: ${previewText}` : previewText
     ?? (agent.entryMode === 'sessions' && recentSession ? readString(recentSession.title) : undefined);
   return Object.freeze({
     agent,

@@ -157,6 +157,25 @@ describe('durable voice lifecycle', () => {
     await act(async () => { hook.result.current.startVoiceInput(); hook.result.current.cancelVoiceInput(); permission.resolve({ granted: false }); await tick(); });
     expect(Audio.requestRecordingPermissionsAsync).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled();
   });
+  it('explains a permanently denied microphone instead of asking the system again', async () => {
+    (Audio.getRecordingPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: false });
+    const hook = setup();
+    await act(async () => { hook.result.current.startVoiceInput(); await tick(); });
+    expect(Audio.requestRecordingPermissionsAsync).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled();
+    expect((Alert.alert as jest.Mock).mock.calls.at(-1)[1]).not.toContain('speech_permission');
+    expect(Alert.alert).toHaveBeenCalledWith('Voice input failed', expect.any(String), [
+      expect.objectContaining({ text: 'Cancel' }), expect.objectContaining({ text: 'Settings' }),
+    ]);
+    expect(hook.result.current.voiceInputState).toBe('idle');
+  });
+  it('still asks the system while it can ask again', async () => {
+    (Audio.getRecordingPermissionsAsync as jest.Mock).mockResolvedValue({ granted: false, canAskAgain: true });
+    (Audio.requestRecordingPermissionsAsync as jest.Mock).mockResolvedValue({ granted: true });
+    const hook = setup();
+    await act(async () => { hook.result.current.startVoiceInput(); await tick(); });
+    expect(Audio.requestRecordingPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalled();
+  });
   it('survives storage write failure with earlier audio retained', async () => {
     const hook = setup(); await begin(hook); act(() => speak());
     const record = [...recordings.values()][0]!; record.append = () => { throw Error('speech_storage'); };

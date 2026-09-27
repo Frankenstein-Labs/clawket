@@ -20,6 +20,7 @@ import {
   buildConnectionDetailRows,
   parseConnectionServerHost,
   resolveConnectionPresence,
+  summarizeConnectionAgents,
   translateConnectionPresence,
 } from './connection-details';
 
@@ -103,7 +104,17 @@ export function ConnectionScreen({
     try { await action(); } catch { setFailed(true); }
     finally { inFlight.current = false; setBusy(false); }
   };
-  const status = translateConnectionPresence(t, resolveConnectionPresence({ active, paused, state }));
+  const presence = resolveConnectionPresence({ active, paused, state });
+  const agentSummary = summarizeConnectionAgents(connection.label, agentNames);
+  const status = translateConnectionPresence(t, presence);
+  // Healthy connections keep Reconnect quiet (an ink button read as "something is wrong", device
+  // review 2026-09-27); it is the page's ink action only when the user has something to fix, and an
+  // inactive connection offers Connect, which switches to it.
+  const lifecycleAction = paused
+    ? { label: t('Resume connection'), icon: Play, variant: 'primary' as const }
+    : presence === 'not_connected'
+      ? { label: t('Connect'), icon: RotateCw, variant: 'primary' as const }
+      : { label: t('Reconnect', { ns: 'common' }), icon: RotateCw, variant: presence === 'offline' ? 'primary' as const : 'outline' as const };
   const locale = i18n?.resolvedLanguage;
   const detailRows = useMemo(() => buildConnectionDetailRows({
     connection,
@@ -120,12 +131,12 @@ export function ConnectionScreen({
           <View style={[styles.symbol, { backgroundColor: colors.surfaceFloating }]}><PlatformMark platform={connection.backendKind} /></View>
           <Text testID="connection-label" style={[styles.name, { color: colors.ink }]}>{connection.label}</Text>
           <Text accessibilityLiveRegion="polite" style={[styles.detail, { color: colors.inkSecondary }]}>{status}</Text>
-          {agentNames.length > 0 ? <Text style={[styles.detail, { color: colors.inkSecondary }]}>{agentNames.join(' · ')}</Text> : null}
+          {agentSummary ? <Text style={[styles.detail, { color: colors.inkSecondary }]}>{agentSummary}</Text> : null}
         </View>
         {failed ? <Banner tone="bad" message={t('Please try again later.', { ns: 'common' })} /> : null}
         <View style={styles.actions}>
-          <Button testID="connection-reconnect" label={paused ? t('Resume connection') : t('Reconnect', { ns: 'common' })}
-            icon={paused ? Play : RotateCw} loading={busy} disabled={busy}
+          <Button testID="connection-reconnect" label={lifecycleAction.label} icon={lifecycleAction.icon}
+            variant={lifecycleAction.variant} loading={busy} disabled={busy}
             onPress={() => { void run(paused ? onResume : onReconnect); }} />
           {!paused ? <Button testID="connection-pause" label={t('Pause connection')} icon={Pause} variant="ghost" disabled={busy}
             onPress={() => setConfirmation('pause')} /> : null}
@@ -140,7 +151,9 @@ export function ConnectionScreen({
               {index > 0 ? <SettingsDivider inset="content" /> : null}
               <SettingsRow testID={`connection-detail-${row.id}`}
                 title={translateAccountSettingsKey(t, row.titleKey, row.titleNamespace)}
-                value={row.value ?? (row.valueKey ? translateAccountSettingsKey(t, row.valueKey) : undefined)} />
+                value={row.value ?? (row.valueKey ? translateAccountSettingsKey(t, row.valueKey) : undefined)}
+                subtitle={row.detail} subtitleLines={row.detail ? row.detail.split('\n').length : undefined}
+                tailWidth={row.wide ? 'wide' : 'default'} />
             </Fragment>
           ))}
         </SettingsGroup>

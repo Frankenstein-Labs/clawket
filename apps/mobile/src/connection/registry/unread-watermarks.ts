@@ -210,6 +210,32 @@ export class UnreadWatermarks {
     });
   }
 
+  /**
+   * The first live snapshot of a connection this device has never tracked sets its baseline: history
+   * that existed before pairing was read elsewhere, so it is not unread here. Without it a new phone
+   * lit the unread dot on every Agent with days-old conversations (device review 2026-09-27). Once a
+   * record exists — including one emptied by `clearConnection` — this only reads it.
+   */
+  async seedIfUnset(
+    connectionId: string,
+    sessions: ReadonlyArray<WatermarkSession>,
+  ): Promise<SessionWatermarks> {
+    const normalizedConnectionId = connectionId.trim();
+    if (!normalizedConnectionId) throw new Error('Connection id is required.');
+    return this.enqueue(async () => {
+      const entry = await this.storage.getDashboardCache<PersistedWatermarks>(watermarkScope(normalizedConnectionId));
+      if (entry) return Object.freeze(normalizeWatermarks(entry.data, normalizedConnectionId) ?? {});
+      const values: Record<string, number> = {};
+      for (const session of sessions) {
+        if (session.connectionId !== normalizedConnectionId || !session.key.trim()) continue;
+        const timestamp = sessionActivityAt(session);
+        if (timestamp !== null) values[session.key] = Math.max(values[session.key] ?? 0, timestamp);
+      }
+      await this.write(normalizedConnectionId, values);
+      return Object.freeze({ ...values });
+    });
+  }
+
   async clearConnection(connectionId: string): Promise<void> {
     const normalizedConnectionId = connectionId.trim();
     if (!normalizedConnectionId) return;

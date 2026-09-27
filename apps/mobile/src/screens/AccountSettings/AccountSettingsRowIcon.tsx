@@ -1,8 +1,8 @@
 import React from 'react';
 import {
   BookOpen, Bug, Cable, CircleHelp, Code2, FileText, Globe2,
-  History, Image, Info, Languages, LayoutGrid, LockOpen, Megaphone, MessageCircle,
-  Palette, Plus, RotateCcw, Settings2, Share2, ShieldCheck, Star, Trash2,
+  History, Image, Info, Languages, LayoutGrid, LockOpen, Megaphone, MessageCircle, MessageSquareText,
+  Palette, Plus, RotateCcw, Settings2, Share2, ShieldCheck, Star, Trash2, UsersRound,
   type LucideIcon,
 } from 'lucide-react-native';
 import { SettingsIcon } from '../../components/ui/SettingsIcon';
@@ -11,9 +11,10 @@ import type { AccountSettingsSectionRow } from './section-model';
 const icons: Readonly<Record<string, LucideIcon>> = {
   theme: Palette, accent: Palette, 'chat-appearance': MessageCircle, 'app-icon': Image,
   'app-language': Languages,
-  'help-center': CircleHelp, feedback: MessageCircle, 'release-notes': History,
+  // Feedback and the Discord community sat side by side with one speech bubble; each gets its own glyph.
+  'help-center': CircleHelp, feedback: MessageSquareText, 'release-notes': History,
   'openclaw-docs': BookOpen, 'hermes-docs': BookOpen, 'openclaw-releases': Globe2,
-  discord: MessageCircle, share: Share2, rate: Star,
+  discord: UsersRound, share: Share2, rate: Star,
   version: Info, repository: Code2, privacy: ShieldCheck, terms: FileText,
   'advanced-settings': Settings2, 'set-debug-mode': Bug, 'preview-environment': Globe2,
   'design-system': LayoutGrid, 'preview-update-announcement': Megaphone,

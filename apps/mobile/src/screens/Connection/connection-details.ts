@@ -38,6 +38,18 @@ export function translateConnectionPresence(
   }
 }
 
+/**
+ * The Agent names a connection row or page lists under its label, or nothing when they only repeat
+ * the label: a product backend's one Agent is named after its connection (`Hermes` under `Hermes`,
+ * `Codex` under `Codex · Computer`; device review 2026-09-27).
+ */
+export function summarizeConnectionAgents(label: string, agentNames: ReadonlyArray<string>): string | undefined {
+  const names = agentNames.map((name) => name.trim()).filter(Boolean);
+  if (names.length === 0) return undefined;
+  if (names.length === 1 && label.trim().toLocaleLowerCase().includes(names[0]!.toLocaleLowerCase())) return undefined;
+  return names.join(' · ');
+}
+
 export type ConnectionDetailRow = Readonly<{
   id: 'backend' | 'transport' | 'environment' | 'server' | 'bridge-version' | 'bridge-capabilities' | 'last-ready';
   titleKey: string;
@@ -46,6 +58,10 @@ export type ConnectionDetailRow = Readonly<{
   valueKey?: string;
   /** Shown verbatim (hosts, versions, formatted dates). */
   value?: string;
+  /** One fact per line under the title, for lists too long for the trailing value (capabilities). */
+  detail?: string;
+  /** The value is one unbreakable token (a host) that needs the wide tail to stay on one line. */
+  wide?: boolean;
 }>;
 
 export type BuildConnectionDetailRowsInput = Readonly<{
@@ -53,6 +69,8 @@ export type BuildConnectionDetailRowsInput = Readonly<{
   serverHost?: string;
   details?: ConnectionRuntimeDetails;
   locale?: string;
+  /** Clock for the last-ready date; tests pin it. */
+  now?: number;
 }>;
 
 /**
@@ -70,25 +88,28 @@ export function buildConnectionDetailRows(
     { id: 'environment', titleKey: 'Environment', titleNamespace: 'settings', valueKey: environment },
   ];
   const host = input.serverHost?.trim();
-  if (host) rows.push({ id: 'server', titleKey: 'Server address', titleNamespace: 'settings', value: host });
+  if (host) rows.push({ id: 'server', titleKey: 'Server address', titleNamespace: 'settings', value: host, wide: true });
   const bridgeVersion = input.details?.bridgeVersion?.trim();
   if (bridgeVersion) {
     rows.push({ id: 'bridge-version', titleKey: 'Bridge version', titleNamespace: 'settings', value: bridgeVersion });
   }
   const capabilities = input.details?.bridgeCapabilities ?? [];
   if (capabilities.length > 0) {
+    // Protocol identifiers do not wrap well in a trailing value (Hermes advertises ten; device review
+    // 2026-09-27 showed them split mid-token), so the count trails and the list reads under the title.
     rows.push({
       id: 'bridge-capabilities',
       titleKey: 'Bridge capabilities',
       titleNamespace: 'settings',
-      value: capabilities.join(', '),
+      value: String(capabilities.length),
+      detail: capabilities.join('\n'),
     });
   }
   rows.push({
     id: 'last-ready',
     titleKey: 'Last ready',
     titleNamespace: 'settings',
-    value: formatConnectionLastReady(input.details?.lastReadyAt, input.locale),
+    value: formatConnectionLastReady(input.details?.lastReadyAt, input.locale, input.now),
   });
   return rows;
 }
@@ -96,11 +117,14 @@ export function buildConnectionDetailRows(
 export function formatConnectionLastReady(
   timestampMs: number | null | undefined,
   locale?: string,
+  now: number = Date.now(),
 ): string {
   if (!timestampMs || !Number.isFinite(timestampMs) || timestampMs < 0) return '—';
   try {
+    // The year only when it is not this one, so the value fits the trailing slot on one line.
+    const sameYear = new Date(timestampMs).getFullYear() === new Date(now).getFullYear();
     return new Intl.DateTimeFormat(locale || undefined, {
-      year: 'numeric',
+      ...(sameYear ? {} : { year: 'numeric' as const }),
       month: 'short',
       day: 'numeric',
       hour: 'numeric',

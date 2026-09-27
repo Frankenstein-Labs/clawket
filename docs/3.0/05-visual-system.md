@@ -64,7 +64,7 @@ iOS 用系统 SF Pro，Android 用 Roboto，中文走系统 CJK；不引入第�
 
 | 组件 | 规格 |
 |---|---|
-| `FloatingButton` | 44 圆，`surfaceFloating` + `shadowFloating`，Lucide 图标 22 / 1.75 描边、`ink`；按下缩放 0.96；可带徽标（accent 点或 bad 数字） |
+| `FloatingButton` | 44 点击区，Lucide 图标 22 / 1.75 描边、`ink`；页头、弹层头与确认弹窗一律 `plain` 纯图标（2026-09-27 负责人决定）；只有悬浮在内容上的按钮（回到底部）用 `surfaceFloating` + `shadowFloating`，壁纸上用 `glass`；按下缩放 0.96；可带徽标（accent 点或 bad 数字） |
 | `HeaderPill` | 高 40 全圆，`surfaceFloating` + 阴影，内容：头像 28 + 名字 `name` + 副标题 `caption inkSecondary`；副标题变化用 100 ms 淡入淡出（沿用现有头部动画） |
 | `AgentAvatar` | 圆角方块，底色 `agentPalette[hash]`，内容 emoji（若有）或 1–2 字首字母（白，600）；状态环：`working` = 不加头像或会话图块角标，沿用花名册预览与对话活动展示（2026-09-22 用户修订）；`attention` = 右下 12 圆点 `warn` / `bad` 带 2pt canvas 边；`done` = 右下 `good` 圆点 3 s 后淡出；`live` = 右下 `good` 圆点常驻，标出实时连接的 Agent（2026-09-26 负责人决定，规则见 04 §2 Agent 行），变为实时时 200 ms 淡入；圆点统一用 `StatusDot`（12pt 含 2pt 所在表面色描边）；头像是正圆，圆点与锁徽标的圆心压在圆周 45° 处，描边切出完整缺口（2026-09-27 负责人反馈：按方框角外扩时描边只擦到圆边一点，像 bug）；同一角一次只放一个标记，锁 > 需要你 > 实时；右上角只给首页会话行放对话徽标（`badgeIcon`：20pt `surface` 灰底圆 + 2pt canvas 描边，同样压在圆周 45°，2026-09-27）；`offline` = 整体去饱和 60%；`locked` = 去饱和 + 右下锁；官方图标（2026-09-27 负责人决定）：`platform` 为产品型后端（Hermes、Codex、Claude Code、Pi、本地模型）时，脸就是官方图标——白底圆 + 发丝描边，裸图标占直径 54%，App 图标类素材满圆裁切——不画 emoji、首字母或图片；`platformBadge` 让有自己头像的 Agent 在右下带后端角标：24pt 画布色环 + 20pt `surface` 灰底圆（白底在画布上会消失）+ 官方图标，圆心压圆周 45°，只在花名册混合两种以上后端时使用；锁 > 需要你 > 角标，实时连接的角标环变 `good`，不再另加绿点 |
 | `Bubble` | 助手：`surface` 底、`ink` 字、圆角 20、左对齐；用户：`accentSoft` 底、`ink` 字、右对齐；Markdown 渲染沿用现有 `chatMarkdown` |
@@ -146,7 +146,7 @@ Grok Bot 清爽的根源不是留白，而是**每个界面只有两层字**：�
 
 | Clawket 3.0 组件 | 移植自 youmind-mobile | 要点 |
 |---|---|---|
-| `FloatingButton`（44 圆形按钮） | `src/components/ui/ActionButton.tsx`（`variant="icon"`，44×44，22pt 图标） | 页面头部的返回 / 关闭 / 会话按钮一律 `appearance="surface"`（`surfaceFloating`：亮色纯白 + 浮起阴影，暗色浮起面 + 细线；2026-09-19 负责人定稿，不再用无底色 `plain` 或与分组底色太接近的灰 `quiet`；弹层内的圆钮仍用 `quiet`）；壁纸上用 `glass`；按下态保留；阴影换成 `shadowFloating`；返回箭头用 `DirectionalChevronLeft`，不用系统返回 |
+| `FloatingButton`（44 圆形按钮） | `src/components/ui/ActionButton.tsx`（`variant="icon"`，44×44，22pt 图标） | 页面头部的返回 / 关闭 / 会话按钮、弹层头部的关闭与右侧按钮、页头右侧动作（聊天、新建、分享）一律 `appearance="plain"` 纯图标，与首页左上用户、右上搜索同一大小和风格（2026-09-27 负责人决定，取代 2026-09-19 的白底浮起圆钮和弹层灰底圆钮）；壁纸上用 `glass`；按下态保留；阴影换成 `shadowFloating`；返回箭头用 `DirectionalChevronLeft`，不用系统返回 |
 | 页面头部 | `ScreenHeader` 的对称 44 槽位契约 + 我们的浮动布局 | 所有页面头部由内容拥有且只用 `ScreenHeader`（2026-09-19 统一）：安全区 + 8 / 44 高控件行、左右距屏幕边 16 / 下方 8，内容再空 16；左 44 槽是纯白（暗色为浮起面）的 44 圆形返回或关闭，中标题（或替换标题的连接状态胶囊）以屏幕居中，右 44 槽放唯一的尾部动作；`native-stack` 的 `headerShown: false`，永远不用系统 header。线程页的浮动头部带、搜索页的输入行与引导页 `FlowHeader` 共用同一边距、行高和圆钮 |
 | `Segmented`（分组 / 列表等） | `src/components/ui/SegmentedTabs.tsx` 原样移植 | **全圆胶囊**：轨道 `Radius.full`、高 44、下沉底色不描边；选中段抬升底色 + `Shadow.xs`（深色改发丝线）；`FontSize.base`，选中 600；`size="sm"` 为 32 高的紧凑档；`variant="text"` 为文字 Tab。全 App 所有 Tab 统一用它 |
 | `Sheet`（会话面板等底部弹层） | `AdaptiveBottomSheetModal` + `SheetHeader` / `SheetDragHandle` / `useSheetBackgroundStyle` + `SheetBackdrop` + `ThemedFullWindowOverlay` | 顶部 chrome 只走这一套：把手、圆角、关闭键 + 居中标题（`titleContent` 可换成会话面板的 Agent 胶囊）；header 行下自带 `Space.md` 留白（内容距 44pt 控件 16pt），body 不再补 `paddingTop`；右上角图标动作统一用 `SheetHeaderButton`（与关闭键同一 quiet 圆形）；可能超出屏幕的 body 用固定 `snapPoints` + `BottomSheetScrollView` / `BottomSheetFlatList`（详情 68% / 92%、表单 82% / 92%、文档编辑单档 93%），原生竖向 `ScrollView` 在弹层里滚不动、`check:ui-style` 直接拒绝；iPad 自动居中面板 |

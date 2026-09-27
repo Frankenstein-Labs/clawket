@@ -15,6 +15,7 @@ import {
   resolveThreadErrorDetail,
   resolveThreadHeaderName,
   resolveThreadHeaderSubtitle,
+  displayProjectPath,
   THREAD_ERROR_COPY,
 } from './model';
 
@@ -182,6 +183,15 @@ describe('Thread model', () => {
       state: { kind: 'offline' },
       isRunning: true,
     })).toBe('Offline · reconnecting');
+  });
+
+  it('shows project paths home-relative on macOS, Linux and Windows', () => {
+    expect(displayProjectPath('/Users/lucy/Documents/Clawket/Chats')).toBe('~/Documents/Clawket/Chats');
+    expect(displayProjectPath('/home/dev/app ')).toBe('~/app');
+    expect(displayProjectPath('/Users/lucy')).toBe('~');
+    expect(displayProjectPath('C:\\Users\\Lucy\\repo')).toBe('~\\repo');
+    expect(displayProjectPath('/opt/work/app')).toBe('/opt/work/app');
+    expect(displayProjectPath('/Users2/lucy/app')).toBe('/Users2/lucy/app');
   });
 
   it('adds a session title only for non-main sessions', () => {

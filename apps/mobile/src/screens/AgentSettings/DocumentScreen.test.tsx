@@ -46,7 +46,14 @@ jest.mock('../../components/ui/ScreenHeader', () => ({ ScreenHeader: ({ title, s
   );
 } }));
 jest.mock('../../components/ui/ConnectionStatusPill', () => ({ ConnectionStatusPill: (props: unknown) => require('react').createElement('StatusPill', props) }));
-jest.mock('../../components/ui/CompositionSafeTextInput', () => ({ CompositionSafeTextInput: (props: unknown) => require('react').createElement('TextInput', props) }));
+const mockSetSelection = jest.fn();
+jest.mock('../../components/ui/CompositionSafeTextInput', () => {
+  const R = require('react');
+  return { CompositionSafeTextInput: R.forwardRef((props: unknown, ref: unknown) => {
+    R.useImperativeHandle(ref, () => ({ setSelection: mockSetSelection }));
+    return R.createElement('TextInput', props);
+  }) };
+});
 jest.mock('../../components/ui/Skeleton', () => ({ Skeleton: (props: unknown) => require('react').createElement('View', props) }));
 
 const navigation = () => ({ goBack: jest.fn(), dispatch: jest.fn() } as unknown as React.ComponentProps<typeof DocumentScreen>['navigation']);
@@ -86,6 +93,33 @@ describe('DocumentScreen', () => {
     fireEvent.changeText(view.getByTestId('document-input'), 'Shorter version');
     fireEvent.press(view.getByTestId('document-save'));
     await waitFor(() => expect(data.save).toHaveBeenCalledWith('Shorter version'));
+  });
+  it('opens the Android source editor at the top of the file, not at the insertion caret', async () => {
+    const platform = require('react-native').Platform as { OS: string };
+    const ios = renderPage(sourceWith());
+    await waitFor(() => expect(ios.view.getByTestId('document-edit')).toBeTruthy());
+    mockSetSelection.mockClear();
+    fireEvent.press(ios.view.getByTestId('document-edit'));
+    fireEvent(ios.view.getByTestId('document-input'), 'contentSizeChange');
+    expect(mockSetSelection).not.toHaveBeenCalled();
+    ios.view.unmount();
+
+    platform.OS = 'android';
+    try {
+      const android = renderPage(sourceWith());
+      await waitFor(() => expect(android.view.getByTestId('document-edit')).toBeTruthy());
+      fireEvent.press(android.view.getByTestId('document-edit'));
+      // The native text lands after mount; its layout is what moves the caret back to the top.
+      fireEvent(android.view.getByTestId('document-input'), 'contentSizeChange');
+      expect(mockSetSelection).toHaveBeenCalledWith(0, 0);
+      mockSetSelection.mockClear();
+      fireEvent(android.view.getByTestId('document-input'), 'focus');
+      fireEvent.changeText(android.view.getByTestId('document-input'), '# Title\n\nBody and more');
+      fireEvent(android.view.getByTestId('document-input'), 'contentSizeChange');
+      expect(mockSetSelection).not.toHaveBeenCalled();
+    } finally {
+      platform.OS = 'ios';
+    }
   });
   it('opens linked source files and displays script text without a writable editor', async () => {
     const open = jest.fn();

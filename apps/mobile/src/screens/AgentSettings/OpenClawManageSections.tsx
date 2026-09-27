@@ -40,6 +40,8 @@ import {
   Space,
 } from '../../theme/tokens';
 import {
+  diagnosticCheckDetail,
+  diagnosticCheckTitle,
   filterConfigEntries,
   permissionStatusKey,
   type ConfigValuePreview,
@@ -506,12 +508,12 @@ function DiagnosticChecks({
             {offset ? <SettingsDivider inset="content" /> : null}
             <SettingsRow
               testID={`openclaw-diagnostic-check-${index}`}
-              title={check.name}
+              title={diagnosticCheckTitle(check)}
               value={diagnosticStatusLabel(check.status, t)}
               leading={diagnosticIcon(check.status)}
               showChevron={Boolean(check.message)}
               onPress={check.message
-                ? () => onShowDetail({ title: check.name, body: check.message ?? '' })
+                ? () => onShowDetail({ title: diagnosticStatusLabel(check.status, t), body: diagnosticCheckDetail(check) })
                 : undefined}
             />
           </Fragment>

@@ -244,6 +244,23 @@ describe('SearchView', () => {
     expect(onSelectResult).toHaveBeenCalledWith(expect.objectContaining({ kind: 'agent' }));
   });
 
+  it('titles scheduled and untitled sessions like the Session Panel and localizes result times', () => {
+    const now = Date.now();
+    const view = render(<SearchView {...props({
+      query: 'qa',
+      sections: [{ kind: 'sessions', results: [
+        result('session', { id: 'cron', sessionKey: 'agent:main:cron:job-1', title: 'Automation: Clawket QA 5min', updatedAt: now - 10 * 60_000 }),
+        result('session', { id: 'untitled', sessionKey: 'agent:main:dm:abc', title: 'agent:main:dm:abc', updatedAt: now - 3 * 86_400_000 }),
+      ] }],
+    })} />);
+
+    expect(view.getByTestId('search-result-session-cron').props.accessibilityLabel).toBe('Scheduled task: Clawket QA 5min');
+    expect(view.getByTestId('search-result-session-untitled').props.accessibilityLabel).toBe('New session');
+    // The shared translator, not the English compact fallback (`10m`, `3d`).
+    expect(view.getByText('10m ago')).toBeTruthy();
+    expect(view.getByText('3d ago')).toBeTruthy();
+  });
+
   it('auto-focuses the quiet input and adapts the canvas to light and dark themes', () => {
     const first = render(<SearchView {...props()} />);
     expect(first.getByTestId('search-input').props.autoFocus).toBe(true);

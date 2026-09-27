@@ -1,5 +1,5 @@
 import React from 'react';
-import { Switch, type SwitchProps } from 'react-native';
+import { Platform, Switch, type SwitchProps } from 'react-native';
 import { useAppTheme } from '../../theme';
 
 type ThemedSwitchProps = SwitchProps & { tone?: 'accent' | 'neutral' };
@@ -10,7 +10,9 @@ export function ThemedSwitch({ tone = 'neutral', ...props }: ThemedSwitchProps):
   const { value, thumbColor, trackColor, ...rest } = props;
   const neutral = tone === 'neutral';
   const resolvedTrackColor = trackColor ?? {
-    false: theme.colors.line,
+    // Android draws a white thumb beside (not inside) the track, so the hairline
+    // track left the off state almost invisible on light cards (device review 2026-09-27).
+    false: Platform.OS === 'android' && theme.scheme === 'light' ? theme.colors.inkTertiary : theme.colors.line,
     true: neutral
       ? (theme.scheme === 'dark' ? theme.colors.inkSecondary : theme.colors.ink)
       : theme.colors.accentSoft,

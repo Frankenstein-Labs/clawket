@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "Không thể truy cập thư mục dự án của cuộc trò chuyện này trên máy tính.",
   "Check again": "Kiểm tra lại",
   "Not sent · tap to review": "Chưa gửi · chạm để xem lại",
-  "This model does not accept images. Choose another model or remove the photo.": "Mô hình này không hỗ trợ hình ảnh. Hãy chọn mô hình khác hoặc xóa ảnh."
+  "This model does not accept images. Choose another model or remove the photo.": "Mô hình này không hỗ trợ hình ảnh. Hãy chọn mô hình khác hoặc xóa ảnh.",
+  "Copy as Markdown": "Sao chép dạng Markdown",
+  "Copy image URL": "Sao chép URL hình ảnh",
+  "Copy {{total}} image URLs": "Sao chép {{total}} URL hình ảnh"
 }

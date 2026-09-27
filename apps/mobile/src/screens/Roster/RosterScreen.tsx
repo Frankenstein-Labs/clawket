@@ -59,6 +59,7 @@ import {
   Space,
 } from '../../theme/tokens';
 import {
+  cronSessionName,
   relativeTime,
   type RelativeTimeTranslator,
 } from '../../utils/chat-message';
@@ -215,7 +216,7 @@ function RosterAddChoices({
           testID="roster-action-add_connection"
           icon={MonitorSmartphone}
           title={t('Add Connection', { ns: 'config' })}
-          description={t('Connect OpenClaw, Hermes and more', { ns: 'config' })}
+          description={t('OpenClaw, Hermes, Codex and more', { ns: 'config' })}
           locked={addConnectionLocked}
           onPress={() => onPress(action)}
         />
@@ -459,13 +460,19 @@ export function RosterView({
       item.lastActivityAt,
       translateRelativeTime,
     );
+    // A conversation shown on home reads as in the Session Panel: scheduled runs lose the Gateway's
+    // English `Automation:` prefix and an untitled conversation never shows its internal key.
+    const cronName = item.kind === 'pinned_session' && item.sessionKind === 'cron' ? cronSessionName(item.name) : '';
+    const name = item.kind !== 'pinned_session' ? item.name
+      : item.sessionKind === 'cron' ? (cronName ? t('Scheduled task: {{name}}', { name: cronName }) : t('Scheduled task'))
+        : item.name === item.sessionKey ? t('New session') : item.name;
     const row = (
       <RosterRow
         testID={`roster-row-${item.key}`}
         selected={selectedThread?.connectionId === item.connectionId
           && selectedThread.agentId === item.agentId && selectedThread.sessionKey === item.sessionKey}
         agentId={item.agentId}
-        name={item.name}
+        name={name}
         avatarName={item.avatarName}
         emoji={item.emoji}
         avatarUrl={item.avatarUrl}
@@ -492,7 +499,7 @@ export function RosterView({
         cached={item.cached}
         locked={item.locked}
         live={live}
-        accessibilityLabel={[item.name, backendMarks ? rosterBackendAccessibilityName(item) : null, live ? t('Connected', { ns: 'settings' }) : null, timeLabel, item.cached && item.syncedAt ? `${t('Last synced')} ${relativeTime(item.syncedAt, translateRelativeTime)}` : null, item.attention === 'input' ? t('Agent needs your input', { ns: 'chat' }) : item.attention === 'approval' ? t('Needs attention') : item.working ? t('Working') : null, item.unreadCount > 0 ? t('Unread messages') : null].filter(Boolean).join(', ')}
+        accessibilityLabel={[name, backendMarks ? rosterBackendAccessibilityName(item) : null, live ? t('Connected', { ns: 'settings' }) : null, timeLabel, item.cached && item.syncedAt ? `${t('Last synced')} ${relativeTime(item.syncedAt, translateRelativeTime)}` : null, item.attention === 'input' ? t('Agent needs your input', { ns: 'chat' }) : item.attention === 'approval' ? t('Needs attention') : item.working ? t('Working') : null, item.unreadCount > 0 ? t('Unread messages') : null].filter(Boolean).join(', ')}
         onPress={() => { dismissRoster?.(); open(item); }}
         {...(onLongPressRow ? { onLongPress: () => onLongPressRow(item) } : {})}
       />

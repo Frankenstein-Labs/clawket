@@ -138,7 +138,7 @@ export function SkillDiscoverScreen({
           <FloatingButton
             testID="skill-discover-close"
             icon={X}
-            appearance="quiet"
+            appearance="plain"
             accessibilityLabel={t('Close', { ns: 'common' })}
             onPress={close}
           />

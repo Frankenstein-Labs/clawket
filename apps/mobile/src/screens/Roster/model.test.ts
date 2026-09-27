@@ -127,7 +127,8 @@ describe('Roster model', () => {
       'agent:two:builder',
     ]);
     expect(rows[1]).toMatchObject({
-      name: '#general',
+      // The conversation's own title; the platform is the avatar badge, not the name.
+      name: 'General',
       kind: 'pinned_session',
       avatarName: 'Main',
       emoji: 'C',
@@ -143,6 +144,30 @@ describe('Roster model', () => {
       && row.attention === null
       && row.working === false
     ))).toBe(true);
+  });
+
+  it('names a conversation on home by its title and falls back to the channel only when untitled', () => {
+    const titled = group('one');
+    const untitled: RosterConnectionGroup = {
+      ...group('two'),
+      agents: group('two').agents.map((summary, index) => index === 0 ? {
+        ...summary,
+        sessions: summary.sessions.map((entry) => entry.kind === 'channel'
+          ? { ...entry, title: entry.key, channel: 'slack' }
+          : entry),
+      } : summary),
+    };
+    const rows = buildRosterRows([titled, untitled], {
+      pinnedSessionKeys: {
+        'one:main': ['agent:main:channel:general'],
+        'two:main': ['agent:main:channel:general'],
+      },
+    });
+    expect(rows.find((row) => row.key === 'session:one:agent:main:channel:general')?.name).toBe('General');
+    expect(rows.find((row) => row.key === 'session:two:agent:main:channel:general')).toMatchObject({
+      name: '#slack',
+      sessionChannel: 'slack',
+    });
   });
 
   it('pins an Agent above newer Agents on other connections', () => {

@@ -39,6 +39,14 @@ it('identifies the landing conversation as main so free clients can chat immedia
   expect(created.kind).toBe('direct');
   expect((await request('sessions.list')).filter((session: any) => session.kind === 'main')).toHaveLength(1);
 });
+it('updates a conversation preview from the accepted user turn to the completed assistant reply', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  await request('chat.send', { sessionKey: key, text: '## Question', idempotencyKey: 'preview' });
+  expect((await request('sessions.list'))[0].preview).toBe('Question');
+  children[0].emit('event', { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '**Answer**' }] } });
+  children[0].emit('event', { type: 'agent_settled' });
+  expect((await request('sessions.list'))[0].preview).toBe('Answer');
+});
 it('persists acceptance, serializes concurrent sends, and never replays duplicate inputs after restart', async () => {
   setup(); const key = (await request('sessions.list'))[0].key;
   const p = { sessionKey: key, text: 'hello', idempotencyKey: '__proto__' };

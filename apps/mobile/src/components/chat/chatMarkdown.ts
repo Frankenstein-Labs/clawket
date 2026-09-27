@@ -42,7 +42,9 @@ export function createChatMarkdownStyle(
       marginBottom: 6,
       // Native Android reserves only "99." by default; longer list markers
       // otherwise draw outside the text view and lose their leading digit.
-      markerMinWidth: Math.ceil(fontSize * 2.5),
+      // "100." needs about 2em in Roboto, SamsungOne and SF; bullets ignore this
+      // width (patch-enriched-markdown-list-indent) and indent text ~28dp.
+      markerMinWidth: Math.ceil(fontSize * 2.1),
     },
     blockquote: {
       fontSize,

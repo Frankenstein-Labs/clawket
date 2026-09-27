@@ -20,7 +20,7 @@ export type PaywallTitleKey =
   | 'Every conversation, in full'
   | 'See where every token goes';
 export type PaywallSubtitleKey =
-  | 'OpenClaw and Hermes together, ready whenever you are.'
+  | 'Use the Agents on all your computers from one app.'
   | 'Agents beyond main are a Pro feature.'
   | '{{feature}} is a Pro feature.'
   | 'Message details across sessions are a Pro feature.'
@@ -122,7 +122,7 @@ export function resolvePaywallContent(trigger: PaywallTrigger | null): PaywallCo
       return {
         hero: 'connections',
         titleKey: 'Every Agent in your pocket',
-        subtitleKey: 'OpenClaw and Hermes together, ready whenever you are.',
+        subtitleKey: 'Use the Agents on all your computers from one app.',
         subtitleFeatureKey: null,
         actionKey: 'adding another connection',
         benefits: contextualBenefits({ kind: 'connections', labelKey: 'Unlimited connections' }),

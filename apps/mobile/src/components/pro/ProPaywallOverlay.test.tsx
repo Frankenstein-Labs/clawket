@@ -17,6 +17,8 @@ jest.mock('react-native', () => {
     Alert: { alert: jest.fn() },
     Linking: { openURL: jest.fn(() => Promise.resolve()) },
     Modal: ({ children, ...props }: { children?: React.ReactNode }) => ReactRuntime.createElement('Modal', props, children),
+    Platform: { OS: 'ios' },
+    StatusBar: { pushStackEntry: jest.fn((props: unknown) => ({ props })), popStackEntry: jest.fn() },
     StyleSheet: { flatten: (style: unknown) => style ?? {} },
   };
 });
@@ -121,6 +123,38 @@ describe('ProPaywallOverlay', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('gives the Android paywall window light status bar icons before presenting it', () => {
+    // RN copies the activity's icon appearance into a Modal window only when it is created.
+    const { Platform, StatusBar } = require('react-native') as {
+      Platform: { OS: string };
+      StatusBar: { pushStackEntry: jest.Mock; popStackEntry: jest.Mock };
+    };
+    const frames: FrameRequestCallback[] = [];
+    const originalRequest = global.requestAnimationFrame;
+    const originalCancel = global.cancelAnimationFrame;
+    global.requestAnimationFrame = ((callback: FrameRequestCallback) => frames.push(callback)) as typeof requestAnimationFrame;
+    global.cancelAnimationFrame = jest.fn();
+    Platform.OS = 'android';
+    StatusBar.pushStackEntry.mockClear();
+    StatusBar.popStackEntry.mockClear();
+    try {
+      const screen = render(<ProPaywallOverlay visible onClose={jest.fn()} />);
+      expect(StatusBar.pushStackEntry).toHaveBeenCalledWith({ barStyle: 'light-content', animated: false });
+      expect(screen.queryByTestId('pro-paywall-modal')).toBeNull();
+
+      act(() => { frames.splice(0).forEach((callback) => callback(0)); });
+      expect(screen.getByTestId('pro-paywall-modal')).toBeTruthy();
+
+      screen.rerender(<ProPaywallOverlay visible={false} onClose={jest.fn()} />);
+      expect(StatusBar.popStackEntry).toHaveBeenCalledWith(StatusBar.pushStackEntry.mock.results[0]?.value);
+      expect(screen.queryByTestId('pro-paywall-modal')).toBeNull();
+    } finally {
+      Platform.OS = 'ios';
+      global.requestAnimationFrame = originalRequest;
+      global.cancelAnimationFrame = originalCancel;
+    }
   });
 
   it('uses a native full-screen modal presentation', () => {

@@ -1,4 +1,5 @@
 import { InteractionAttention } from '../interaction-attention.js';
+import { lastVisiblePreview, sessionPreview } from '../session-preview.js';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, lstatSync, realpathSync, existsSync, unlinkSync } from 'node:fs';
 import { join, basename } from 'node:path';
@@ -13,7 +14,7 @@ import { piBranch, piMessages, piText, piUsage } from './history.js';
 export interface PiRequest { type: 'req'; id: string; method: string; params?: Record<string, unknown> }
 export interface PiOptions { project: string; directory: string; command?: string; agentDirectory?: string; nativeSessionDirectory?: string; args?: string[]; env?: NodeJS.ProcessEnv }
 type RecordEntry = { id: string; file: string; title: string; created: number; activity?: number; model?: string; provider?: string; preview?: string; keys: Record<string, { hash: string; runId: string }> };
-type Running = { rpc: PiRpc; run?: { id: string; text: string; started: number; inputText?: string; agentStarted?: boolean; stop?: 'cancelled' | 'error'; final?: any }; questions: Map<string, AgentQuestion> };
+type Running = { rpc: PiRpc; run?: { id: string; text: string; started: number; inputText?: string; agentStarted?: boolean; stop?: 'cancelled' | 'error'; final?: any; visibleReply?: string }; questions: Map<string, AgentQuestion> };
 
 /** Owns private Pi sessions. Remote callers can select opaque IDs, never filesystem paths or arbitrary RPC commands. */
 export class PiService extends EventEmitter {
@@ -148,9 +149,9 @@ export class PiService extends EventEmitter {
             const path = join(dir, file), entries = this.readEntries(path), messages = piMessages(piBranch(entries));
             const key = `native-${createHash('sha256').update(file).digest('hex').slice(0, 24)}`;
             this.native.set(key, path);
-            const last = messages.filter(m => ['user', 'assistant'].includes(m.role)).at(-1);
+            const last = lastVisiblePreview(messages);
             const title = entries.filter(e => e.type === 'session_info').at(-1)?.name || messages.find(m => m.role === 'user')?.text.slice(0, 100) || basename(this.project);
-            sessions.push({ connectionId: '', agentId: 'pi', key, kind: 'direct', title, updatedAt: last?.timestampMs ?? null, lastActivityAt: last?.timestampMs ?? null, preview: last?.text.slice(0, 160), hasActiveRun: false, source: 'native', allowedActions: { rename: false, reset: false, delete: false, pin: true } });
+            sessions.push({ connectionId: '', agentId: 'pi', key, kind: 'direct', title, updatedAt: last?.lastActivityAt ?? null, lastActivityAt: last?.lastActivityAt ?? null, preview: last?.preview, hasActiveRun: false, source: 'native', allowedActions: { rename: false, reset: false, delete: false, pin: true } });
           } catch { /* An active/incompatible native transcript cannot take the Bridge offline. */ }
         }
         return sessions;
@@ -268,7 +269,7 @@ export class PiService extends EventEmitter {
       if (Object.keys(record.keys).length >= 10000) throw new Error('Start a new session to continue');
       if (this.stopped) throw new Error('Pi Bridge stopped');
       const runId = randomUUID();
-      Object.defineProperty(record.keys, input.idempotencyKey, { value: { hash, runId }, enumerable: true, configurable: true, writable: true }); record.activity = Date.now(); record.preview = input.text.slice(0, 160); if (!record.title && input.text.trim()) record.title = input.text.trim().slice(0, 80); record.model = state.model?.id; record.provider = state.model?.provider; this.save();
+      Object.defineProperty(record.keys, input.idempotencyKey, { value: { hash, runId }, enumerable: true, configurable: true, writable: true }); record.activity = Date.now(); record.preview = sessionPreview(input.text, images.length > 0); if (!record.title && input.text.trim()) record.title = input.text.trim().slice(0, 80); record.model = state.model?.id; record.provider = state.model?.provider; this.save();
       live.run = { id: runId, text: '', inputText: input.text, started: Date.now() };
       this.update({ type: 'run_started', sessionKey: record.id, runId });
       // The durable acceptance is our acknowledgement. Pi extension commands may await user input before their RPC response.
@@ -301,6 +302,7 @@ export class PiService extends EventEmitter {
     }
     if (event.type === 'message_end' && event.message?.role === 'assistant') {
       run.final = event.message;
+      run.visibleReply = sessionPreview(piText(event.message.content)) ?? run.visibleReply;
       if (event.message.stopReason === 'error') { run.stop = 'error'; this.update({ type: 'error', sessionKey, runId, code: 'server', message: 'Pi model request failed. Check the model credentials and provider on your computer.' }); }
       if (event.message.stopReason === 'aborted') run.stop = 'cancelled';
     }
@@ -313,7 +315,10 @@ export class PiService extends EventEmitter {
     const run = live.run; if (!run) return;
     live.run = undefined;
     for (const id of live.questions.keys()) this.update({ type: 'question_resolved', sessionKey: record.id, questionId: id });
-    live.questions.clear(); record.activity = Date.now(); this.save();
+    live.questions.clear();
+    const reply = run.visibleReply;
+    if (reply) { record.activity = Date.now(); record.preview = reply; }
+    this.save();
     this.update({ type: 'run_finished', sessionKey: record.id, runId: run.id, stopReason, message: run.final ? { role: 'assistant', content: piText(run.final.content).slice(0, 128_000), model: run.final.model, provider: run.final.provider } : undefined, usage: piUsage(run.final?.usage) });
     this.update({ type: 'session_info_update', session: this.descriptor(record) });
   }

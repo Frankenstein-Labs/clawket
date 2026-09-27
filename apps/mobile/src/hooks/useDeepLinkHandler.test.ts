@@ -36,6 +36,12 @@ jest.mock('../connection', () => ({
   getConnectionRuntime: () => mockRuntime,
 }));
 
+// The app catalog needs React; notices only need the key, which is the English copy.
+jest.mock('../i18n', () => ({
+  __esModule: true,
+  default: { t: (key: string) => key },
+}));
+
 jest.mock('../contexts/GatewayScannerContext', () => ({
   useGatewayScanner: () => ({ connectPairingLink: connectPairingLinkMock }),
 }));
@@ -409,8 +415,9 @@ describe('useDeepLinkHandler', () => {
       await flushPromises();
       expect(mockActivate).not.toHaveBeenCalled();
       expect(Alert.alert).toHaveBeenLastCalledWith(
-        'Connection Failed',
+        'Connection failed',
         'Could not save this connection. Try again.',
+        [{ text: 'OK' }],
       );
     });
 
@@ -422,8 +429,9 @@ describe('useDeepLinkHandler', () => {
       expect(mockUpsertConnection).toHaveBeenCalledTimes(1);
       expect(mockActivate).toHaveBeenCalledWith('connection-from-link');
       expect(Alert.alert).toHaveBeenLastCalledWith(
-        'Connection Failed',
+        'Connection failed',
         'Could not save this connection. Try again.',
+        [{ text: 'OK' }],
       );
     });
 
@@ -450,8 +458,9 @@ describe('useDeepLinkHandler', () => {
         from: 'deeplink',
       });
       expect(Alert.alert).toHaveBeenLastCalledWith(
-        'Send Failed',
+        'Send failed',
         'Connection is not ready. Please try again in the thread.',
+        [{ text: 'OK' }],
       );
       expect(mockRecordSuccessfulSend).not.toHaveBeenCalled();
     });
@@ -463,8 +472,9 @@ describe('useDeepLinkHandler', () => {
       expect(mockNavigate).not.toHaveBeenCalled();
       expect(mockPrompt).not.toHaveBeenCalled();
       expect(Alert.alert).toHaveBeenLastCalledWith(
-        'Connection Required',
+        'Connection required',
         'Connect to an Agent before sending this message.',
+        [{ text: 'OK' }],
       );
     });
 
@@ -475,8 +485,9 @@ describe('useDeepLinkHandler', () => {
       expect(mockNavigate).not.toHaveBeenCalled();
       expect(mockPrompt).not.toHaveBeenCalled();
       expect(Alert.alert).toHaveBeenLastCalledWith(
-        'Connection Required',
+        'Connection required',
         'Connect to an Agent before opening this session.',
+        [{ text: 'OK' }],
       );
     });
   });

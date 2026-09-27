@@ -109,8 +109,10 @@ import {
   getChatMarkdownFlavor,
   openChatMarkdownLink,
 } from '../../components/chat/chatMarkdown';
+import { useMarkdownSelectionMenu } from '../../components/chat/useMarkdownSelectionMenu';
 import {
   buildThreadTimelineItems,
+  displayProjectPath,
   groupThreadTools,
   resolveThreadHeaderName,
   resolveThreadHeaderSubtitle,
@@ -510,6 +512,11 @@ export function ThreadView({
   const [composerExpanded, setComposerExpanded] = useState(false);
   const compactComposerHeight = useRef(0);
   useEffect(() => { setComposerExpanded(false); }, [sessionKey]);
+  // The older-page placeholder is for a reader scrolling up. A short conversation reaches its top on
+  // open and pages once by itself; a placeholder there pushed the whole timeline down and back up
+  // (device review 2026-09-27), so it waits for the reader's first drag in this session.
+  const [historyBrowsed, setHistoryBrowsed] = useState(false);
+  useEffect(() => { setHistoryBrowsed(false); }, [sessionKey]);
   useEffect(() => {
     if (!composerExpanded) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -593,6 +600,7 @@ export function ThreadView({
   // the actual activity.
   const avatarStatus = locked ? 'locked' : offline ? 'offline' : 'idle';
   const headerWorking = presentedRunning && !awaitingInput && state.kind !== 'reconnecting';
+  const projectSubtitle = projectPath?.trim() ? displayProjectPath(projectPath) : undefined;
   const canOpenSessions = capabilities.sessions && Boolean(onOpenSessionPanel);
   // The screen decides availability from the full capability set (attachments,
   // skills, commands, thinking, cron, tools); the view only needs the handler.
@@ -856,6 +864,7 @@ export function ThreadView({
     returningToBottomRef.current = false;
     readerScrollingRef.current = true;
     followNewMessagesRef.current = false;
+    setHistoryBrowsed(true);
   }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide]);
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
     const changed = scrollMetricsRef.current.height !== height;
@@ -920,6 +929,7 @@ export function ThreadView({
         favorited={favoriteMessageIds?.has(message.id) ?? false}
         status={messageStatuses.get(message.id) ?? null}
         showIdentity={false}
+        selectable
       />
     </View>
   ), [copy, favoriteMessageIds, messageStatuses]);
@@ -1024,13 +1034,13 @@ export function ThreadView({
     </View>
   ) : null), [compactionNotice, testID]);
   const previewUpgrade = sessionPreview?.hasHiddenHistory ? sessionPreview.onUpgrade : undefined;
-  const timelineHeader = useMemo(() => (previewUpgrade ? <SessionPreviewNotice onUpgrade={previewUpgrade} /> : loadingMoreHistory ? (
+  const timelineHeader = useMemo(() => (previewUpgrade ? <SessionPreviewNotice onUpgrade={previewUpgrade} /> : loadingMoreHistory && historyBrowsed ? (
     <Skeleton
       testID={`${testID}-history-more`}
       accessibilityLabel={copy.loadingHistory}
       style={styles.historyMore}
     />
-  ) : null), [copy.loadingHistory, loadingMoreHistory, previewUpgrade, styles.historyMore, testID]);
+  ) : null), [copy.loadingHistory, historyBrowsed, loadingMoreHistory, previewUpgrade, styles.historyMore, testID]);
 
   return (
     <ChatPresentationProvider value={presentation}>
@@ -1064,7 +1074,7 @@ export function ThreadView({
         <FloatingButton
           testID={`${testID}-back`}
           icon={workspace.toggleRoster ? PanelLeft : ChevronLeft}
-          appearance={wallpaperActive ? 'glass' : 'surface'}
+          appearance={wallpaperActive ? 'glass' : 'plain'}
           accessibilityLabel={workspace.toggleRoster ? t('Agents', { ns: 'common' }) : copy.back}
           onPress={workspace.toggleRoster ?? onBack}
         />
@@ -1075,8 +1085,8 @@ export function ThreadView({
             name={headerName}
             avatarName={agentName}
             subtitle={headerWorking ? '' : headerSubtitle}
-            subtitleEllipsizeMode={projectPath?.trim() === headerSubtitle ? 'middle' : undefined}
-            accessibilityHint={!headerWorking && projectPath?.trim() === headerSubtitle ? headerSubtitle : undefined}
+            subtitleEllipsizeMode={projectSubtitle === headerSubtitle ? 'middle' : undefined}
+            accessibilityHint={!headerWorking && projectSubtitle === headerSubtitle ? projectPath?.trim() : undefined}
             working={headerWorking}
             icon={isCronSession ? CalendarClock : undefined}
             emoji={agentEmoji}
@@ -1091,7 +1101,7 @@ export function ThreadView({
         {canOpenSessions ? <FloatingButton
           testID={`${testID}-sessions`}
           icon={MessagesSquare}
-          appearance={wallpaperActive ? 'glass' : 'surface'}
+          appearance={wallpaperActive ? 'glass' : 'plain'}
           accessibilityLabel={copy.openSessions}
           onPress={() => onOpenSessionPanel?.()}
           disabled={locked}
@@ -1704,6 +1714,7 @@ function ThreadMessageRowContent({
   favorited,
   status = null,
   showIdentity = true,
+  selectable = false,
   onOpenAttachments,
   onLongPress,
 }: Readonly<{
@@ -1712,6 +1723,12 @@ function ThreadMessageRowContent({
   favorited: boolean;
   status?: UserMessageStatus | null;
   showIdentity?: boolean;
+  /**
+   * Text selection lives on the lifted clone only, Telegram style: in the list
+   * a long press belongs to the message actions, and a selectable text view
+   * there opened the system menu on top of them on iOS (owner decision 2026-09-27).
+   */
+  selectable?: boolean;
   onOpenAttachments?: (message: UiMessage, index?: number) => void;
   /** Row long-press forwarded to the album so photos open the same actions. */
   onLongPress?: () => void;
@@ -1732,9 +1749,9 @@ function ThreadMessageRowContent({
       ) : null}
       {hasBubble ? (
         message.role === 'assistant' ? (
-          <AssistantBubble message={message} showIdentity={showIdentity} />
+          <AssistantBubble message={message} showIdentity={showIdentity} selectable={selectable} />
         ) : (
-          <UserBubble message={message} status={status} copy={copy} />
+          <UserBubble message={message} status={status} copy={copy} selectable={selectable} />
         )
       ) : null}
       {fileAttachments.map((file, index) => (
@@ -1782,7 +1799,8 @@ function UserBubble({
   message,
   status,
   copy,
-}: Readonly<{ message: UiMessage; status: UserMessageStatus | null; copy: ThreadCopy }>): React.JSX.Element {
+  selectable = false,
+}: Readonly<{ message: UiMessage; status: UserMessageStatus | null; copy: ThreadCopy; selectable?: boolean }>): React.JSX.Element {
   const typography = useBubbleTypography();
   const time = useMessageClock(message);
   const incoming = isIncomingParticipant(message);
@@ -1791,7 +1809,7 @@ function UserBubble({
   return (
     <Bubble testID={`thread-bubble-${message.id}`} role={incoming ? "assistant" : "user"}>
       <View style={stylesStatic.userBody}>
-        <Text selectable style={typography}>
+        <Text selectable={selectable} style={typography}>
           {message.text}
           {hasMeta ? <Text style={stylesStatic.metaSpacer}>{messageMetaSpacer(time, Boolean(status))}</Text> : null}
         </Text>
@@ -2059,14 +2077,17 @@ function ThreadExecApprovalTimelineItem({
 function AssistantBubble({
   message,
   showIdentity = true,
+  selectable = false,
 }: {
   message: UiMessage;
   showIdentity?: boolean;
+  selectable?: boolean;
 }): React.JSX.Element {
   const theme = useConversationTheme();
   const { fontSize, identity } = useChatPresentation();
   const liveActivity = useContext(ThreadLiveActivityContext);
   const time = useMessageClock(message);
+  const selectionMenu = useMarkdownSelectionMenu();
   const markdownStyle = useMemo(
     () => createChatMarkdownStyle(theme.colors, fontSize),
     [theme.colors, fontSize],
@@ -2108,7 +2129,8 @@ function AssistantBubble({
             markdown={displayText}
             markdownStyle={markdownStyle}
             onLinkPress={openChatMarkdownLink}
-            selectable
+            selectable={selectable}
+            selectionMenuConfig={selectionMenu}
             streamingAnimation={streamingAnimation}
           />
           {time ? (

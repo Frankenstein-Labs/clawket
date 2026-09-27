@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "مجلد مشروع هذه المحادثة غير متاح على الكمبيوتر.",
   "Check again": "التحقق مجددًا",
   "Not sent · tap to review": "لم تُرسل · اضغط للمراجعة",
-  "This model does not accept images. Choose another model or remove the photo.": "هذا النموذج لا يدعم الصور. اختر نموذجًا آخر أو أزل الصورة."
+  "This model does not accept images. Choose another model or remove the photo.": "هذا النموذج لا يدعم الصور. اختر نموذجًا آخر أو أزل الصورة.",
+  "Copy as Markdown": "نسخ بتنسيق Markdown",
+  "Copy image URL": "نسخ رابط الصورة",
+  "Copy {{total}} image URLs": "نسخ {{total}} من روابط الصور"
 }

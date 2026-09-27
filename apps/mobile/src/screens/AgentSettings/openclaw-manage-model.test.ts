@@ -8,6 +8,8 @@ import {
 import {
   withManagementDeadline,
   describeConfigValue,
+  diagnosticCheckDetail,
+  diagnosticCheckTitle,
   filterConfigEntries,
   isOpenClawManageTabSupported,
   managementErrorDetail,
@@ -179,3 +181,24 @@ describe('management read deadline', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 });
+
+describe('diagnostic check titles', () => {
+  it('reads the finding message instead of the internal check id', () => {
+    const plaintext = {
+      name: 'core/doctor/security',
+      message: 'WARNING: openclaw.json contains plaintext secret-bearing config fields.\n\nPaths: gateway.auth.token',
+    };
+    expect(diagnosticCheckTitle(plaintext)).toBe('openclaw.json contains plaintext secret-bearing config fields.');
+    expect(diagnosticCheckDetail(plaintext)).toBe(`${plaintext.message}\n\ncore/doctor/security`);
+    expect(diagnosticCheckTitle({
+      name: 'core/doctor/codex-session-routes',
+      message: "Custom Codex app-server command bypasses OpenClaw's managed exact-version binary. Remove it.",
+    })).toBe("Custom Codex app-server command bypasses OpenClaw's managed exact-version binary.");
+    expect(diagnosticCheckTitle({ name: 'Gateway', message: 'Ready' })).toBe('Ready');
+    expect(diagnosticCheckTitle({ name: 'Gateway' })).toBe('Gateway');
+    expect(diagnosticCheckTitle({ name: 'Gateway', message: '   ' })).toBe('Gateway');
+    expect(diagnosticCheckTitle({ name: 'long', message: 'x'.repeat(200) })).toHaveLength(120);
+    expect(diagnosticCheckDetail({ name: 'Gateway' })).toBe('Gateway');
+  });
+});
+

@@ -756,7 +756,7 @@ describe('RosterScreen', () => {
 
     fireEvent.press(view.getByTestId('roster-add'));
     expect(view.getByTestId('roster-action-add_connection')).toBeTruthy();
-    expect(view.getByText('Connect OpenClaw, Hermes and more')).toBeTruthy();
+    expect(view.getByText('OpenClaw, Hermes, Codex and more')).toBeTruthy();
     expect(view.getByText('Create another agent on live')).toBeTruthy();
     expect(view.queryByTestId('roster-action-add_connection-lock-icon')).toBeNull();
     expect(view.getByTestId('roster-action-create_agent-lock-icon')).toBeTruthy();
@@ -829,7 +829,7 @@ describe('RosterScreen', () => {
     fireEvent.press(view.getByTestId('roster-add'));
     expect(view.getByTestId('roster-action-add_connection-lock-icon')).toBeTruthy();
     expect(view.getByTestId('roster-action-add_connection').props.accessibilityLabel).toBe(
-      'Add Connection, Connect OpenClaw, Hermes and more',
+      'Add Connection, OpenClaw, Hermes, Codex and more',
     );
     fireEvent.press(view.getByTestId('roster-action-add_connection'));
     expect(onAdd).toHaveBeenCalledTimes(1);

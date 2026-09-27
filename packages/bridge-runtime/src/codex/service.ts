@@ -1,4 +1,5 @@
 import { InteractionAttention } from '../interaction-attention.js';
+import { lastVisiblePreview, sessionPreview } from '../session-preview.js';
 import { isDeepStrictEqual } from 'node:util';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, lstatSync, realpathSync, existsSync, unlinkSync } from 'node:fs';
@@ -28,6 +29,7 @@ export class CodexService extends EventEmitter {
   private rpc: CodexRpc;
   private records: Entry[] = [];
   private native = new Map<string, any>();
+  private nativePreviews = new Map<string, { version: string; preview?: string; lastActivityAt: number | null; checkedAt: number; failed?: boolean }>();
   private loaded = new Set<string>();
   private runs = new Map<string, Run>();
   private starts = new Map<string, Promise<any>>();
@@ -194,6 +196,31 @@ export class CodexService extends EventEmitter {
     })().finally(() => { this.discovery = undefined; });
     return this.discovery;
   }
+  private async refreshNativePreviews(): Promise<void> {
+    // Roster freshness needs the newest conversations, not a full-history scan of a large device catalog.
+    const recent = [...this.native.entries()].sort((a, b) => (b[1].recencyAt ?? b[1].updatedAt ?? 0) - (a[1].recencyAt ?? a[1].updatedAt ?? 0)).slice(0, 12);
+    for (let index = 0; index < recent.length; index += 3) await Promise.all(recent.slice(index, index + 3).map(async ([key, thread]) => {
+      const version = `${thread.updatedAt ?? ''}:${thread.recencyAt ?? ''}`;
+      const cached = this.nativePreviews.get(key);
+      if (cached?.version === version && (!cached.failed || Date.now() - cached.checkedAt < 30_000)) return;
+      try {
+        const page = await this.rpc.request('thread/turns/list', { threadId: thread.id, limit: 3, itemsView: 'full', sortDirection: 'desc' });
+        const turns = Array.isArray(page.data) ? [...page.data].reverse().map((turn: any) => ({ ...turn,
+          items: Array.isArray(turn.items) ? turn.items.filter((item: any) => item.type !== 'plan') : [] })) : [];
+        const messages = turns.flatMap((turn: any) => codexMessages([turn])
+          .filter(message => message.role === 'user' || message.role === 'assistant')
+          .map(message => message.role === 'assistant' && typeof turn.completedAt === 'number'
+            ? { ...message, timestampMs: turn.completedAt * 1000 } : message));
+        // Native plans are protocol items, not an assistant chat reply.
+        const visible = lastVisiblePreview(messages);
+        this.nativePreviews.set(key, { version, preview: visible?.preview, lastActivityAt: visible?.lastActivityAt ?? null, checkedAt: Date.now() });
+      } catch {
+        // Retry transient native errors after a short pause, without polling a broken thread on every roster refresh.
+        this.nativePreviews.set(key, { version, preview: undefined, lastActivityAt: null, checkedAt: Date.now(), failed: true });
+      }
+    }));
+    for (const key of this.nativePreviews.keys()) if (!this.native.has(key)) this.nativePreviews.delete(key);
+  }
   private async desktopTurn(r: Entry, params: object): Promise<any> {
     this.desktop!.follow(r.threadId!);
     const run = this.runs.get(r.id)!; run.desktop = true;
@@ -357,7 +384,16 @@ export class CodexService extends EventEmitter {
       }
       case 'sessions.list': {
         await this.discover();
-        return [...this.records.map(r => this.descriptor(r)), ...[...this.native.entries()].filter(([, t]) => !this.records.some(r => r.threadId === t.id)).map(([key, t]) => ({ connectionId: '', agentId: 'codex', key, kind: 'direct', title: t.name || t.preview?.slice(0, 80) || basename(t.cwd), updatedAt: t.updatedAt * 1000, lastActivityAt: (t.recencyAt ?? t.updatedAt) * 1000, preview: t.preview?.slice(0, 160), model: t.model, modelProvider: t.modelProvider, hasActiveRun: t.status?.type === 'active', project: this.options.device ? this.projectDetails(t.cwd) : undefined, canContinue: this.options.device === true, source: 'native', allowedActions: { rename: false, reset: false, delete: false, pin: true } }))];
+        await this.refreshNativePreviews();
+        return [...this.records.map(r => {
+          const native = r.threadId ? this.nativePreviews.get(`native:${r.threadId}`) : undefined;
+          return native && !this.runs.has(r.id) && (r.preview === undefined || (r.native && !Object.keys(r.keys).length) || (native.lastActivityAt ?? 0) > (r.activity ?? 0))
+            ? { ...this.descriptor(r), preview: native.preview, lastActivityAt: native.lastActivityAt,
+              updatedAt: Math.max(r.activity ?? r.created, native.lastActivityAt ?? 0) } : this.descriptor(r);
+        }), ...[...this.native.entries()].filter(([, t]) => !this.records.some(r => r.threadId === t.id)).map(([key, t]) => {
+          const visible = this.nativePreviews.get(key);
+          return { connectionId: '', agentId: 'codex', key, kind: 'direct', title: t.name || t.preview?.slice(0, 80) || basename(t.cwd), updatedAt: t.updatedAt * 1000, lastActivityAt: visible?.lastActivityAt ?? (t.recencyAt ?? t.updatedAt) * 1000, preview: visible?.preview, model: t.model, modelProvider: t.modelProvider, hasActiveRun: t.status?.type === 'active', project: this.options.device ? this.projectDetails(t.cwd) : undefined, canContinue: this.options.device === true, source: 'native', allowedActions: { rename: false, reset: false, delete: false, pin: true } };
+        })];
       }
       case 'sessions.create': {
         if (p.title !== undefined && typeof p.title !== 'string') throw new Error('Invalid title');
@@ -546,7 +582,7 @@ export class CodexService extends EventEmitter {
       if (Object.keys(r.keys).length >= 10000) throw new Error('Start a new conversation to continue');
       const runId = randomUUID();
       Object.defineProperty(r.keys, input.idempotencyKey, { value: { hash, runId }, enumerable: true, configurable: true });
-      r.preview = input.text.slice(0, 160); r.activity = Date.now(); if (!r.title) r.title = input.text.trim().slice(0, 80); r.effort = input.thinkingLevel ?? r.effort; this.save();
+      r.preview = sessionPreview(input.text, !!input.attachments?.length); r.activity = Date.now(); if (!r.title) r.title = input.text.trim().slice(0, 80); r.effort = input.thinkingLevel ?? r.effort; this.save();
       this.runs.set(r.id, { id: runId, text: '', started: Date.now(), items: new Map() }); this.update({ type: 'run_started', sessionKey: r.id, runId });
       const params = { threadId: r.threadId, input: [{ type: 'text', text: input.text }, ...images.map(a => ({ type: 'image', url: `data:${a.mimeType};base64,${a.content}` }))], ...(desktopOwned ? {} : { model: r.model, effort: r.effort }), clientUserMessageId: input.idempotencyKey };
       const accepted = desktopOwned ? this.desktopTurn(r, params) : this.rpc.request('turn/start', params);
@@ -636,7 +672,9 @@ export class CodexService extends EventEmitter {
     this.runs.delete(r.id);
     for (const [id, c] of this.approvals) if (c.entry === r) { this.approvals.delete(id); this.update({ type: 'approval_resolved', approvalId: id, decision: 'expired' }); }
     for (const [id, group] of this.questions) if (group.entry === r) { this.questions.delete(id); for (const q of group.pending.keys()) this.update({ type: 'question_resolved', sessionKey: r.id, questionId: q }); }
-    r.activity = Date.now(); this.save(); this.scheduleDesktop(r);
+    const reply = sessionPreview(run.final);
+    if (reply) { r.preview = reply; r.activity = Date.now(); }
+    this.save(); this.scheduleDesktop(r);
     this.update({ type: 'run_finished', sessionKey: r.id, runId: run.id, stopReason, ...(stopReason === 'error' ? { message: { role: 'assistant', content: 'Codex could not confirm completion. Check model access and project trust on your computer before retrying.' } } : run.final ? { message: { role: 'assistant', content: run.final, model: r.model, provider: r.provider } } : {}) });
     this.update({ type: 'session_info_update', session: this.descriptor(r) });
   }

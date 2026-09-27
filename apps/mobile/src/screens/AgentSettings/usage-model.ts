@@ -195,6 +195,20 @@ export function formatUsageTokens(value: number): string {
   return String(Math.round(value));
 }
 
+/**
+ * Chart axis ticks: the grid values are round (`computeYScale`), so they read without the detail
+ * decimals of `formatUsageValue`. `$1.00` and `$0.5000` did not fit the 40-point axis and were cut
+ * to `$1…` / `$0…` (device review 2026-09-27).
+ */
+export function formatUsageAxisValue(value: number, measure: UsageMeasure): string {
+  if (!Number.isFinite(value) || value < 0) return '—';
+  if (measure !== 'cost') return formatUsageTokens(value);
+  if (value === 0) return '$0';
+  if (value >= 1000) return `$${trimTrailingZero(value / 1000)}K`;
+  if (value >= 1) return `$${trimTrailingZero(value)}`;
+  return `$${Number(value.toPrecision(2))}`;
+}
+
 export function formatUsageCost(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '—';
   if (value === 0) return '$0.00';

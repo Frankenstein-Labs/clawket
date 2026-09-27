@@ -176,6 +176,21 @@ describe('UnreadWatermarks', () => {
     await expect(watermarks.get('connection-1')).resolves.toEqual({ valid: 10, activity: 20 });
   });
 
+  it('seeds a never-tracked connection once and then only reads it', async () => {
+    const watermarks = new UnreadWatermarks({ storage: new MemoryCacheStorage(), now: () => 100 });
+    const observed = (connectionId: string, key: string, updatedAt: number) => session(key, updatedAt, { connectionId });
+    const first = [observed('alpha', 'agent:main:main', 40), observed('alpha', 'agent:main:slack', 70), observed('beta', 'other', 90)];
+    expect(await watermarks.seedIfUnset('alpha', first)).toEqual({ 'agent:main:main': 40, 'agent:main:slack': 70 });
+    // A later snapshot never moves an existing baseline.
+    expect(await watermarks.seedIfUnset('alpha', [observed('alpha', 'agent:main:main', 95)])).toEqual({
+      'agent:main:main': 40, 'agent:main:slack': 70,
+    });
+    // A cleared connection keeps its (empty) record rather than being re-seeded.
+    await watermarks.clearConnection('alpha');
+    expect(await watermarks.seedIfUnset('alpha', first)).toEqual({});
+    await expect(watermarks.seedIfUnset('  ', first)).rejects.toThrow('Connection id is required.');
+  });
+
   it('fails closed on corrupt persisted values and clears a connection by overwriting them', async () => {
     const storage = new MemoryCacheStorage();
     storage.entries.set('connection-registry:unread-watermarks:v1:connection-1', {

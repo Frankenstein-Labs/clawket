@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Modal } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { publicAppLinks } from '../../config/public';
 import { useProPaywall } from '../../contexts/ProPaywallContext';
+import { useLightStatusBarBeforeModal } from '../../hooks/useLightStatusBarBeforeModal';
 import { analyticsEvents } from '../../services/analytics/events';
 import { hasRenewingProSubscription, isRevenueCatPackagePurchaseLocked, proSubscriptionManagementUrl, selectDisplayedRevenueCatPackage } from '../../services/pro-subscription';
 import { PaywallScreen } from '../../screens/Paywall/PaywallScreen';
@@ -106,7 +107,9 @@ export function ProPaywallOverlay({ visible, onClose, onContinue }: Props): Reac
     }
   }, [t]);
 
-  if (!visible || !paywallMode) return null;
+  const statusBarReady = useLightStatusBarBeforeModal(visible && Boolean(paywallMode));
+
+  if (!visible || !paywallMode || !statusBarReady) return null;
 
   const interactionLocked = paywallPhase === 'purchasing'
     || paywallPhase === 'restoring'

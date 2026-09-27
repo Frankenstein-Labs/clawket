@@ -2,6 +2,7 @@ import type { AgentAdapter } from '@clawket/agent-protocol';
 import { createReplyConversation, replyConversationDraft } from './reply-conversation';
 import { ManualSessions } from './manual-sessions';
 import { StorageService } from './storage';
+import { FreshSessions } from './fresh-sessions';
 const reply = { id: 'reply', role: 'assistant' as const, text: 'A useful answer' };
 jest.mock('./manual-sessions', () => ({ ManualSessions: { create: jest.fn() } }));
 jest.mock('./storage', () => ({ StorageService: { getComposerDraft: jest.fn(), setComposerDraft: jest.fn() } }));
@@ -13,6 +14,8 @@ test('prepares only a selected reply and never sends or alters the original', as
   await createReplyConversation(backend, 'agent', 'original', reply);
   expect(StorageService.setComposerDraft).toHaveBeenCalledWith('agent', 'new', reply.text, 'connection');
   expect(backend.prompt).not.toHaveBeenCalled(); expect(backend.deleteSession).not.toHaveBeenCalled();
+  // The quoted reply is the app's own seed, so leaving it unsent still counts as untouched.
+  expect(FreshSessions.takeAbandoned('connection', 'agent', 'new', reply.text)).toBe(true);
 });
 test('a failed draft write retries the returned session and overlapping taps share one operation', async () => {
   const backend = adapter(); jest.mocked(StorageService.setComposerDraft).mockRejectedValueOnce(new Error('disk full'));

@@ -29,6 +29,8 @@ export type UsageBarChartProps = Readonly<{
   selectedIndex: number | null;
   onSelect: (index: number) => void;
   formatValue: (value: number) => string;
+  /** Grid tick labels; defaults to `formatValue`. Ticks are round, so they can drop detail decimals. */
+  formatAxisValue?: (value: number) => string;
   formatDayLabel: (date: string) => string;
   todayLabel: string;
   accessibilityLabel?: string;
@@ -55,6 +57,7 @@ export function UsageBarChart({
   selectedIndex,
   onSelect,
   formatValue,
+  formatAxisValue = formatValue,
   formatDayLabel,
   todayLabel,
   accessibilityLabel,
@@ -120,7 +123,7 @@ export function UsageBarChart({
         </Svg>
         {GRID_STEPS.map((step) => (
           <Text key={step} style={[styles.axisLabel, { top: gridY(step) - LineHeight.caption / 2 }]} numberOfLines={1}>
-            {formatValue(max * step)}
+            {formatAxisValue(max * step)}
           </Text>
         ))}
         <Text style={[styles.axisLabel, { top: PLOT_HEIGHT - LineHeight.caption / 2 }]} numberOfLines={1}>0</Text>

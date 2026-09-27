@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "この会話のプロジェクトフォルダにパソコンからアクセスできません。",
   "Check again": "再確認",
   "Not sent · tap to review": "未送信 · タップして確認",
-  "This model does not accept images. Choose another model or remove the photo.": "このモデルは画像に対応していません。別のモデルを選ぶか、写真を削除してください。"
+  "This model does not accept images. Choose another model or remove the photo.": "このモデルは画像に対応していません。別のモデルを選ぶか、写真を削除してください。",
+  "Copy as Markdown": "Markdown としてコピー",
+  "Copy image URL": "画像の URL をコピー",
+  "Copy {{total}} image URLs": "{{total}} 件の画像 URL をコピー"
 }

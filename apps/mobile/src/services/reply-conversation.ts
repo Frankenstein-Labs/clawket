@@ -1,6 +1,7 @@
 import type { AgentAdapter, SessionDescriptor } from '@clawket/agent-protocol';
 import type { UiMessage } from '../types/chat';
 import { sanitizeDisplayText } from '../utils/chat-message';
+import { FreshSessions } from './fresh-sessions';
 import { ManualSessions } from './manual-sessions';
 import { StorageService } from './storage';
 
@@ -25,6 +26,8 @@ export function createReplyConversation(adapter: AgentAdapter, agentId: string, 
     const existing = await StorageService.getComposerDraft(agentId, attempt.session.key, adapter.connection.id);
     if (existing && existing !== draft) throw new Error('reply_conversation_draft_conflict');
     await StorageService.setComposerDraft(agentId, attempt.session.key, draft, adapter.connection.id);
+    // The quoted reply is the app's own seed: leaving it unsent still discards the session.
+    FreshSessions.mark(adapter.connection.id, agentId, attempt.session.key, draft);
     pending.delete(key);
     return attempt.session;
   })();

@@ -250,8 +250,26 @@ describe('aggregateRoster', () => {
       watermarks: {},
     }], 'a')[0].agents[0];
     expect(summarize('sessions').preview).toBe('Investigate startup');
-    expect(summarize('sessions', 'Found the cause').preview).toBe('Investigate startup: Found the cause');
+    expect(summarize('sessions', 'Found the cause').preview).toBe('Found the cause');
     expect(summarize().preview).toBeUndefined();
+  });
+  it('retains the conversation label for a non-sessions-first Agent preview', () => {
+    const summary = aggregateRoster([{
+      connection: connection('a', 1), source: 'live', syncedAt: 200,
+      agents: [agent('a', 'main')],
+      sessions: [session('a', 'main', 'task', 100, { kind: 'direct', title: 'Investigate startup', preview: 'Found the cause' })],
+      watermarks: {},
+    }], 'a')[0].agents[0];
+    expect(summary.preview).toBe('Investigate startup: Found the cause');
+  });
+  it('shows the message directly for a Pi side conversation', () => {
+    const summary = aggregateRoster([{
+      connection: connection('a', 1), source: 'live', syncedAt: 200,
+      agents: [{ ...agent('a', 'pi'), mainSessionKey: 'pi:main' }],
+      sessions: [session('a', 'pi', 'native', 100, { kind: 'direct', title: 'A long first prompt', preview: 'Latest answer' })],
+      watermarks: {},
+    }], 'a')[0].agents[0];
+    expect(summary.preview).toBe('Latest answer');
   });
   it('orders groups and Agents by human activity only, keeping unread and attention as badges', () => {
     const groups = aggregateRoster([

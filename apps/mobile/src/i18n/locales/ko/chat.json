@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "컴퓨터에서 이 대화의 프로젝트 폴더에 접근할 수 없습니다.",
   "Check again": "다시 확인",
   "Not sent · tap to review": "전송 안 됨 · 눌러서 확인",
-  "This model does not accept images. Choose another model or remove the photo.": "이 모델은 이미지를 지원하지 않습니다. 다른 모델을 선택하거나 사진을 삭제해 주세요."
+  "This model does not accept images. Choose another model or remove the photo.": "이 모델은 이미지를 지원하지 않습니다. 다른 모델을 선택하거나 사진을 삭제해 주세요.",
+  "Copy as Markdown": "Markdown으로 복사",
+  "Copy image URL": "이미지 URL 복사",
+  "Copy {{total}} image URLs": "이미지 URL {{total}}개 복사"
 }

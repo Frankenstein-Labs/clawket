@@ -241,7 +241,7 @@ describe.each(['light', 'dark'] as const)('%s navigation primitives', (scheme) =
     expect(header.paddingBottom).toBe(Space.md);
   });
 
-  it('gives a trailing SheetHeaderButton the same quiet chrome as the close button', () => {
+  it('gives a trailing SheetHeaderButton the same plain chrome as the close button', () => {
     const onManage = jest.fn();
     const result = render(
       <Sheet
@@ -257,7 +257,8 @@ describe.each(['light', 'dark'] as const)('%s navigation primitives', (scheme) =
     );
     const close = flattened(result.getByTestId('action-sheet-close').props.style);
     const manage = flattened(result.getByTestId('action-sheet-manage').props.style);
-    expect(manage.backgroundColor).toBe(buildTheme(scheme, scheme, builtInAccents.iceBlue).colors.surface);
+    // Plain icons in every header corner, like the roster (owner decision 2026-09-27).
+    expect(manage.backgroundColor).toBe('transparent');
     expect(manage.backgroundColor).toBe(close.backgroundColor);
     expect(manage.width).toBe(close.width);
     expect(manage.height).toBe(close.height);
@@ -331,6 +332,21 @@ describe.each(['light', 'dark'] as const)('review controls in %s', (scheme) => {
     view.rerender(<ThemedSwitch testID="switch" value tone="neutral" onValueChange={onChange} />);
     expect(view.getByTestId('switch')).toBe(native);
     expect(native.props.value).toBe(true);
+  });
+
+  it('gives the Android off track enough contrast beside its white thumb', () => {
+    const platform = require('react-native').Platform as { OS: string };
+    const colors = buildTheme(scheme, scheme, builtInAccents.iceBlue).colors;
+    const ios = render(<ThemedSwitch testID="switch" value={false} onValueChange={jest.fn()} />);
+    expect(ios.getByTestId('switch').props.trackColor.false).toBe(colors.line);
+    ios.unmount();
+    platform.OS = 'android';
+    try {
+      const android = render(<ThemedSwitch testID="switch" value={false} onValueChange={jest.fn()} />);
+      expect(android.getByTestId('switch').props.trackColor.false).toBe(scheme === 'light' ? colors.inkTertiary : colors.line);
+    } finally {
+      platform.OS = 'ios';
+    }
   });
 
   it('preserves the quiet disabled surface and dims only its glyph', () => {

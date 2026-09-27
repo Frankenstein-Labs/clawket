@@ -290,6 +290,29 @@ describe('device project discovery and desktop routing', () => {
     await service.stop(); service = new CodexService({ project, directory: join(root, 'device'), device: true, env: { CODEX_HOME: root }, desktop: desktop as any });
     return desktop;
   }
+  it('uses the last visible native message instead of the first prompt and caches the tail', async () => {
+    await device();
+    const original = mock.request.getMockImplementation()!;
+    let recency = 2;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/list') return Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 2, recencyAt: recency, preview: 'First prompt' }] });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: [
+        { id: 'second', startedAt: 200, completedAt: 250, items: [{ id: 'answer', type: 'agentMessage', text: '**Latest reply**' }, { id: 'tool', type: 'commandExecution', command: 'pwd' }] },
+        { id: 'first', startedAt: 100, items: [{ id: 'prompt', type: 'userMessage', content: [{ type: 'text', text: 'First prompt' }] }] },
+      ] });
+      return original(method, params);
+    });
+    expect((await request('sessions.list')).find((row: any) => row.key === `native:${threadId}`))
+      .toMatchObject({ preview: 'Latest reply', lastActivityAt: 250000 });
+    await request('chat.history', { sessionKey: `native:${threadId}` });
+    expect((await request('sessions.list')).find((row: any) => row.key === `native:${threadId}`))
+      .toMatchObject({ preview: 'Latest reply', lastActivityAt: 250000 });
+    await request('sessions.list');
+    expect(mock.request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(2); // one list tail, one history page
+    recency = 3;
+    await request('sessions.list');
+    expect(mock.request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(3);
+  });
   it('paginates across projects, includes desktop sources and binds new chats to an opaque discovered project', async () => {
     await device(); const other = join(root, 'second'); mkdirSync(other);
     mock.request.mockImplementation(async (method, params) => {

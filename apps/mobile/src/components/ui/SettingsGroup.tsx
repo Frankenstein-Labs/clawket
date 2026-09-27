@@ -41,7 +41,8 @@ export type SettingsRowProps = {
   children?: React.ReactNode;
   title?: string;
   subtitle?: string;
-  subtitleLines?: 1 | 2;
+  /** Lines the subtitle may take; a short fact list (connection capabilities) passes its length. */
+  subtitleLines?: number;
   value?: string;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;

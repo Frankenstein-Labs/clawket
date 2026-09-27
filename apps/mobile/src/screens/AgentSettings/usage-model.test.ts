@@ -1,6 +1,7 @@
 import type { CostSummary, UsageResult, UsageTotals } from '@clawket/agent-protocol';
 import {
   buildUsageSummary,
+  formatUsageAxisValue,
   formatUsageCost,
   formatUsageTokens,
   getUsageDateRange,
@@ -144,3 +145,22 @@ describe('Agent usage presentation model', () => {
 it('propagates missing-price completeness to the usage dashboard and poster', () => {
   expect(buildUsageSummary(usage, { ...cost, totals: { ...totals, missingCostEntries: 19 } }).presentation?.mode).toBe('mixed');
 });
+
+describe('formatUsageAxisValue', () => {
+  it('labels round grid ticks compactly enough for the 40-point axis', () => {
+    expect(formatUsageAxisValue(1, 'cost')).toBe('$1');
+    expect(formatUsageAxisValue(0.5, 'cost')).toBe('$0.5');
+    expect(formatUsageAxisValue(0.05, 'cost')).toBe('$0.05');
+    expect(formatUsageAxisValue(0.0025, 'cost')).toBe('$0.0025');
+    expect(formatUsageAxisValue(2.5, 'cost')).toBe('$2.5');
+    expect(formatUsageAxisValue(20, 'cost')).toBe('$20');
+    expect(formatUsageAxisValue(5000, 'cost')).toBe('$5K');
+    expect(formatUsageAxisValue(0, 'cost')).toBe('$0');
+    expect(formatUsageAxisValue(2_000_000, 'tokens')).toBe('2M');
+    expect(formatUsageAxisValue(Number.NaN, 'cost')).toBe('—');
+    for (const value of [1, 0.5, 0.05, 2.5, 20, 5000]) {
+      expect(formatUsageAxisValue(value, 'cost').length).toBeLessThanOrEqual(5);
+    }
+  });
+});
+

@@ -303,8 +303,8 @@ export function HelpCenterScreen({
         t('In Add connection, choose the backend and enter its pairing code, or scan or import its QR. Local pairing uses QR. If both backends are installed, the CLI prints a result for each. Keep the host running.'),
       ],
       commands: [
-        { label: t('Remote connection command', { ns: 'chat' }), value: 'npx @p697/clawket pair' },
-        { label: t('Same Wi-Fi pairing', { ns: 'chat' }), value: 'npx @p697/clawket pair local' },
+        { label: t('Remote connection command', { ns: 'chat' }), value: 'npx @p697/clawket@latest pair' },
+        { label: t('Same Wi-Fi pairing', { ns: 'chat' }), value: 'npx @p697/clawket@latest pair local' },
       ],
     },
     {
@@ -315,7 +315,7 @@ export function HelpCenterScreen({
       commands: [
         { label: t('Minimal openclaw.json example'), value: LAN_DIRECT_CONFIG },
         { label: t('Restart Gateway'), value: 'openclaw gateway restart' },
-        { value: 'npx @p697/clawket pair local --backend openclaw --url "ws://<lan-ip>:18789"' },
+        { value: 'npx @p697/clawket@latest pair local --backend openclaw --url "ws://<lan-ip>:18789"' },
       ],
     },
     {
@@ -330,7 +330,7 @@ export function HelpCenterScreen({
       commands: [
         { label: t('Minimal openclaw.json example'), value: TAILNET_DIRECT_CONFIG },
         { label: t('Restart Gateway'), value: 'openclaw gateway restart' },
-        { value: 'npx @p697/clawket pair local --backend openclaw --url "ws://<tailscale-ip>:18789"' },
+        { value: 'npx @p697/clawket@latest pair local --backend openclaw --url "ws://<tailscale-ip>:18789"' },
       ],
     },
     {
@@ -346,7 +346,7 @@ export function HelpCenterScreen({
       commands: [
         { label: t('Minimal openclaw.json example'), value: TAILSCALE_SERVE_CONFIG },
         { label: t('Restart Gateway'), value: 'openclaw gateway restart' },
-        { value: 'npx @p697/clawket pair local --backend openclaw --url "wss://<magicdns-host>"' },
+        { value: 'npx @p697/clawket@latest pair local --backend openclaw --url "wss://<magicdns-host>"' },
       ],
     },
     {

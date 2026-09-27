@@ -1,4 +1,5 @@
 import { InteractionAttention } from '../interaction-attention.js';
+import { sessionPreview } from '../session-preview.js';
 import { ClaudeFault } from './errors.js';
 import { EventEmitter } from 'node:events';
 import { createHash, randomUUID } from 'node:crypto';
@@ -33,6 +34,7 @@ export class ClaudeService extends EventEmitter {
   private sessions = new Map<string, ClaudeSession>();
   private locks = new Map<string, ClaudeOwnerLock>();
   private probes = new Set<ClaudeSession>();
+  private previews = new Map<string, { preview: string; lastActivityAt: number }>();
   private queue: Promise<unknown> = Promise.resolve();
   private stopped = false;
 
@@ -70,9 +72,13 @@ export class ClaudeService extends EventEmitter {
   private async descriptor(record: ClaudeRecord, roster?: ClaudeOwnerSnapshot): Promise<SessionDescriptor> {
     const project = await this.catalog.addProject(record.cwd);
     const continuation = record.imported ? this.continuation(record.nativeId!, project.available, roster ?? await this.owners.snapshot(), record.key) : {};
+    const livePreview = this.previews.get(record.key);
+    const nativePreview = record.nativeId ? this.catalog.cachedPreview(record.nativeId) : undefined;
+    const visible = nativePreview && (!livePreview || nativePreview.lastActivityAt > livePreview.lastActivityAt)
+      ? nativePreview : livePreview ?? nativePreview;
     return { connectionId: '', agentId: 'claude-code', key: record.key, kind: 'direct',
-      title: record.title || basename(record.cwd), updatedAt: record.lastActivityAt ?? record.createdAt,
-      lastActivityAt: record.lastActivityAt ?? null, model: record.model,
+      title: record.title || basename(record.cwd), updatedAt: Math.max(record.lastActivityAt ?? record.createdAt, visible?.lastActivityAt ?? 0),
+      lastActivityAt: visible?.lastActivityAt ?? record.lastActivityAt ?? null, preview: visible?.preview, model: record.model,
       project, source: record.imported ? 'native' : 'bridge', ...continuation,
       hasActiveRun: !!this.sessions.get(record.key)?.activeRun, attention: this.attention.get(record.key),
       allowedActions: { rename: !record.imported, reset: !record.imported, delete: !record.imported, pin: true } };
@@ -99,6 +105,10 @@ export class ClaudeService extends EventEmitter {
       case 'sessions.list': {
         const roster = await this.owners.snapshot();
         const native = await this.discover(roster);
+        const recentOwned = [...this.store.records].filter(record => record.materialized && !!record.nativeId && !this.catalog.hasNativeEntry(record.nativeId))
+          .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)).slice(0, 8);
+        for (let index = 0; index < recentOwned.length; index += 2) await Promise.all(recentOwned.slice(index, index + 2).map(record =>
+          this.catalog.loadPreview(record.nativeId!, record.cwd, record.lastActivityAt ?? record.createdAt)));
         const owned = [];
         for (const record of this.store.records) owned.push(await this.descriptor(record, roster));
         return [...owned, ...native];
@@ -145,6 +155,7 @@ export class ClaudeService extends EventEmitter {
           delete record.nativeId; delete record.materialized; delete record.lastActivityAt;
         }
         try { this.store.save(); } catch (error) { this.store.records = JSON.parse(before); throw error; }
+        this.previews.delete(record.key);
         return { ok: true };
       });
       case 'chat.history': return this.history(string(p.sessionKey, 'session'), p.cursor);
@@ -314,10 +325,15 @@ export class ClaudeService extends EventEmitter {
           void this.descriptor(record).then(descriptor => this.update({ type: 'session_info_update', session: descriptor })).catch(() => {});
         }
       });
-      session.on('settled', () => {
-        record.lastActivityAt = Date.now();
+      session.on('settled', (result?: { text?: string; timestampMs?: number }) => {
+        const preview = sessionPreview(result?.text);
+        if (preview) {
+          record.lastActivityAt = result?.timestampMs ?? Date.now();
+          this.previews.set(record.key, { preview, lastActivityAt: record.lastActivityAt });
+        }
         try { this.store.save(); }
         catch { this.update({ type: 'error', sessionKey: record.key, code: 'server', message: 'Claude session metadata could not be saved. Check local storage.' }); }
+        void this.descriptor(record).then(descriptor => this.update({ type: 'session_info_update', session: descriptor })).catch(() => {});
         // Imported conversations relinquish the native writer between turns so the computer can resume later.
         if (record.imported) void this.serial(() => this.releaseSession(record.key, session)).catch(() => {});
       });
@@ -356,6 +372,9 @@ export class ClaudeService extends EventEmitter {
         delete record.fingerprints[key]; record.lastActivityAt = previous.activity; record.materialized = previous.materialized; record.title = previous.title;
         throw error;
       }
+      const preview = sessionPreview(input.text, !!input.attachments?.some(item => item.type === 'image'));
+      if (preview) this.previews.set(record.key, { preview, lastActivityAt: record.lastActivityAt });
+      void this.descriptor(record).then(descriptor => this.update({ type: 'session_info_update', session: descriptor })).catch(() => {});
       // A failure after durable acceptance remains uncertain. Never remove this fingerprint and retry silently.
       session.send(runId, input);
       return { runId };

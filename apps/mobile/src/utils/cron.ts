@@ -135,6 +135,12 @@ function describeCronScheduleHuman(expr: string, t: TFn): string {
     return t('schedule_every_minute', { ns: 'settings' });
   }
 
+  // Every N hours on the hour: 0 */N * * * (otherwise the English fallback leaks into every locale).
+  if (minF === '0' && /^\*\/\d+$/.test(hourF) && domF === '*' && monF === '*' && dowF === '*') {
+    const step = Number(hourF.slice(2));
+    if (step >= 2 && step <= 23) return t('schedule_every_n_hours', { ns: 'settings', count: step });
+  }
+
   // Try to extract a single HH:MM time
   const min = Number(minF);
   const hour = Number(hourF);

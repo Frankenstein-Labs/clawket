@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { useAppTheme } from '../../theme';
 import { ControlSize, FontSize, FontWeight, LineHeight, Space } from '../../theme/tokens';
 import { Button } from './Button';
+import { relativeTime } from '../../utils/chat-message';
+import { useRelativeTimeTranslator } from '../../hooks/useRelativeTimeTranslator';
 
 export type ConnectionUnavailableProps = Readonly<{
   name: string;
@@ -23,10 +25,12 @@ export function ConnectionUnavailable({
   name, lastReadyAt, message, actionLabel, onRetry, onManage, onViewSaved,
   compact = false, testID = 'connection-unavailable',
 }: ConnectionUnavailableProps): React.JSX.Element {
-  const { t, i18n } = useTranslation('common');
+  const { t } = useTranslation('common');
+  const translateRelativeTime = useRelativeTimeTranslator();
   const { theme } = useAppTheme();
+  // Relative, like every other activity time (`2026/9/27 17:01:11` read as a log line; device review 2026-09-27).
   const lastSeen = lastReadyAt && Number.isFinite(lastReadyAt) && lastReadyAt > 0
-    ? new Date(lastReadyAt).toLocaleString(i18n?.language) : null;
+    ? relativeTime(lastReadyAt, translateRelativeTime) : null;
   const content = <View style={styles.content}>
     <Laptop size={ControlSize.settingsRow} color={theme.colors.inkSecondary} strokeWidth={1.5} />
     <Text style={[styles.name, { color: theme.colors.ink }]}>{name}</Text>

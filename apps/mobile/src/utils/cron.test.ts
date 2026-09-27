@@ -233,6 +233,13 @@ describe('describeScheduleHuman', () => {
     expect(result).toBe('Every 15 minutes');
   });
 
+  it('describes an on-the-hour step cron in the user language: 0 */2 * * *', () => {
+    expect(describeScheduleHuman({ kind: 'cron', expr: '0 */2 * * *' } as any, t)).toBe('Every 2 hours');
+    // Hourly and offset-minute steps keep the full description rather than a wrong count.
+    expect(describeScheduleHuman({ kind: 'cron', expr: '0 */1 * * *' } as any, t)).not.toBe('Every 1 hours');
+    expect(describeScheduleHuman({ kind: 'cron', expr: '15 */2 * * *' } as any, t)).not.toBe('Every 2 hours');
+  });
+
   it('describes every minute cron: * * * * *', () => {
     const result = describeScheduleHuman({ kind: 'cron', expr: '* * * * *' } as any, t);
     expect(result).toBe('Every minute');

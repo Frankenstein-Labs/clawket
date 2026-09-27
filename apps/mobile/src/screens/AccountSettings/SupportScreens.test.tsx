@@ -283,11 +283,11 @@ describe('AccountSettings support screens', () => {
 
     fireEvent.press(view.getByTestId('help-topic-row-pair'));
     expect(view.getByTestId('help-topic-sheet-pair')).toBeTruthy();
-    expect(view.getByText('npx @p697/clawket pair')).toBeTruthy();
+    expect(view.getByText('npx @p697/clawket@latest pair')).toBeTruthy();
     fireEvent.press(view.getByTestId('help-command-pair-0'));
 
     await waitFor(() => {
-      expect(mockSetStringAsync).toHaveBeenCalledWith('npx @p697/clawket pair');
+      expect(mockSetStringAsync).toHaveBeenCalledWith('npx @p697/clawket@latest pair');
     });
 
     fireEvent.press(view.getByTestId('help-topic-sheet-pair-close'));
@@ -312,7 +312,7 @@ describe('AccountSettings support screens', () => {
     expect(view.getByText(/merge these fields into the existing gateway configuration/)).toBeTruthy();
     fireEvent.press(view.getByTestId(`help-command-${topic}-2`));
     await waitFor(() => expect(mockSetStringAsync).toHaveBeenLastCalledWith(
-      `npx @p697/clawket pair local --backend openclaw --url "${url}"`,
+      `npx @p697/clawket@latest pair local --backend openclaw --url "${url}"`,
     ));
   });
 

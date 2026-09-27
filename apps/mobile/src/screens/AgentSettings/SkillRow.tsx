@@ -34,7 +34,7 @@ export function SkillSwitch({ skill, disabled, busy, testID, onToggle }: Readonl
         testID={testID}
         hitSlop={Space.sm}
         accessibilityRole="switch"
-        accessibilityLabel={`${t('Enabled')}: ${skill.name}`}
+        accessibilityLabel={`${t('Enable')}: ${skill.name}`}
         accessibilityState={{ disabled, busy }}
         value={skill.always || !skill.disabled}
         disabled={disabled}

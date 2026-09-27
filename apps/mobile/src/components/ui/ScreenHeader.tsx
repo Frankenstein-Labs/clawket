@@ -21,8 +21,8 @@ type Props = {
   showBorder?: boolean;
   /** Long translated titles may take a second line instead of truncating. */
   titleNumberOfLines?: number;
-  /** Chrome of the dismiss control: the white floating circle by default, `glass` over a chat wallpaper. */
-  dismissAppearance?: Extract<FloatingButtonAppearance, 'surface' | 'glass'>;
+  /** Chrome of the dismiss control: a plain icon by default, `glass` over a chat wallpaper. */
+  dismissAppearance?: Extract<FloatingButtonAppearance, 'plain' | 'glass'>;
   backAccessibilityLabel?: string;
   style?: ViewStyle;
   leftSlotStyle?: ViewStyle;
@@ -38,7 +38,8 @@ type Props = {
  * The one page header. Every content-owned screen top is this geometry: the
  * safe-area inset plus 8 points, one 44-point control row inset 16 points
  * from the screen edge, and 8 points below it. The dismiss control is a
- * white 44-point floating circle (owner decision 2026-09-19); the title (or the connection status that replaces
+ * plain 44-point icon like the roster header's (owner decision 2026-09-27, replacing the
+ * white floating circle of 2026-09-19); the title (or the connection status that replaces
  * it) is centered on the screen, not between the slots; page content starts
  * a further 16 points down, so a control sits 24 points above the content.
  */
@@ -54,7 +55,7 @@ export function ScreenHeader({
   rightContent,
   showBorder,
   titleNumberOfLines = 1,
-  dismissAppearance = 'surface',
+  dismissAppearance = 'plain',
   backAccessibilityLabel,
   style,
   leftSlotStyle,

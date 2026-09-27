@@ -189,7 +189,7 @@ export class ClaudeSession extends EventEmitter {
     this.interactions.cancelPending();
     this.update({ type: 'run_finished', sessionKey: this.options.key, runId: run.id, stopReason,
       ...(run.text ? { message: { role: 'assistant', content: run.text, model: run.model } } : {}) });
-    this.emit('settled');
+    this.emit('settled', { text: run.text, timestampMs: Date.now() });
   }
 
   async interrupt(runId: string): Promise<void> {

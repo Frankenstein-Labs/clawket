@@ -189,7 +189,8 @@ describe('ThreadMessageActionsOverlay', () => {
     expect(menuStyle).toMatchObject({ top: 340 + 120 + Space.md, left: Space.lg, opacity: 1 });
     expect(menuStyle.transform).toEqual([{ translateY: 0 }, { scale: 1 }]);
     expect(mockScrollTo).not.toHaveBeenCalled();
-    expect(view.getByTestId('thread-message-actions-message').props.pointerEvents).toBe('none');
+    // The lifted message takes touches so its text can be selected there.
+    expect(view.getByTestId('thread-message-actions-message').props.pointerEvents).toBe('auto');
   });
 
   it('grows a streaming clone downward and moves the menu with it', () => {

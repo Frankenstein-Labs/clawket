@@ -352,6 +352,50 @@ describe('ThreadScreen connection container', () => {
     expect(native.loadSession).toHaveBeenCalledWith(props.route.params.sessionKey);
   });
 
+  it('discards a session this app just created when the reader leaves it without writing anything', async () => {
+    const { FreshSessions } = require('../../services/fresh-sessions');
+    const props = createNavigationProps();
+    const deleteSession = jest.fn(async () => undefined);
+    mockRuntime.getSnapshot.mockReturnValue({ activeConnectionId: 'connection-1', activeAdapter: { ...adapter, deleteSession } } as any);
+    try {
+      mockController.listData = [];
+      mockController.input = '';
+      FreshSessions.mark('connection-1', 'atlas', 'agent:atlas:main');
+      render(<ThreadScreen {...props} />).unmount();
+      await waitFor(() => expect(deleteSession).toHaveBeenCalledWith('agent:atlas:main'));
+
+      // Switching into the new session from one with history: the controller still shows the old
+      // session's rows for a moment, which must not count as writing to the new one.
+      deleteSession.mockClear();
+      const fresh = { ...props, route: { ...props.route, params: { ...props.route.params, sessionKey: 'agent:atlas:new' } } } as ThreadScreenProps;
+      mockController.listData = [{ id: 'old-1', role: 'assistant', text: 'Earlier reply' }];
+      mockController.sessionKey = 'agent:atlas:main';
+      const switching = render(<ThreadScreen {...props} />);
+      FreshSessions.mark('connection-1', 'atlas', 'agent:atlas:new');
+      switching.rerender(<ThreadScreen {...fresh} />);
+      mockController.listData = [];
+      mockController.sessionKey = 'agent:atlas:new';
+      switching.rerender(<ThreadScreen {...fresh} />);
+      switching.unmount();
+      await waitFor(() => expect(deleteSession).toHaveBeenCalledWith('agent:atlas:new'));
+      mockController.sessionKey = 'agent:atlas:main';
+
+      // A message on screen or the reader's own unsent draft keeps the session.
+      deleteSession.mockClear();
+      FreshSessions.mark('connection-1', 'atlas', 'agent:atlas:main');
+      mockController.listData = [{ id: 'user-1', role: 'user', text: 'Hi' }];
+      render(<ThreadScreen {...props} />).unmount();
+      mockController.listData = [];
+      FreshSessions.mark('connection-1', 'atlas', 'agent:atlas:main');
+      mockController.input = 'Unsent thought';
+      render(<ThreadScreen {...props} />).unmount();
+      await act(async () => { await Promise.resolve(); });
+      expect(deleteSession).not.toHaveBeenCalled();
+    } finally {
+      mockRuntime.getSnapshot.mockReturnValue({ activeConnectionId: 'connection-1' } as any);
+    }
+  });
+
   it.each(['claude-code', 'codex'] as const)('shows the regular composer for a resumable native %s conversation', backend => {
     const props = createNavigationProps();
     const native = { ...adapter, capabilities: CAPABILITY_MATRIX[backend] };

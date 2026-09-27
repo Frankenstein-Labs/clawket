@@ -1,8 +1,10 @@
 import type { AgentFileOperations, AgentFileSummary } from '@clawket/agent-protocol';
 import {
   canEditAgentFile,
+  FILE_SEARCH_MIN_COUNT,
   filterAgentFiles,
   formatFileSize,
+  shouldShowFileSearch,
 } from './files-model';
 
 const files: AgentFileSummary[] = [
@@ -29,5 +31,12 @@ describe('Agent files model', () => {
     expect(canEditAgentFile({ fileEdit: true }, operations)).toBe(true);
     expect(canEditAgentFile({ fileEdit: false }, operations)).toBe(false);
     expect(canEditAgentFile({ fileEdit: true }, { get: jest.fn() })).toBe(false);
+  });
+
+  it('offers search only for a long list or while a query is active', () => {
+    expect(shouldShowFileSearch(2, '')).toBe(false);
+    expect(shouldShowFileSearch(FILE_SEARCH_MIN_COUNT - 1, '  ')).toBe(false);
+    expect(shouldShowFileSearch(FILE_SEARCH_MIN_COUNT, '')).toBe(true);
+    expect(shouldShowFileSearch(1, 'soul')).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useImageDimensions } from '../../hooks/useImageDimensions';
-import { Radius } from '../../theme/tokens';
+import { BorderWidth, Radius } from '../../theme/tokens';
 import type { ImageMeta } from '../../types/chat';
 import { useConversationTheme } from './ChatPresentation';
 import { computeAttachmentAlbumLayout } from './attachmentAlbumLayout';
@@ -78,6 +78,12 @@ export function MessageAttachmentAlbum({
           <Image source={{ uri: uris[index] }} resizeMode="cover" style={styles.image} />
         </Pressable>
       ))}
+      {/* A white screenshot otherwise dissolves into the canvas and reads as app UI (device review 2026-09-27). */}
+      <View
+        testID={testID ? `${testID}-edge` : undefined}
+        pointerEvents="none"
+        style={[styles.edge, { borderColor: colors.line }]}
+      />
     </View>
   );
 }
@@ -95,5 +101,14 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  edge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: Radius.bubble,
+    borderWidth: BorderWidth.hairline,
   },
 });

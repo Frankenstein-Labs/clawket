@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "Bu konuşmanın proje klasörüne bilgisayarınızdan erişilemiyor.",
   "Check again": "Yeniden kontrol et",
   "Not sent · tap to review": "Gönderilmedi · incelemek için dokunun",
-  "This model does not accept images. Choose another model or remove the photo.": "Bu model görselleri desteklemiyor. Başka bir model seçin veya fotoğrafı kaldırın."
+  "This model does not accept images. Choose another model or remove the photo.": "Bu model görselleri desteklemiyor. Başka bir model seçin veya fotoğrafı kaldırın.",
+  "Copy as Markdown": "Markdown olarak kopyala",
+  "Copy image URL": "Görsel URL’sini kopyala",
+  "Copy {{total}} image URLs": "{{total}} görsel URL’sini kopyala"
 }

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { ManualSessions, useManualSession } from './manual-sessions';
+import { FreshSessions } from './fresh-sessions';
 import type { AgentAdapter } from '@clawket/agent-protocol';
 
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
@@ -43,6 +44,8 @@ test('a storage retry reuses the created backend session and overlapping taps co
   await expect(ManualSessions.create(adapter, 'main')).resolves.toEqual(session);
   expect(createSession).toHaveBeenCalledTimes(1);
   expect(JSON.parse((await AsyncStorage.getItem('clawket.manual-sessions.v1'))!)).toContainEqual({ connectionId: 'create-retry', agentId: 'main', key: 'created-once' });
+  // A created session starts fresh: leaving it untouched discards it.
+  expect(FreshSessions.takeAbandoned('create-retry', 'main', 'created-once', '')).toBe(true);
 });
 
 test('an unsupported adapter never creates a backend session', async () => {

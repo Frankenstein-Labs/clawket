@@ -25,6 +25,7 @@ import {
   canEditAgentFile,
   filterAgentFiles,
   formatFileSize,
+  shouldShowFileSearch,
 } from './files-model';
 
 export type FilesSectionProps = Readonly<{
@@ -104,12 +105,14 @@ function FilesContent({
 
   return (
     <View testID="agent-files-section" style={styles.root}>
-      <SearchInput
-        testID="agent-files-search"
-        value={query}
-        onChangeText={setQuery}
-        placeholder={t('Search files...', { ns: 'settings' })}
-      />
+      {shouldShowFileSearch(files?.length ?? 0, query) ? (
+        <SearchInput
+          testID="agent-files-search"
+          value={query}
+          onChangeText={setQuery}
+          placeholder={t('Search files...', { ns: 'settings' })}
+        />
+      ) : null}
       {error ? (
         <Banner
           testID="agent-files-error"

@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "ไม่สามารถเข้าถึงโฟลเดอร์โปรเจกต์ของการสนทนานี้บนคอมพิวเตอร์ได้",
   "Check again": "ตรวจสอบอีกครั้ง",
   "Not sent · tap to review": "ยังไม่ได้ส่ง · แตะเพื่อตรวจสอบ",
-  "This model does not accept images. Choose another model or remove the photo.": "โมเดลนี้ไม่รองรับรูปภาพ โปรดเลือกโมเดลอื่นหรือนำรูปออก"
+  "This model does not accept images. Choose another model or remove the photo.": "โมเดลนี้ไม่รองรับรูปภาพ โปรดเลือกโมเดลอื่นหรือนำรูปออก",
+  "Copy as Markdown": "คัดลอกเป็น Markdown",
+  "Copy image URL": "คัดลอก URL รูปภาพ",
+  "Copy {{total}} image URLs": "คัดลอก URL รูปภาพ {{total}} รายการ"
 }

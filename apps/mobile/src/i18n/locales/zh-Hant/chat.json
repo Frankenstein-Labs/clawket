@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "電腦上無法存取這段對話的專案資料夾。",
   "Check again": "重新檢查",
   "Not sent · tap to review": "尚未傳送 · 點一下查看",
-  "This model does not accept images. Choose another model or remove the photo.": "此模型不支援圖片，請更換模型或移除照片。"
+  "This model does not accept images. Choose another model or remove the photo.": "此模型不支援圖片，請更換模型或移除照片。",
+  "Copy as Markdown": "複製為 Markdown",
+  "Copy image URL": "複製圖片連結",
+  "Copy {{total}} image URLs": "複製 {{total}} 個圖片連結"
 }

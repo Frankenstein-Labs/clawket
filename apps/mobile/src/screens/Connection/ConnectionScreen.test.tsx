@@ -74,8 +74,8 @@ jest.mock('../../components/ui/Button', () => {
   const ReactRuntime = require('react');
   const { Pressable, Text } = require('react-native');
   return {
-    Button: ({ testID, label, onPress, disabled }: { testID?: string; label: string; onPress: () => void; disabled?: boolean }) => (
-      ReactRuntime.createElement(Pressable, { testID, onPress, disabled }, ReactRuntime.createElement(Text, null, label))
+    Button: ({ testID, label, onPress, disabled, variant }: { testID?: string; label: string; onPress: () => void; disabled?: boolean; variant?: string }) => (
+      ReactRuntime.createElement(Pressable, { testID, onPress, disabled, variant }, ReactRuntime.createElement(Text, null, label))
     ),
   };
 });
@@ -236,6 +236,24 @@ describe('ConnectionScreen', () => {
     expect(view.queryByTestId('connection-pause')).toBeNull();
     await act(async () => { fireEvent.press(view.getByTestId('connection-reconnect')); });
     expect(onResume).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Reconnect quiet while online and makes the needed action the ink one', async () => {
+    const view = render(<ConnectionScreen {...props({ active: true, state: 'ready' })} />);
+    await flush();
+    expect(view.getByTestId('connection-reconnect').props.variant).toBe('outline');
+    expect(view.getByText('Reconnect')).toBeTruthy();
+
+    view.rerender(<ConnectionScreen {...props({ active: true, state: 'offline' })} />);
+    expect(view.getByTestId('connection-reconnect').props.variant).toBe('primary');
+
+    view.rerender(<ConnectionScreen {...props({ active: false, state: 'idle' })} />);
+    expect(view.getByTestId('connection-reconnect').props.variant).toBe('primary');
+    expect(view.getByText('Connect')).toBeTruthy();
+
+    view.rerender(<ConnectionScreen {...props({ paused: true, state: 'offline' })} />);
+    expect(view.getByTestId('connection-reconnect').props.variant).toBe('primary');
+    expect(view.getByText('Resume connection')).toBeTruthy();
   });
 
   it('shows the free slot only to free users and routes the switch', async () => {

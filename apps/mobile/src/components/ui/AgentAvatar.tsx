@@ -108,6 +108,12 @@ export type AgentAvatarProps = Readonly<{
    * in `good` instead of adding the separate live dot.
    */
   platformBadge?: boolean;
+  /**
+   * A `locked` avatar is muted and badged with a lock. A row that already ends
+   * in its own lock marker turns the badge off, so the corner can carry the
+   * backend mark instead (roster, owner decision 2026-09-27).
+   */
+  lockBadge?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }>;
@@ -146,6 +152,7 @@ export function AgentAvatar({
   badgeIcon: BadgeIcon,
   platform,
   platformBadge = false,
+  lockBadge = true,
   style,
   testID,
 }: AgentAvatarProps): React.JSX.Element {
@@ -199,7 +206,8 @@ export function AgentAvatar({
   const mutedFilter = isMuted ? [{ saturate: AVATAR_MUTED_SATURATION }] : undefined;
   const productFace = isProductFacePlatform(platform);
   // One corner, one marker: lock and attention outrank the backend badge, which in turn carries the live state.
-  const badgePlatform = platformBadge && !productFace && status !== 'locked' && status !== 'attention'
+  const showLock = status === 'locked' && lockBadge;
+  const badgePlatform = platformBadge && !productFace && !showLock && status !== 'attention'
     ? platform ?? null
     : null;
   const statusDotColor = attentionTone === 'bad' ? theme.colors.bad : theme.colors.warn;
@@ -346,7 +354,7 @@ export function AgentAvatar({
           />
         </Animated.View>
       ) : null}
-      {status === 'locked' ? (
+      {showLock ? (
         <View
           testID={testID ? `${testID}-locked` : undefined}
           pointerEvents="none"

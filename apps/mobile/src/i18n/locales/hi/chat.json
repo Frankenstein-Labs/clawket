@@ -393,5 +393,8 @@
   "This conversation’s project folder is unavailable on your computer.": "इस बातचीत का प्रोजेक्ट फ़ोल्डर आपके कंप्यूटर पर उपलब्ध नहीं है।",
   "Check again": "दोबारा जाँचें",
   "Not sent · tap to review": "नहीं भेजा गया · देखने के लिए टैप करें",
-  "This model does not accept images. Choose another model or remove the photo.": "यह मॉडल तस्वीरें स्वीकार नहीं करता। कोई दूसरा मॉडल चुनें या तस्वीर हटाएँ।"
+  "This model does not accept images. Choose another model or remove the photo.": "यह मॉडल तस्वीरें स्वीकार नहीं करता। कोई दूसरा मॉडल चुनें या तस्वीर हटाएँ।",
+  "Copy as Markdown": "Markdown के रूप में कॉपी करें",
+  "Copy image URL": "इमेज URL कॉपी करें",
+  "Copy {{total}} image URLs": "{{total}} इमेज URL कॉपी करें"
 }

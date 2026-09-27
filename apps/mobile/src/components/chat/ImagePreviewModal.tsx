@@ -15,9 +15,10 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { Download, X } from 'lucide-react-native';
+import { useLightStatusBarBeforeModal } from '../../hooks/useLightStatusBarBeforeModal';
 import { saveImageUriToPhotoLibrary } from '../../services/photo-library';
 import { useAppTheme } from '../../theme';
-import { FontSize, IconSize, PresentationColor, Radius, Space } from '../../theme/tokens';
+import { BorderWidth, FontSize, IconSize, PresentationColor, Radius, Space } from '../../theme/tokens';
 import { FloatingButton, SettingsGroup, SettingsRow, Sheet } from '../ui';
 
 type Props = {
@@ -108,6 +109,8 @@ export function ImagePreviewModal({
   const styles = useMemo(() => createStyles(theme.colors), [theme]);
   const closeRequestedRef = useRef(false);
   const [imageActionsIndex, setImageActionsIndex] = useState<number | null>(null);
+  // The black viewer otherwise keeps the app's dark status bar icons on Android (invisible clock).
+  const statusBarReady = useLightStatusBarBeforeModal(visible);
 
   const scales = useMemo(
     () => uris.map(() => makeMutable(1)),
@@ -424,7 +427,7 @@ export function ImagePreviewModal({
     ],
   }));
 
-  if (!visible) {
+  if (!visible || !statusBarReady) {
     return <></>;
   }
 
@@ -522,8 +525,12 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
       right: Space.lg,
       zIndex: 10,
     },
+    // A 15% white disc vanished over white screenshots (device review 2026-09-27); a dark
+    // translucent disc with a light hairline stays visible over any photo.
     previewCloseButton: {
-      backgroundColor: PresentationColor.mediaControl,
+      backgroundColor: PresentationColor.mediaOverlayStrong,
+      borderWidth: BorderWidth.hairline,
+      borderColor: PresentationColor.onMediaBorder,
     },
     gestureSurface: {
       flex: 1,

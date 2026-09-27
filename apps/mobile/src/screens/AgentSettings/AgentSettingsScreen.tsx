@@ -75,6 +75,12 @@ export type AgentSettingsViewProps = Readonly<{
   state: AgentSettingsPageState;
   isPro: boolean;
   summary?: AgentSettingsSummary;
+  /**
+   * The summary counts are still being read. A card without a value shows a quiet placeholder
+   * meanwhile; `—` means the read ended without one (device review 2026-09-27: a busy Hermes
+   * showed dashes for counts that were only late).
+   */
+  summaryLoading?: boolean;
   identityDetail?: string;
   /** Agents on the connection; the shared Gateway heartbeat line shows only for a lone Agent. */
   agentCount?: number;
@@ -93,7 +99,7 @@ export type AgentSettingsViewProps = Readonly<{
 
 export type AgentSettingsScreenProps = Omit<
   AgentSettingsViewProps,
-  'connectionState' | 'state' | 'summary' | 'onRefresh' | 'refreshing'
+  'connectionState' | 'state' | 'summary' | 'summaryLoading' | 'onRefresh' | 'refreshing'
 > & Readonly<{
   adapter: AgentAdapter | null;
   /** Route-level refresh (roster identity, connection probe) that runs beside the summary reload. */
@@ -194,6 +200,7 @@ export function AgentSettingsScreen({
     value: AgentSettingsSummary;
   }> | null>(null);
   const [hasStateError, setHasStateError] = useState(false);
+  const [summaryPendingKey, setSummaryPendingKey] = useState<string | null>(null);
   const summary = loadedSummary?.key === summaryKey
     ? loadedSummary.value
     : initialSummary;
@@ -229,7 +236,12 @@ export function AgentSettingsScreen({
     const applySummary = (nextSummary: AgentSettingsSummary) => {
       if (active) mergeSummary(summaryKey, nextSummary);
     };
-    void loadAgentSettingsSummary(accessibleAdapter, agent, Date.now(), applySummary).then(applySummary);
+    setSummaryPendingKey(summaryKey);
+    void loadAgentSettingsSummary(accessibleAdapter, agent, Date.now(), applySummary)
+      .then(applySummary)
+      .finally(() => {
+        if (active) setSummaryPendingKey((pending) => (pending === summaryKey ? null : pending));
+      });
     return () => {
       active = false;
     };
@@ -292,6 +304,7 @@ export function AgentSettingsScreen({
       state={state}
       isPro={viewProps.isPro}
       summary={summary}
+      summaryLoading={summaryPendingKey !== null && summaryPendingKey === summaryKey}
       identityDetail={viewProps.identityDetail}
       errorMessage={errorMessage}
       refreshing={refreshing}
@@ -308,6 +321,7 @@ export function AgentSettingsView({
   state,
   isPro,
   summary,
+  summaryLoading = false,
   identityDetail,
   agentCount,
   errorMessage,
@@ -453,7 +467,7 @@ export function AgentSettingsView({
           <FloatingButton
             testID="agent-profile-chat"
             icon={MessageCircle}
-            appearance="ink"
+            appearance="plain"
             accessibilityLabel={t('Continue chatting', { ns: 'settings' })}
             onPress={onContinueChat ?? onBack}
           />
@@ -540,6 +554,7 @@ export function AgentSettingsView({
           </Pressable>
           <AgentSettingsStats
             stats={model.stats}
+            loading={summaryLoading}
             translate={(key) => translateAgentSettingsKey(t, key)}
             translateDetail={(detail) => t(detail.key, { ns: 'settings', ...detail.params })}
             onOpen={openRow}
@@ -593,11 +608,13 @@ type TranslateDetail = (detail: NonNullable<AgentSettingsStatDescriptor['detail'
 /** Two hero cards on top, then a row of tiles; every card is one 44-point-plus target. */
 function AgentSettingsStats({
   stats,
+  loading,
   translate,
   translateDetail,
   onOpen,
 }: Readonly<{
   stats: ReadonlyArray<AgentSettingsStatDescriptor>;
+  loading: boolean;
   translate: Translate;
   translateDetail: TranslateDetail;
   onOpen: (stat: AgentSettingsStatDescriptor) => void;
@@ -618,13 +635,17 @@ function AgentSettingsStats({
       >
         <View style={styles.statBody}>
           <View style={styles.statHead}>
-            <Text
-              testID={`agent-settings-stat-${stat.id}-value`}
-              style={styles.statValue}
-              numberOfLines={1}
-            >
-              {stat.value ?? '—'}
-            </Text>
+            {stat.value == null && loading && !stat.locked ? (
+              <Skeleton testID={`agent-settings-stat-${stat.id}-loading`} style={styles.statValueLoading} />
+            ) : (
+              <Text
+                testID={`agent-settings-stat-${stat.id}-value`}
+                style={styles.statValue}
+                numberOfLines={1}
+              >
+                {stat.value ?? '—'}
+              </Text>
+            )}
             {stat.locked ? (
               <Lock
                 testID={`agent-settings-stat-${stat.id}-lock`}
@@ -781,6 +802,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
       fontWeight: FontWeight.semibold,
       fontVariant: ['tabular-nums'],
     },
+    // A number-sized bar on the title line, so the card keeps its height while the count loads.
+    statValueLoading: { width: 40, height: 20, borderRadius: Radius.full },
     statDetail: {
       flexShrink: 1,
       color: colors.inkSecondary,

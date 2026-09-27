@@ -14,6 +14,7 @@ import { ControlSize, FontSize, FontWeight, LineHeight, Space } from '../../them
 import { formatChannelName } from '../../utils/chat-message';
 import { formatDurationMs } from '../../utils/cron';
 import { cronRunStatus } from './cron-model';
+import { formatCronDate } from './cron-schedule';
 
 // The record can outgrow the screen: fixed detents plus the Gorhom-integrated
 // scroll view (a plain ScrollView in a dynamic-height sheet hands its drags to
@@ -39,7 +40,7 @@ type ContentState = Readonly<{ key: string; status: 'loading' | 'ready' | 'faile
  * still belongs to this run, a way into the full conversation.
  */
 export function CronRunSheet({ run, loadContent, onOpenSession, onClose }: CronRunSheetProps): React.JSX.Element {
-  const { t } = useTranslation(['common', 'settings']);
+  const { t, i18n } = useTranslation(['common', 'settings']);
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const markdownStyle = useMemo(() => createChatMarkdownStyle(theme.colors, FontSize.body), [theme.colors]);
@@ -98,7 +99,7 @@ export function CronRunSheet({ run, loadContent, onOpenSession, onClose }: CronR
             <SettingsRow
               style={styles.row}
               title={run.jobName ?? run.jobId}
-              subtitle={formatTimestamp(run.runAtMs ?? run.ts)}
+              subtitle={formatCronDate(run.runAtMs ?? run.ts, i18n?.resolvedLanguage)}
               value={translateCronRunStatus(cronRunStatus(run), t)}
             />
           </SettingsGroup>
@@ -195,10 +196,6 @@ function translateCronRunStatus(status: ReturnType<typeof cronRunStatus>, t: Ret
   return t('Unknown', { ns: 'common' });
 }
 
-function formatTimestamp(value?: number): string {
-  if (!value || !Number.isFinite(value)) return '—';
-  return new Date(value).toLocaleString();
-}
 
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors']) {

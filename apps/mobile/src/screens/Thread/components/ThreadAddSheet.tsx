@@ -14,6 +14,7 @@ import {
   CalendarClock,
   Camera,
   FileText,
+  FolderOpen,
   Images,
   Puzzle,
   SlidersHorizontal,
@@ -358,7 +359,8 @@ export function ThreadAddSheet({
   ].filter(Boolean);
 
   const agentRows = [
-    onOpenSessionFiles ? menuRow('session-files', 'session-files', t('Session files'), FileText, onOpenSessionFiles) : null,
+    // Its own glyph: beside Choose File the two rows read as one action.
+    onOpenSessionFiles ? menuRow('session-files', 'session-files', t('Session files'), FolderOpen, onOpenSessionFiles) : null,
     onCreateScheduledTask ? menuRow('schedule', 'schedule', t('Schedule a task'), CalendarClock, onCreateScheduledTask) : null,
     onOpenTools ? menuRow('tools', 'tools', t('Tools'), SlidersHorizontal, onOpenTools) : null,
   ].filter(Boolean);

@@ -14,6 +14,7 @@ jest.mock('react-native', () => {
   return {
     Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Alert: { alert: jest.fn() },
+    StatusBar: { pushStackEntry: jest.fn((props: unknown) => ({ props })), popStackEntry: jest.fn() },
     Modal: primitive('Modal'),
     Pressable: primitive('Pressable'),
     StyleSheet: {
@@ -170,5 +171,35 @@ describe('ImagePreviewModal image actions', () => {
       'chat-image',
     ));
     expect(view.queryByTestId('image-options-sheet')).toBeNull();
+  });
+
+  it('gives the Android viewer light status bar icons before presenting its black window', () => {
+    const { Platform, StatusBar } = require('react-native') as {
+      Platform: { OS: string };
+      StatusBar: { pushStackEntry: jest.Mock; popStackEntry: jest.Mock };
+    };
+    const frames: FrameRequestCallback[] = [];
+    const originalRequest = global.requestAnimationFrame;
+    const originalCancel = global.cancelAnimationFrame;
+    global.requestAnimationFrame = ((callback: FrameRequestCallback) => frames.push(callback)) as typeof requestAnimationFrame;
+    global.cancelAnimationFrame = jest.fn();
+    Platform.OS = 'android';
+    const props = {
+      uris: ['file://first.jpg'], index: 0, screenWidth: 390, screenHeight: 844,
+      insetsTop: 24, insetsBottom: 16, onClose: jest.fn(), onIndexChange: jest.fn(),
+    };
+    try {
+      const view = render(<ImagePreviewModal visible {...props} />);
+      expect(StatusBar.pushStackEntry).toHaveBeenCalledWith({ barStyle: 'light-content', animated: false });
+      expect(view.queryByTestId('image-preview-close')).toBeNull();
+      act(() => { frames.splice(0).forEach((callback) => callback(0)); });
+      expect(view.getByTestId('image-preview-close')).toBeTruthy();
+      view.rerender(<ImagePreviewModal visible={false} {...props} />);
+      expect(StatusBar.popStackEntry).toHaveBeenCalledWith(StatusBar.pushStackEntry.mock.results[0]?.value);
+    } finally {
+      Platform.OS = 'ios';
+      global.requestAnimationFrame = originalRequest;
+      global.cancelAnimationFrame = originalCancel;
+    }
   });
 });

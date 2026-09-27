@@ -6,6 +6,13 @@ import type {
 
 const CORE_FILE_ORDER = ['SOUL.md', 'MEMORY.md', 'USER.md', 'AGENTS.md'];
 
+/** A search field above two to four core files was clutter (device review 2026-09-27). */
+export const FILE_SEARCH_MIN_COUNT = 7;
+
+export function shouldShowFileSearch(count: number, query: string): boolean {
+  return count >= FILE_SEARCH_MIN_COUNT || query.trim().length > 0;
+}
+
 export function filterAgentFiles(
   files: ReadonlyArray<AgentFileSummary>,
   query: string,
