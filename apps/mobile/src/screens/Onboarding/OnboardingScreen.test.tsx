@@ -263,7 +263,7 @@ describe('OnboardingScreen', () => {
     fireEvent.press(view.getByTestId('onboarding-backend-local-model'));
     expect(view.queryByTestId('onboarding-agent-prompt')).toBeNull();
     expect(view.queryByTestId('onboarding-pairing-method-terminal')).toBeNull();
-    expect(view.getByText('npx @p697/clawket pair --backend local-model')).toBeTruthy();
+    expect(view.getByText('npx @p697/clawket@latest pair --backend local-model')).toBeTruthy();
     fireEvent.changeText(view.getByTestId('onboarding-pairing-code'), '001234');
     fireEvent.press(view.getByTestId('onboarding-connect'));
     expect(onSubmitPairing).toHaveBeenCalledWith({ backendKind: 'local-model', transportKind: 'relay', code: '001234' });
@@ -276,18 +276,18 @@ describe('OnboardingScreen', () => {
     expect(engineTabs).toBeTruthy();
     expect(view.getByTestId('onboarding-local-model-engine-llamacpp').props.accessibilityState).toEqual({ selected: true });
     expect(view.getByTestId('onboarding-command-hint').props.children).toBe('Start llama-server first (default port 8080), then run this in Terminal.');
-    expect(view.getByText('npx @p697/clawket pair --backend local-model')).toBeTruthy();
+    expect(view.getByText('npx @p697/clawket@latest pair --backend local-model')).toBeTruthy();
 
     fireEvent.press(view.getByTestId('onboarding-local-model-engine-ollama'));
     expect(view.getByTestId('onboarding-command-hint').props.children).toBe('Make sure Ollama is running, then run this in Terminal.');
-    const ollamaCommand = 'npx @p697/clawket pair --backend local-model --engine ollama --base-url http://127.0.0.1:11434';
+    const ollamaCommand = 'npx @p697/clawket@latest pair --backend local-model --engine ollama --base-url http://127.0.0.1:11434';
     expect(view.getByText(ollamaCommand)).toBeTruthy();
     fireEvent.press(view.getByTestId('onboarding-copy-command'));
     expect(onCopyCommand).toHaveBeenCalledWith(ollamaCommand);
 
     fireEvent.press(view.getByTestId('onboarding-local-model-engine-openai-compatible'));
     expect(view.getByTestId('onboarding-command-hint').props.children).toContain('OpenAI-compatible server');
-    expect(view.getByText('npx @p697/clawket pair --backend local-model --engine openai-compatible --base-url http://127.0.0.1:1234')).toBeTruthy();
+    expect(view.getByText('npx @p697/clawket@latest pair --backend local-model --engine openai-compatible --base-url http://127.0.0.1:1234')).toBeTruthy();
 
     // OpenClaw keeps its generic terminal hint and never shows the engine switch.
     view.rerender(<OnboardingScreen {...createProps({ initialBackend: 'openclaw', onCopyCommand, onCopyAgentPrompt: undefined })} />);
@@ -362,6 +362,34 @@ describe('OnboardingScreen', () => {
     expect(hermes.getByTestId('onboarding-pairing-code').props.returnKeyType).toBe('go');
   });
 
+  it('lifts the pairing code and Connect action above the Android keyboard too', () => {
+    // KeyboardProvider draws edge to edge, so Android's adjustResize no longer resizes the window
+    // and the number pad covered Connect (Samsung A56, Android 16).
+    const platform = (require('react-native') as { Platform: { OS: string } }).Platform;
+    platform.OS = 'android';
+    try {
+      const view = render(<OnboardingScreen {...createProps()} />);
+      const avoiding = view.getByTestId('onboarding-keyboard-avoiding');
+      expect(avoiding.props.enabled).toBe(true);
+      expect(avoiding.props.behavior).toBe('padding');
+      expect(view.getByTestId('onboarding-scroll').props.automaticallyAdjustKeyboardInsets).toBe(false);
+      // Hermes codes are Latin letters and digits: a plain Latin keyboard, not the system IME.
+      const hermes = render(<OnboardingScreen {...createProps({ initialBackend: 'hermes' })} />);
+      expect(hermes.getByTestId('onboarding-pairing-code').props.keyboardType).toBe('visible-password');
+      expect(hermes.getByTestId('onboarding-pairing-code').props.returnKeyType).toBe('go');
+      expect(view.getByTestId('onboarding-pairing-code').props.keyboardType).toBe('number-pad');
+    } finally {
+      platform.OS = 'ios';
+    }
+  });
+
+  it('tells Pi users to run the command from the project folder it pairs', () => {
+    const pi = render(<OnboardingScreen {...createProps({ initialBackend: 'pi', onCopyAgentPrompt: undefined })} />);
+    expect(pi.getByTestId('onboarding-command-hint').props.children).toBe('Open Terminal in your project folder and run this command.');
+    const codex = render(<OnboardingScreen {...createProps({ initialBackend: 'codex', onCopyAgentPrompt: undefined })} />);
+    expect(codex.getByTestId('onboarding-command-hint').props.children).toBe('Open Terminal and run this command.');
+  });
+
   it.each(['openclaw', 'hermes'] as const)('uses one native keyboard-avoidance owner on iPad for %s pairing', (backend) => {
     mockIPad = true;
     const onSubmitPairing = jest.fn();
@@ -399,9 +427,9 @@ describe('OnboardingScreen', () => {
       // Without an agent handler the step offers only the terminal path, with no method switch.
       expect(view.queryByTestId('onboarding-pairing-method-terminal')).toBeNull();
       expect(view.queryByTestId('onboarding-pairing-method-agent')).toBeNull();
-      expect(view.getByText('npx @p697/clawket pair --preview')).toBeTruthy();
+      expect(view.getByText('npx @p697/clawket pair --preview --backend openclaw')).toBeTruthy();
       fireEvent.press(view.getByTestId('onboarding-copy-command'));
-      expect(onCopyCommand).toHaveBeenCalledWith('npx @p697/clawket pair --preview');
+      expect(onCopyCommand).toHaveBeenCalledWith('npx @p697/clawket pair --preview --backend openclaw');
       await act(async () => { await Promise.resolve(); });
       expect(view.getByTestId('onboarding-copy-command').props.accessibilityLabel).toBe('Copied');
       act(() => { jest.advanceTimersByTime(1500); });
@@ -459,9 +487,9 @@ describe('OnboardingScreen', () => {
       expect(view.queryByTestId('onboarding-agent-prompt')).toBeNull();
       expect(view.getByText('Get a pairing code')).toBeTruthy();
       expect(view.getByText('Enter the pairing code')).toBeTruthy();
-      expect(view.getByText('npx @p697/clawket pair --preview')).toBeTruthy();
+      expect(view.getByText('npx @p697/clawket pair --preview --backend hermes')).toBeTruthy();
       fireEvent.press(view.getByTestId('onboarding-copy-command'));
-      expect(onCopyCommand).toHaveBeenCalledWith('npx @p697/clawket pair --preview');
+      expect(onCopyCommand).toHaveBeenCalledWith('npx @p697/clawket pair --preview --backend hermes');
       fireEvent.press(view.getByTestId('onboarding-pairing-method-agent'));
       expect(view.getByTestId('onboarding-agent-prompt')).toBeTruthy();
     } finally {

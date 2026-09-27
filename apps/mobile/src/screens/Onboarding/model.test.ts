@@ -1,5 +1,6 @@
 import {
   buildAgentPairingPrompt,
+  buildBackendPairingCommand,
   buildLocalModelPairingCommand,
   LOCAL_MODEL_ENGINES,
   createPairingSubmission,
@@ -18,14 +19,24 @@ describe('Onboarding model', () => {
     expect(prompt).toContain('npx @p697/clawket pair --preview');
     expect(prompt).toContain('open-source');
     expect(prompt).toContain('"Pairing code:"');
-    expect(buildAgentPairingPrompt(t)).toContain('npx @p697/clawket pair');
+    expect(buildAgentPairingPrompt(t)).toContain('npx @p697/clawket@latest pair');
+  });
+
+  it('targets exactly the selected backend, while preserving legacy bare pair for older apps', () => {
+    const command = 'npx @p697/clawket@latest pair';
+    expect(buildBackendPairingCommand('openclaw', command)).toBe(`${command} --backend openclaw`);
+    expect(buildBackendPairingCommand('hermes', command)).toBe(`${command} --backend hermes`);
+    expect(buildBackendPairingCommand('codex', command)).toBe(`${command} --backend codex`);
+    expect(buildBackendPairingCommand('claude-code', command)).toBe(`${command} --backend claude-code`);
+    expect(buildBackendPairingCommand('pi', `${command} --preview`)).toBe(`${command} --backend pi`);
+    expect(buildBackendPairingCommand('openclaw', `${command} --preview`)).toBe(`${command} --preview --backend openclaw`);
   });
 
   it('spells out engine and address for model servers that do not match the CLI default', () => {
     expect(LOCAL_MODEL_ENGINES).toEqual(['llamacpp', 'ollama', 'openai-compatible']);
-    expect(buildLocalModelPairingCommand('llamacpp')).toBe('npx @p697/clawket pair --backend local-model');
-    expect(buildLocalModelPairingCommand('ollama')).toBe('npx @p697/clawket pair --backend local-model --engine ollama --base-url http://127.0.0.1:11434');
-    expect(buildLocalModelPairingCommand('openai-compatible')).toBe('npx @p697/clawket pair --backend local-model --engine openai-compatible --base-url http://127.0.0.1:1234');
+    expect(buildLocalModelPairingCommand('llamacpp')).toBe('npx @p697/clawket@latest pair --backend local-model');
+    expect(buildLocalModelPairingCommand('ollama')).toBe('npx @p697/clawket@latest pair --backend local-model --engine ollama --base-url http://127.0.0.1:11434');
+    expect(buildLocalModelPairingCommand('openai-compatible')).toBe('npx @p697/clawket@latest pair --backend local-model --engine openai-compatible --base-url http://127.0.0.1:1234');
   });
 
   it('removes separators without silently changing malformed invitation values', () => {

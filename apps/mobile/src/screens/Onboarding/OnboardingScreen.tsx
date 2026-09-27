@@ -46,7 +46,7 @@ import { useKeyboardRevealScroll } from '../../components/ui/useKeyboardRevealSc
 import { Skeleton } from '../../components/ui/Skeleton';
 import {
   buildAgentPairingPrompt,
-  buildLocalModelPairingCommand,
+  buildBackendPairingCommand,
   createPairingSubmission,
   formatVerificationCode,
   isVerificationCodeComplete,
@@ -145,10 +145,12 @@ export function OnboardingScreen({
   const { t } = useTranslation('config');
   const { theme } = useAppTheme();
   const insets = useSafeAreaInsets();
-  // iOS: the padding KeyboardAvoidingView shrinks the viewport with the keyboard's real frame;
+  // Phones: the padding KeyboardAvoidingView shrinks the viewport with the keyboard's real frame;
   // the reveal scroll moves only the measured shortfall, in step with the keyboard, so a
   // third-party keyboard changing height afterwards adds an increment instead of a re-scroll.
-  const keyboardReveal = useKeyboardRevealScroll({ clearance: KEYBOARD_CLEARANCE, enabled: Platform.OS === 'ios' && !isIPad });
+  // Android too: KeyboardProvider draws edge to edge, so adjustResize no longer lifts the Connect
+  // button above the keyboard (Samsung A56 / Android 16, 2026-09-27).
+  const keyboardReveal = useKeyboardRevealScroll({ clearance: KEYBOARD_CLEARANCE, enabled: !isIPad });
   const [backendKind, setBackendKind] = useState<PairableBackendKind>(initialBackend ?? 'openclaw');
   const [pairingCode, setPairingCode] = useState('');
   const [choosing, setChoosing] = useState(!initialBackend);
@@ -163,9 +165,7 @@ export function OnboardingScreen({
   const [docsExpanded, setDocsExpanded] = useState(false);
   const viewedRef = useRef(false);
   const submitInFlightRef = useRef(false);
-  const effectiveCommand = backendKind === 'local-model'
-    ? buildLocalModelPairingCommand(localModelEngine)
-    : backendKind === 'claude-code' ? `${pairingCommand} --backend claude-code` : backendKind === 'codex' ? `${pairingCommand} --backend codex` : backendKind === 'pi' ? `${PAIRING_COMMAND} --backend pi` : pairingCommand;
+  const effectiveCommand = buildBackendPairingCommand(backendKind, pairingCommand, localModelEngine);
   const agentPrompt = useMemo(() => buildAgentPairingPrompt(t, effectiveCommand), [effectiveCommand, t]);
   // The tab row doubles as the list of supported model servers; each hint names
   // the precondition the CLI cannot check for the user before it runs.
@@ -175,6 +175,11 @@ export function OnboardingScreen({
     { key: 'openai-compatible', label: t('Other'), hint: t('Point --base-url at any OpenAI-compatible server, like LM Studio or vLLM, then run this in Terminal.') },
   ], [t]);
   const localModelHint = backendKind === 'local-model' ? localModelEngines.find((engine) => engine.key === localModelEngine)?.hint : undefined;
+  // Pi pairs the folder the command runs in (`--project` defaults to the working directory), so run from
+  // a home-directory terminal would authorize the whole home folder.
+  const commandHint = localModelHint ?? (backendKind === 'pi'
+    ? t('Open Terminal in your project folder and run this command.')
+    : t('Open Terminal and run this command.'));
   const backendOptions = useMemo(() => [
     { ...BACKEND_OPTIONS[0], label: t('OpenClaw') },
     { ...BACKEND_OPTIONS[1], label: t('Hermes') },
@@ -232,9 +237,13 @@ export function OnboardingScreen({
   const pairingReady = isVerificationCodeComplete(pairingCode, backendKind) && !connecting;
   // iPadOS 26 numberPad uses an unstable floating popover. Keep pairing on
   // the full ASCII keyboard; normalization below still enforces the code alphabet.
-  const pairingInput = isIPad
-    ? { keyboardType: 'ascii-capable' as const }
-    : PAIRING_INPUT_PRESENTATION[backendKind];
+  const pairingInput: { keyboardType: 'number-pad' | 'ascii-capable' | 'visible-password' } = isIPad
+    ? { keyboardType: 'ascii-capable' }
+    : Platform.OS === 'android' && PAIRING_INPUT_PRESENTATION[backendKind].keyboardType === 'ascii-capable'
+      // `ascii-capable` is iOS-only: Android fell back to the system IME, often a Chinese 9-key pad,
+      // for a Latin code. `visible-password` opens a plain Latin keyboard without suggestions.
+      ? { keyboardType: 'visible-password' }
+      : PAIRING_INPUT_PRESENTATION[backendKind];
   const pairingPlaceholder: Readonly<Record<PairableBackendKind, string>> = {
     openclaw: t('123 456'),
     hermes: t('ABC 234'),
@@ -291,7 +300,7 @@ export function OnboardingScreen({
       <FlowHeader onBack={connecting ? onClose : onClose || !choosing ? goBack : undefined} testID="onboarding-close"
         title={environment === 'preview' ? t('Preview') : undefined}
         right={onOpenDesignSystem ? <FloatingButton icon={Palette} appearance="plain" accessibilityLabel={t('Design language')} onPress={onOpenDesignSystem} /> : undefined} />
-      <KeyboardAvoidingView testID="onboarding-keyboard-avoiding" enabled={!isIPad} style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView testID="onboarding-keyboard-avoiding" enabled={!isIPad} style={styles.screen} behavior="padding">
       <Reanimated.ScrollView ref={keyboardReveal.scrollRef} testID="onboarding-scroll"
         // On iPad use the native keyboard frame and focused-field reveal. Do not also
         // resize/scroll through keyboard-controller (which can miss a foreground frame).
@@ -335,7 +344,7 @@ export function OnboardingScreen({
             {backendKind === 'local-model'
               ? <SegmentedTabs testID="onboarding-local-model-engine" size="sm" tabs={localModelEngines} active={localModelEngine} onSwitch={setLocalModelEngine} />
               : null}
-            <Text testID="onboarding-command-hint" style={styles.subtitle}>{localModelHint ?? t('Open Terminal and run this command.')}</Text>
+            <Text testID="onboarding-command-hint" style={styles.subtitle}>{commandHint}</Text>
             <CommandBlock command={effectiveCommand} copied={copied} onCopy={onCopyCommand ? () => {
               void Promise.resolve(onCopyCommand(effectiveCommand)).then(flashCopied, () => setLocalError(true));
             } : undefined} />

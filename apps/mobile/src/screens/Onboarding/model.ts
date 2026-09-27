@@ -1,6 +1,8 @@
 import type { AdapterErrorCode, BackendKind, TransportKind } from '@clawket/agent-protocol';
 
-export const PAIRING_COMMAND = 'npx @p697/clawket pair';
+// `@latest`: a bare `npx @p697/clawket` runs an older global install when one exists, and a 3.0 CLI
+// rejects `--backend codex|claude-code|pi` (Samsung A56 device review, 2026-09-27).
+export const PAIRING_COMMAND = 'npx @p697/clawket@latest pair';
 
 /**
  * Message the user pastes to the agent already running on their computer so it
@@ -39,6 +41,18 @@ export function buildLocalModelPairingCommand(engine: LocalModelEngine): string 
     default:
       return base;
   }
+}
+
+/** A copied command must select exactly the backend the person chose in the app. */
+export function buildBackendPairingCommand(
+  backendKind: PairableBackendKind,
+  pairingCommand: string = PAIRING_COMMAND,
+  localModelEngine: LocalModelEngine = 'llamacpp',
+): string {
+  if (backendKind === 'local-model') return buildLocalModelPairingCommand(localModelEngine);
+  // Pi has no Preview service; its existing pairing always uses the Pi production Registry.
+  if (backendKind === 'pi') return `${PAIRING_COMMAND} --backend pi`;
+  return `${pairingCommand} --backend ${backendKind}`;
 }
 
 export type PairingSubmission = Readonly<{
