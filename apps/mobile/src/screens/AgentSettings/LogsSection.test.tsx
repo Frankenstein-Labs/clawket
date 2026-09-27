@@ -60,6 +60,8 @@ jest.mock('react-native', () => {
   };
 });
 
+jest.mock('lucide-react-native', () => ({ Check: 'Check' }));
+
 jest.mock('react-i18next', () => ({
   useTranslation: (() => {
     const t = (key: string) => key;
