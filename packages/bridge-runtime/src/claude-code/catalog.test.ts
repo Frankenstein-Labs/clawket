@@ -29,7 +29,7 @@ describe('Claude project and native session discovery', () => {
     expect(sessions[0]).toMatchObject({ source: 'native', canContinue: false, allowedActions: { delete: false, reset: false } });
     await expect(catalog.history('unlisted-client-id')).rejects.toThrow('Unknown');
     expect(sdk.getSessionMessages).toHaveBeenCalledTimes(1);
-    expect(sdk.getSessionMessages).toHaveBeenCalledWith(row(project, 1).sessionId, { dir: expect.stringContaining('/project') });
+    expect(sdk.getSessionMessages).toHaveBeenCalledWith(row(project, 1).sessionId, { dir: project });
   });
 
   it('discovers more than one page, hides native IDs and keeps a missing project visible', async () => {

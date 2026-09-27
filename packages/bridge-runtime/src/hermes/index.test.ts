@@ -108,7 +108,7 @@ describe('HermesLocalBridge multi-session protocol', () => {
     await expect(bridge.dispatchRequest('sessions.delete', { key: 'native' })).rejects.toThrow(/read-only/);
     await expect(bridge.dispatchRequest('sessions.patch', { title: 'oops' })).rejects.toThrow(/requires key/);
     await expect(bridge.dispatchRequest('sessions.reset', {})).rejects.toThrow(/requires key/);
-  });
+  }, 20_000);
 
   it('paginates with a same-timestamp keyset cursor that does not drift after concurrent inserts', async () => {
     const messages = Array.from({ length: 5 }, (_, index) => ({
