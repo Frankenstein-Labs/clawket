@@ -40,6 +40,9 @@ export function createChatMarkdownStyle(
       color: colors.ink,
       lineHeight,
       marginBottom: 6,
+      // Native Android reserves only "99." by default; longer list markers
+      // otherwise draw outside the text view and lose their leading digit.
+      markerMinWidth: Math.ceil(fontSize * 2.5),
     },
     blockquote: {
       fontSize,

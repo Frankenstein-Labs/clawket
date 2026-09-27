@@ -61,7 +61,8 @@ export async function handleCodexCommand(args: string[]): Promise<void> {
     if (command === 'start' || command === 'restart') { if (!existsSync(configPath)) throw new Error('Pair this Codex connection first'); await startCodexBackground(['run', '--config', configPath], join(directory, 'codex.log')); return; }
   }
   if (command === 'pair' && !args.includes('--foreground')) {
-    await startCodexBackground([...args, '--config', configPath], join(directory, 'codex.log')); return;
+    // The child receives --config before it exists; preserve the resolved scope.
+    await startCodexBackground([...args, ...(config.device && !args.includes('--device') ? ['--device'] : []), '--config', configPath], join(directory, 'codex.log')); return;
   }
   const show = (text: string) => { if (process.send) process.send({ type: 'codex.display', text }); else console.log(text); };
   const installed = await inspectCodexInstallation(config.command);

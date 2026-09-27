@@ -69,6 +69,8 @@ export type SocketAttachment = {
   lastPongAt?: number;
   /** Routing identity survives Durable Object hibernation; never contains payloads. */
   activeClient?: boolean;
+  /** Bounded response origins survive hibernation; no request bodies or credentials. */
+  pendingRequests?: Array<[id: string, expiresAt: number]>;
   challengeDeliveredAt?: number;
   authScope?: 'full' | 'pairing';
   pairingSessionId?: string;

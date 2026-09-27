@@ -31,7 +31,8 @@ import {
   Space,
 } from '../../theme/tokens';
 import { useAppTheme } from '../../theme';
-import { getDisplayAgentEmoji } from '../../utils/agent-emoji';
+import { extractDisplayAgentEmoji } from '../../utils/agent-emoji';
+import { getAgentInitials } from '../ui/AgentAvatar';
 import { resolveAgentAvatarImageSource } from '../../utils/agent-avatar-uri';
 import { sanitizeDisplayText } from '../../utils/chat-message';
 import { PosterThemePicker } from '../poster/PosterThemePicker';
@@ -258,6 +259,7 @@ export function ChatSharePosterModal({
   }, [capture]);
 
   const agentAvatarSource = resolveAgentAvatarImageSource(agentAvatarUri);
+  const displayEmoji = extractDisplayAgentEmoji(agentEmoji);
 
   const posterContent = (
     <>
@@ -267,7 +269,9 @@ export function ChatSharePosterModal({
           <Image source={agentAvatarSource} style={[s.avatar, { borderColor: theme.accent }]} />
         ) : (
           <View style={[s.avatarFallback, { backgroundColor: theme.accentSoft, borderColor: theme.accentMuted }]}>
-            <Text style={s.avatarEmoji}>{getDisplayAgentEmoji(agentEmoji)}</Text>
+            <Text style={displayEmoji ? s.avatarEmoji : [s.avatarInitials, { color: theme.accent }]}>
+              {displayEmoji ?? getAgentInitials(agentName)}
+            </Text>
           </View>
         )}
         <View style={s.agentMeta}>
@@ -426,6 +430,10 @@ const s = StyleSheet.create({
   },
   avatarEmoji: {
     fontSize: FontSize.display,
+  },
+  avatarInitials: {
+    fontSize: FontSize.title,
+    fontWeight: FontWeight.semibold,
   },
   agentMeta: {
     flex: 1,

@@ -30,8 +30,8 @@ export function PageIntro({ title, description }: { title: string; description?:
 export function ChoiceRow({ icon: Icon, leading, title, description, locked = false, onPress, testID }: { icon?: LucideIcon; leading?: React.ReactNode; title: string; description?: string; locked?: boolean; onPress: () => void; testID?: string }) {
   const { theme: { colors } } = useAppTheme();
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={description ? `${title}, ${description}` : title} onPress={onPress}
-    style={({ pressed }) => [styles.choice, { backgroundColor: pressed ? colors.surface : 'transparent' }]}>
-    <View style={[styles.icon, { backgroundColor: leading ? 'transparent' : colors.surface }]}>{leading ?? (Icon ? <Icon size={IconSize.lg} color={colors.ink} strokeWidth={1.5} /> : null)}</View>
+    style={({ pressed }) => [styles.choice, description ? styles.choiceDescribed : null, { backgroundColor: pressed ? colors.surface : 'transparent' }]}>
+    <View style={[styles.icon, description ? styles.iconDescribed : null, { backgroundColor: leading ? 'transparent' : colors.surface }]}>{leading ?? (Icon ? <Icon size={IconSize.lg} color={colors.ink} strokeWidth={1.5} /> : null)}</View>
     <View style={styles.choiceCopy}>
       <Text style={[styles.choiceTitle, { color: colors.ink }]}>{title}</Text>
       {description ? <Text style={[styles.description, { color: colors.inkSecondary }]}>{description}</Text> : null}
@@ -100,8 +100,13 @@ const styles = StyleSheet.create({
   intro: { gap: Space.md, paddingVertical: Space.lg },
   title: { fontSize: FontSize.display, lineHeight: LineHeight.display, fontWeight: FontWeight.semibold },
   description: { fontSize: FontSize.secondary, lineHeight: LineHeight.secondary, fontWeight: FontWeight.regular },
-  choice: { minHeight: ControlSize.rosterRow, paddingVertical: Space.lg, paddingHorizontal: Space.xs, flexDirection: 'row', alignItems: 'center', gap: Space.lg, borderRadius: Radius.card },
-  icon: { width: ControlSize.settingsRow, height: ControlSize.settingsRow, borderRadius: Radius.card, alignItems: 'center', justifyContent: 'center' },
+  // A title-only choice is a 68-point row around a 44-point slot (owner request 2026-09-27) so the
+  // Onboarding chooser and its help fit one phone screen; a described choice keeps the 52-point tile
+  // and the roster's two-line height.
+  choice: { paddingVertical: Space.md, paddingHorizontal: Space.xs, flexDirection: 'row', alignItems: 'center', gap: Space.lg, borderRadius: Radius.card },
+  choiceDescribed: { minHeight: ControlSize.rosterRow, paddingVertical: Space.lg },
+  icon: { width: ControlSize.floatingButton, height: ControlSize.floatingButton, borderRadius: Radius.card, alignItems: 'center', justifyContent: 'center' },
+  iconDescribed: { width: ControlSize.settingsRow, height: ControlSize.settingsRow },
   choiceCopy: { flex: 1, gap: Space.xs },
   choiceTitle: { fontSize: FontSize.body, lineHeight: LineHeight.body, fontWeight: FontWeight.semibold },
   step: { gap: Space.md },

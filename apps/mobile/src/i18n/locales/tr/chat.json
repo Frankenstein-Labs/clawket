@@ -386,5 +386,12 @@
   "Allow this action?": "Bu işleme izin verilsin mi?",
   "Stop task": "Görevi durdur",
   "Your answer": "Yanıtınız",
-  "Question {{current}} of {{total}}": "Soru {{current}} / {{total}}"
+  "Question {{current}} of {{total}}": "Soru {{current}} / {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "İçe aktarılan sohbetler salt okunurdur. Bağlamlarını koruyarak yeni bir sohbette devam edin; orijinal sohbet değişmez.",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "Bu konuşma bilgisayarınızda açık. Kapatıp yeniden kontrol edin veya yeni bir oturumda devam edin.",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "Bu konuşmanın kullanımda olup olmadığı doğrulanamadı. Yeniden kontrol edin veya yeni bir oturumda devam edin.",
+  "This conversation’s project folder is unavailable on your computer.": "Bu konuşmanın proje klasörüne bilgisayarınızdan erişilemiyor.",
+  "Check again": "Yeniden kontrol et",
+  "Not sent · tap to review": "Gönderilmedi · incelemek için dokunun",
+  "This model does not accept images. Choose another model or remove the photo.": "Bu model görselleri desteklemiyor. Başka bir model seçin veya fotoğrafı kaldırın."
 }

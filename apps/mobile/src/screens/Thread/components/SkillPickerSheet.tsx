@@ -9,14 +9,14 @@ import { SheetHeaderButton } from '../../../components/ui/SheetHeaderButton';
 import { SearchInput } from '../../../components/ui/SearchInput';
 import { SettingsDivider, SettingsRow } from '../../../components/ui/SettingsGroup';
 import { Banner } from '../../../components/ui/Banner';
-import { LoadingState } from '../../../components/ui/LoadingState';
+import { ListSkeleton } from '../../../components/ui/ListSkeleton';
 import { useAppTheme } from '../../../theme';
 import { FontSize, LineHeight, Space } from '../../../theme/tokens';
 
 const SNAP_POINTS = ['62%', '92%'];
 
-export function SkillPickerSheet({ visible, adapter, agentId, online, onClose, onSelect, onManage }: Readonly<{
-  visible: boolean; adapter: AgentAdapter | null; agentId: string; online: boolean;
+export function SkillPickerSheet({ visible, adapter, agentId, sessionKey, online, onClose, onSelect, onManage }: Readonly<{
+  visible: boolean; adapter: AgentAdapter | null; agentId: string; sessionKey?: string; online: boolean;
   onClose: () => void; onSelect: (skill: SkillStatusEntry) => void; onManage: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation(['chat', 'common', 'settings']);
@@ -24,24 +24,27 @@ export function SkillPickerSheet({ visible, adapter, agentId, online, onClose, o
   const [query, setQuery] = useState('');
   const [skills, setSkills] = useState<SkillStatusEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const pending = useRef<(() => void) | null>(null);
-  const scope = `${adapter?.connection.id ?? ''}:${agentId}`;
+  const scope = JSON.stringify([adapter?.connection.id ?? '', agentId, sessionKey ?? '']);
   const currentScope = useRef({ scope, adapter, online });
   currentScope.current = { scope, adapter, online };
-  useEffect(() => { pending.current = null; setSkills([]); setQuery(''); }, [scope, adapter]);
+  useEffect(() => { pending.current = null; setSkills([]); setQuery(''); setFetched(false); }, [scope, adapter]);
   useEffect(() => {
     let active = true;
     if (!visible || !adapter?.management?.skills?.status || !online) { setLoading(false); return; }
     setLoading(true); setError(false);
-    void adapter.management.skills.status(agentId).then((report) => {
+    void adapter.management.skills.status(agentId, sessionKey ? { sessionKey } : undefined).then((report) => {
       if (active) setSkills(report.skills.filter((skill) => Boolean(skill.invocation) && skill.eligible && !skill.disabled && !skill.blockedByAllowlist));
-    }).catch(() => { if (active) setError(true); }).finally(() => { if (active) setLoading(false); });
+    }).catch(() => { if (active) setError(true); }).finally(() => { if (active) { setLoading(false); setFetched(true); } });
     return () => { active = false; };
-  }, [adapter, agentId, visible, online, retry]);
+  }, [adapter, agentId, sessionKey, visible, online, retry]);
   const filtered = useMemo(() => skills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(query.trim().toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name)), [skills, query]);
+  // Until the first answer for this scope lands, the list is loading, never "no skills".
+  const waiting = !skills.length && !error && (loading || (online && Boolean(adapter?.management?.skills?.status) && !fetched));
   const handoff = (action: () => void) => {
     const selectedScope = scope;
     pending.current = () => { if (currentScope.current.scope === selectedScope && currentScope.current.adapter === adapter && currentScope.current.online) action(); };
@@ -53,11 +56,11 @@ export function SkillPickerSheet({ visible, adapter, agentId, online, onClose, o
     <View style={styles.search}><SearchInput inSheet appearance="quiet" value={query} onChangeText={setQuery} placeholder={t('Search skills...', { ns: 'settings' })} testID="skill-picker-search" /></View>
     {error ? <Banner message={t('Failed to load skills', { ns: 'settings' })} actionLabel={t('Retry', { ns: 'common' })} onAction={() => setRetry((value) => value + 1)} /> : null}
     <BottomSheetScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      {loading && !skills.length ? <LoadingState /> : filtered.map((skill, index) => <React.Fragment key={skill.skillKey}>
+      {waiting ? <ListSkeleton testID="skill-picker-loading" accessibilityLabel={t('Loading...', { ns: 'common' })} detail trailing="none" /> : filtered.map((skill, index) => <React.Fragment key={skill.skillKey}>
         {index ? <SettingsDivider inset="content" /> : null}
         <SettingsRow title={skill.name} subtitle={skill.description} subtitleLines={1} disabled={!online} onPress={() => handoff(() => onSelect(skill))} testID={`use-skill-${skill.skillKey}`} />
       </React.Fragment>)}
-      {!loading && !filtered.length && !error ? <Text style={[styles.empty, { color: theme.colors.inkSecondary }]}>{online ? t('No available skills') : t('Offline', { ns: 'common' })}</Text> : null}
+      {!waiting && !loading && !filtered.length && !error ? <Text style={[styles.empty, { color: theme.colors.inkSecondary }]}>{online ? t('No available skills') : t('Offline', { ns: 'common' })}</Text> : null}
     </BottomSheetScrollView>
   </Sheet>;
 }

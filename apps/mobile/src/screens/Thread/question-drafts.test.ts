@@ -25,3 +25,34 @@ it('restores every multi-selection and preserves a deliberately cleared incomple
   await saveQuestionDraft('multi', { q0: ['Unit', 'Integration'], q1: [] });
   expect(await loadQuestionDraft('multi')).toEqual({ q0: ['Unit', 'Integration'], q1: [] });
 });
+
+
+it('coalesces a fast typing burst to the latest draft while storage is busy', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  (AsyncStorage.getItem as jest.Mock).mockImplementationOnce(async () => { await gate; return null; });
+  (AsyncStorage.setItem as jest.Mock).mockClear();
+  const writes = Array.from({ length: 80 }, (_, i) => saveQuestionDraft('fast-typing', { note: [`Draft ${i}`] }));
+  await Promise.resolve();
+  release();
+  await Promise.all(writes);
+  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(await loadQuestionDraft('fast-typing')).toEqual({ note: ['Draft 79'] });
+});
+
+it('flushes edits arriving during an in-flight write before resolving the shared save', async () => {
+  let release!: () => void;
+  let began!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { began = resolve; });
+  const write = (AsyncStorage.setItem as jest.Mock).getMockImplementation()!;
+  (AsyncStorage.setItem as jest.Mock).mockImplementationOnce(async (...args) => {
+    began(); await gate; return write(...args);
+  });
+  const first = saveQuestionDraft('edit-during-write', { note: ['First'] });
+  await started;
+  const latest = saveQuestionDraft('edit-during-write', { note: ['Final exact answer'] });
+  release();
+  await Promise.all([first, latest]);
+  expect(await loadQuestionDraft('edit-during-write')).toEqual({ note: ['Final exact answer'] });
+});

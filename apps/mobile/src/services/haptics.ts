@@ -16,6 +16,15 @@ export function triggerSelectionHaptic(): void {
   fireAndForget(Haptics.selectionAsync());
 }
 
+export function triggerMediumImpact(): void {
+  fireAndForget(Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
+}
+
+/** A hard knock for the Companion's claw swipe. */
+export function triggerHeavyImpact(): void {
+  fireAndForget(Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy));
+}
+
 export function triggerDragStartHaptic(): void {
   triggerLightImpact();
 }

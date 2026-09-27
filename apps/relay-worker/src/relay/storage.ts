@@ -1,4 +1,5 @@
 import { selectActiveClient } from './runtime';
+import { restorePendingRequests } from './pending-requests';
 import {
   GATEWAY_OWNER_KEY,
   GATEWAY_OWNER_TOUCH_INTERVAL_MS,
@@ -278,6 +279,7 @@ export function reconcileSockets(runtime: RelayRuntime, options: ReconcileSocket
     selectActiveClient(runtime, marked.length === 1 ? marked[0][0] : onlyClient ?? null);
   }
 
+  restorePendingRequests(runtime);
   const hasOwner = Boolean(runtime.gatewaySocket?.readyState === WebSocket.OPEN);
   const summary: RehydrateSummary = {
     totalSocketCount: sockets.length,

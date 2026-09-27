@@ -89,6 +89,8 @@ A Hermes Relay command that deliberately yields to another owner stays alive wit
 
 Codex default state and listen ports are isolated by project and service environment. Refresh pairing through the existing Registry access-code endpoint so previously paired clients retain their identity; refuse refresh while a task is active.
 
+Codex first-time detached pairing must carry the resolved device scope into the child when adding a not-yet-created `--config` path. Repeated default pairing reuses that state; explicit project scope remains restricted.
+
 ## Claude Code projects
 
 `clawket claude-code pair` / `pair --backend claude-code` uses the installed, unmodified Claude executable and device discovery by default. `--project` authorizes only that project. State, logs and Preview credentials live under the independent `~/.clawket/claude-code` tree; lifecycle commands stop only authenticated Clawket-owned runtimes. The official `@anthropic-ai/claude-agent-sdk` is an explicit package external, retained as a production dependency; do not bundle its assets or silently substitute its packaged CLI for the user's selected executable. Native authentication remains on the computer. See `../../docs/3.1/claude-code.md`.

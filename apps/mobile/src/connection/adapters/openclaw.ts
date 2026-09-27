@@ -264,8 +264,8 @@ export class OpenClawAdapter extends GatewayAdapterBase {
   }
 
   protected override handleGatewayConnectionTransition(state: LegacyConnectionState): void {
-    this.currentCapabilities = resolveCapabilities('openclaw', { sessionFiles: state === 'ready'
-      && this.gateway.supportsMethod?.('clawket.files.list') === true && this.gateway.supportsMethod?.('clawket.files.read') === true });
+    this.updateCapabilities(resolveCapabilities('openclaw', { sessionFiles: state === 'ready'
+      && this.gateway.supportsMethod?.('clawket.files.list') === true && this.gateway.supportsMethod?.('clawket.files.read') === true }));
     if (state === 'connecting') this.v2HandshakeStarted = false;
     if (state === 'challenging') this.v2HandshakeStarted = true;
   }

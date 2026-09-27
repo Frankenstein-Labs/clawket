@@ -20,6 +20,7 @@ jest.mock('react-native', () => {
     return result;
   };
   return {
+    Platform: { OS: 'android', select: (options: Record<string, unknown>) => options.android ?? options.default },
     Image: primitive('Image'),
     Pressable: primitive('Pressable'),
     StyleSheet: { create: <T,>(styles: T) => styles, flatten, hairlineWidth: 1 },
@@ -126,6 +127,8 @@ describe('PendingImageBar', () => {
     expect(StyleSheet.flatten(hitTarget.props.style)).toMatchObject({
       width: HitSize.md,
       height: HitSize.md,
+      top: 0,
+      right: 0,
     });
     expect(StyleSheet.flatten(visual.props.style)).toMatchObject({
       width: IconSize.md,

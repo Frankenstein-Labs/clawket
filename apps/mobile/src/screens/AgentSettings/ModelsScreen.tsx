@@ -132,6 +132,8 @@ export function ModelsScreen({
   }, [scope]);
 
   const manage = bundle?.mode === 'manage';
+  const canSelectCurrent = Boolean(operations?.setSelection)
+    && (!adapter.capabilities.modelPerSession || Boolean(agent.mainSessionKey));
   const dirty = bundle ? isModelsDraftDirty(bundle) : false;
   const saving = busy !== null;
   const groups = useMemo(() => buildAgentModelGroups(bundle, query), [bundle, query]);
@@ -147,7 +149,7 @@ export function ModelsScreen({
     [allGroups, providerSlug],
   );
   const pickerModels = useMemo<PickerModelInfo[]>(() => allGroups.flatMap((group) => (
-    group.rows.map((row) => ({ id: row.id, name: row.name, provider: row.provider }))
+    group.rows.map((row) => ({ id: row.id, name: row.name, provider: row.provider, sortOrder: row.model.sortOrder }))
   )), [allGroups]);
   const pickerProviders = useMemo(() => allGroups.map((group) => ({
     slug: group.provider,
@@ -278,11 +280,11 @@ export function ModelsScreen({
   }, [bundle, dirty, load, online, operations, runWrite, saving, scope, t]);
 
   const selectCurrent = useCallback(async (row: Pick<AgentModelRow, 'id' | 'provider'>) => {
-    if (!operations?.setSelection || !online || saving) return;
+    if (!canSelectCurrent || !operations?.setSelection || !online || saving) return;
     const done = await runWrite(
       'select',
       async () => { await operations.setSelection!(buildModelSelectionWrite(row, adapter.capabilities, agent)); },
-      setSheetError,
+      detailKey ? setSheetError : setError,
       t('Save failed', { ns: 'settings' }),
     );
     if (!done || activeScope.current !== scope) return;
@@ -291,7 +293,7 @@ export function ModelsScreen({
       selection: { ...current.selection, currentModel: row.id, currentProvider: row.provider },
     } : current));
     setDetailKey(null);
-  }, [adapter.capabilities, agent, online, operations, runWrite, saving, scope, t]);
+  }, [adapter.capabilities, agent, canSelectCurrent, detailKey, online, operations, runWrite, saving, scope, t]);
 
   const addModel = useCallback(async (group: AgentModelGroup, modelId: string, modelName: string) => {
     if (!operations?.addModel) return;
@@ -416,7 +418,7 @@ export function ModelsScreen({
           />
         ) : (
           <>
-            <SettingsGroup testID="agent-models-defaults">
+            {manage || canSelectCurrent ? <SettingsGroup testID="agent-models-defaults">
               {manage ? (
                 <>
                   <SettingsRow
@@ -463,7 +465,7 @@ export function ModelsScreen({
                   onPress={() => setPicker('current')}
                 />
               )}
-            </SettingsGroup>
+            </SettingsGroup> : null}
 
             <View style={styles.catalog}>
               <View style={styles.catalogTools}>
@@ -556,6 +558,7 @@ export function ModelsScreen({
         error={sheetError}
         canDelete={canDelete}
         canEditCost={canEditCost}
+        canSelectCurrent={canSelectCurrent}
         onClose={() => setDetailKey(null)}
         onSetDefault={(row) => {
           if (!manage) { void selectCurrent(row); return; }

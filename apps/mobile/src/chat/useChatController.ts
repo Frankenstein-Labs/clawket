@@ -1,5 +1,5 @@
 import { sameLiveToolCall, withToolMessage } from './liveToolMessages';
-import { rememberUncertainSend, recoverUncertainSends, useUncertainSends } from './sendRecovery';
+import { hasBackendEcho, rememberUncertainSend, recoverUncertainSends, useUncertainSends } from './sendRecovery';
 import { describeReplyFailure, sanitizeReplyFailure } from './reply-failure';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -251,7 +251,9 @@ export function useChatController({
   const [input, setInput] = useState("");
   const [sendFailure, setSendFailureMessage] = useState<string | null>(null);
   const [sendFailureDetails, setSendFailureDetails] = useState<string | null>(null);
+  const uncertainFailureRef = useRef<{ scope: string | null; message: UiMessage } | null>(null);
   const setSendFailure = useCallback((message: string | null) => {
+    uncertainFailureRef.current = null;
     setSendFailureMessage(message);
     setSendFailureDetails(null);
   }, []);
@@ -654,6 +656,14 @@ export function useChatController({
     sessionKey: history.sessionKey,
   });
   const uncertainSends = useUncertainSends(messageQueue.scopeKey, history.messages);
+  useEffect(() => {
+    const failure = uncertainFailureRef.current;
+    if (failure?.scope === messageQueue.scopeKey && hasBackendEcho(history.messages, failure.message)) {
+      // Clear only the failure for this exact acknowledged send. A reconnect,
+      // unrelated reply or matching text is not delivery evidence.
+      setSendFailure(null);
+    }
+  }, [history.messages, messageQueue.scopeKey, uncertainSends, setSendFailure]);
   const recoverableMessages = useMemo(
     () => recoverUncertainSends(history.messages, uncertainSends),
     [history.messages, uncertainSends],
@@ -2470,6 +2480,7 @@ export function useChatController({
           rememberUncertainSend(sourceQueue.scopeKey, uiMsg);
           if (messageQueueRef.current.scopeKey !== sourceQueue.scopeKey) return;
           setSendFailure(t('Sending failed. Check the conversation before trying again.'));
+          uncertainFailureRef.current = { scope: sourceQueue.scopeKey, message: uiMsg };
           const details = sanitizeReplyFailure(error instanceof Error ? error.message : String(error ?? ''));
           setSendFailureDetails(details || null);
           // Preserve one recoverable bubble; refilling the composer invites duplicate sends.
@@ -2563,6 +2574,7 @@ export function useChatController({
     currentModel,
     currentModelHeaderLabel,
     currentModelDisplayName,
+    currentModelSupportsImages,
     selectNativeThinkingLevel,
     nativeThinkingLevel,
     currentModelProvider,
@@ -2577,6 +2589,7 @@ export function useChatController({
     connectionState,
     adapter,
     sessionKey: history.sessionKey,
+    sessionMetadata: history.sessions.find((session) => session.key === history.sessionKey),
     setInput,
     setSessions: history.setSessions,
     setThinkingLevel: history.setThinkingLevel,
@@ -2670,6 +2683,11 @@ export function useChatController({
       const text = (voiceText ?? input).trim();
       const images = [...pendingImages];
       if ((!text && images.length === 0) || !history.sessionKey) return;
+      if (currentModelSupportsImages === false && images.some(image => isImageAttachmentMimeType(image.mimeType))) {
+        setSendFailure(t('This model does not accept images. Choose another model or remove the photo.'));
+        setSendFailureDetails(null);
+        return;
+      }
       if (!acquireSendTriggerGuard()) return;
 
 
@@ -2791,6 +2809,8 @@ export function useChatController({
     messageQueue,
     openCommandPicker,
     openModelPicker,
+    currentModelSupportsImages,
+    t,
     pendingImages,
     releaseSendTriggerGuard,
     submitMessageWithConnectionCheck,
@@ -3177,14 +3197,19 @@ export function useChatController({
     reconnectAdapter(adapter);
   }, [adapter]);
 
+  // Recovery can retire a remembered run while its stream is already null.
+  // The timeline must observe that identity change even when history and text
+  // are unchanged, otherwise an empty streaming row survives the final reply.
+  const presentationRunId = currentRunIdRef.current;
+  const presentationStartedAt = streamStartedAtRef.current;
   const listData = useMemo((): UiMessage[] => {
     const sessionMessages = buildLiveRunListData({
       historyMessages: recoverableMessages,
       streamSegments: chatStreamSegments,
       toolMessages: chatToolMessages,
       liveStreamText: chatStream,
-      liveStreamStartedAt: streamStartedAtRef.current,
-      activeRunId: currentRunIdRef.current,
+      liveStreamStartedAt: presentationStartedAt,
+      activeRunId: presentationRunId,
       includePlaceholder: true,
     });
     const pairApprovals = pairApprovalProjection.adapter === adapter
@@ -3213,7 +3238,7 @@ export function useChatController({
       }), renderKey: item.id }))
       .reverse();
     return queued.length > 0 ? [...queued, ...merged] : merged;
-  }, [adapter, chatStream, chatStreamSegments, chatToolMessages, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, recoverableMessages]);
+  }, [adapter, chatStream, chatStreamSegments, chatToolMessages, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, presentationRunId, presentationStartedAt, recoverableMessages]);
 
   useEffect(() => {
     const list = adapter?.management?.approvals?.listExec;
@@ -3412,6 +3437,7 @@ export function useChatController({
     currentModel,
     currentModelHeaderLabel,
     currentModelDisplayName,
+    currentModelSupportsImages,
     currentModelProvider,
     thinkingLevel: nativeThinkingLevel ?? history.thinkingLevel,
     openThinkPicker: openStaticThinkPicker,

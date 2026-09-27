@@ -13,6 +13,7 @@ jest.mock('react-native', () => {
     ReactRuntime.createElement(name, props, children)
   );
   return {
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Pressable: host('Pressable'),
     Text: host('Text'),
     View: host('View'),

@@ -386,5 +386,12 @@
   "Allow this action?": "इस कार्रवाई की अनुमति दें?",
   "Stop task": "कार्य रोकें",
   "Your answer": "आपका उत्तर",
-  "Question {{current}} of {{total}}": "प्रश्न {{current}} / {{total}}"
+  "Question {{current}} of {{total}}": "प्रश्न {{current}} / {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "इम्पोर्ट की गई बातचीत केवल पढ़ी जा सकती है। उसी संदर्भ के साथ नई बातचीत में जारी रखें; मूल बातचीत नहीं बदलेगी।",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "यह बातचीत आपके कंप्यूटर पर खुली है। इसे बंद करके दोबारा जाँचें, या नए सत्र में जारी रखें।",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "यह बातचीत उपयोग में है या नहीं, इसकी पुष्टि नहीं हो सकी। दोबारा जाँचें, या नए सत्र में जारी रखें।",
+  "This conversation’s project folder is unavailable on your computer.": "इस बातचीत का प्रोजेक्ट फ़ोल्डर आपके कंप्यूटर पर उपलब्ध नहीं है।",
+  "Check again": "दोबारा जाँचें",
+  "Not sent · tap to review": "नहीं भेजा गया · देखने के लिए टैप करें",
+  "This model does not accept images. Choose another model or remove the photo.": "यह मॉडल तस्वीरें स्वीकार नहीं करता। कोई दूसरा मॉडल चुनें या तस्वीर हटाएँ।"
 }

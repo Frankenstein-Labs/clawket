@@ -242,6 +242,17 @@ describe('RosterCache', () => {
 });
 
 describe('aggregateRoster', () => {
+  it('shows the latest conversation title when a sessions-first backend has no message preview', () => {
+    const summarize = (entryMode?: 'sessions', preview?: string) => aggregateRoster([{
+      connection: connection('a', 1), source: 'live', syncedAt: 200,
+      agents: [{ ...agent('a', 'main'), ...(entryMode ? { entryMode, mainSessionKey: '' } : {}) }],
+      sessions: [session('a', 'main', 'task', 100, { kind: 'direct', title: 'Investigate startup', preview })],
+      watermarks: {},
+    }], 'a')[0].agents[0];
+    expect(summarize('sessions').preview).toBe('Investigate startup');
+    expect(summarize('sessions', 'Found the cause').preview).toBe('Investigate startup: Found the cause');
+    expect(summarize().preview).toBeUndefined();
+  });
   it('orders groups and Agents by human activity only, keeping unread and attention as badges', () => {
     const groups = aggregateRoster([
       {
@@ -433,4 +444,16 @@ it('persists sessions-first entry without inventing a main chat', async () => {
   await cache.set('c', [{ ...agent('c', 'codex'), entryMode: 'sessions', mainSessionKey: '' }], []);
   expect((await new RosterCache({ storage }).get('c'))?.agents[0]).toMatchObject({ entryMode: 'sessions', mainSessionKey: '' });
   await expect(cache.set('c', [{ ...agent('c', 'codex'), mainSessionKey: '' }], [])).rejects.toThrow();
+});
+
+it('preserves a native continuation restriction across a cold cache read', async () => {
+  const storage = new MemoryCacheStorage(); const cache = new RosterCache({ storage });
+  await cache.set('c', [agent('c', 'claude-code')], [session('c', 'claude-code', 'native:blocked', 10, { source: 'native', canContinue: false, continuationBlockedReason: 'in_use' })], 'ready');
+  expect((await new RosterCache({ storage }).get('c'))?.sessions[0]).toMatchObject({ canContinue: false, continuationBlockedReason: 'in_use' });
+});
+
+it('preserves input attention distinctly from approval in cached sessions', async () => {
+  const storage = new MemoryCacheStorage(); const cache = new RosterCache({ storage });
+  await cache.set('c', [agent('c', 'claude-code')], [session('c', 'claude-code', 'question', 10, { attention: 'input' })], 'ready');
+  expect((await new RosterCache({ storage }).get('c'))?.sessions[0].attention).toBe('input');
 });

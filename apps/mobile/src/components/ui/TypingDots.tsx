@@ -1,15 +1,6 @@
-import React, { useEffect } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-  type SharedValue,
-} from 'react-native-reanimated';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Animated, Easing, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 import { useAppTheme } from '../../theme';
 import { LineHeight, Motion, Radius, Space } from '../../theme/tokens';
 
@@ -17,6 +8,8 @@ import { LineHeight, Motion, Radius, Space } from '../../theme/tokens';
  * Three dots that lift one after another while the Agent is working — the
  * messaging convention for "the other side is composing". One shared progress
  * value drives every dot, so the row costs one animation and stays in phase.
+ * Native opacity/transform updates do not repeatedly commit the Fabric tree
+ * while a long streaming Markdown message is being measured.
  * Reduced motion keeps the three dots at their resting opacities.
  */
 const DOT_COUNT = 3;
@@ -38,27 +31,23 @@ export type TypingDotsProps = Readonly<{
   testID?: string;
 }>;
 
-/** 0 outside the dot's bounce window, rising to 1 at its peak and back. */
-function bounce(value: number, start: number, peak: number, end: number): number {
-  'worklet';
-  if (value <= start || value >= end) return 0;
-  return value < peak ? (value - start) / (peak - start) : (end - value) / (end - peak);
-}
-
 function Dot({ index, progress, color, animate }: {
-  index: number; progress: SharedValue<number>; color: string; animate: boolean;
+  index: number; progress: Animated.Value; color: string; animate: boolean;
 }): React.JSX.Element {
   const start = (index * STEP_MS) / CYCLE_MS;
   const peak = (index * STEP_MS + BOUNCE_MS / 2) / CYCLE_MS;
   const end = (index * STEP_MS + BOUNCE_MS) / CYCLE_MS;
-  const animatedStyle = useAnimatedStyle(() => {
-    if (!animate) return { opacity: REST_OPACITY, transform: [{ translateY: 0 }] };
-    const amount = bounce(progress.value, start, peak, end);
+  const animatedStyle = useMemo(() => {
+    const inputRange = [start, peak, end];
     return {
-      opacity: REST_OPACITY + (1 - REST_OPACITY) * amount,
-      transform: [{ translateY: DOT_LIFT * amount }],
+      opacity: animate ? progress.interpolate({
+        inputRange, outputRange: [REST_OPACITY, 1, REST_OPACITY], extrapolate: 'clamp',
+      }) : REST_OPACITY,
+      transform: [{ translateY: animate ? progress.interpolate({
+        inputRange, outputRange: [0, DOT_LIFT, 0], extrapolate: 'clamp',
+      }) : 0 }],
     };
-  }, [animate, start, peak, end]);
+  }, [animate, progress, start, peak, end]);
   return (
     <Animated.View
       testID={`typing-dot-${index}`}
@@ -70,19 +59,22 @@ function Dot({ index, progress, color, animate }: {
 export function TypingDots({ color, height = LineHeight.caption, style, testID }: TypingDotsProps): React.JSX.Element {
   const { theme } = useAppTheme();
   const reduceMotion = useReducedMotion();
-  const progress = useSharedValue(0);
+  const progress = useRef(new Animated.Value(0)).current;
   const animate = !reduceMotion;
 
   useEffect(() => {
-    cancelAnimation(progress);
-    progress.value = 0;
-    if (!animate) return () => cancelAnimation(progress);
-    progress.value = withRepeat(
-      withTiming(1, { duration: CYCLE_MS, easing: Easing.linear }),
-      -1,
-      false,
-    );
-    return () => cancelAnimation(progress);
+    progress.setValue(0);
+    if (!animate) return;
+    const animation = Animated.loop(Animated.timing(progress, {
+      toValue: 1,
+      duration: CYCLE_MS,
+      easing: Easing.linear,
+      useNativeDriver: true,
+      // A persistent working indicator must not hold list rendering jobs.
+      isInteraction: false,
+    }));
+    animation.start();
+    return () => animation.stop();
   }, [animate, progress]);
 
   const dotColor = color ?? theme.colors.inkSecondary;

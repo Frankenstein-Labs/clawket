@@ -1,5 +1,4 @@
 import React from 'react';
-import type { SessionKind } from '@clawket/agent-protocol';
 import {
   Pressable,
   StyleProp,
@@ -8,7 +7,7 @@ import {
   type ViewStyle,
   View,
 } from 'react-native';
-import { Lock, Pin } from 'lucide-react-native';
+import { Lock, Pin, type LucideIcon } from 'lucide-react-native';
 import Animated, {
   interpolateColor,
   useAnimatedStyle,
@@ -35,7 +34,6 @@ import {
   type AgentAvatarStatus,
 } from './AgentAvatar';
 import { formatFloatingButtonBadgeCount } from './FloatingButton';
-import { resolveSessionKindIcon } from './sessionKindIcon';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -47,8 +45,10 @@ export type RosterRowProps = Readonly<{
   preview: string;
   emoji?: string | null;
   avatarUrl?: string | null;
+  /** A pinned Agent: pinned Agents lead the roster and only they carry the pin glyph. */
   pinned?: boolean;
-  sessionKind?: SessionKind;
+  /** A conversation row's badge glyph (`resolveSessionTileIcon`); Agent rows have none. */
+  sessionIcon?: LucideIcon;
   avatarStatus?: AgentAvatarStatus;
   attentionTone?: AgentAttentionTone;
   timeLabel?: string;
@@ -78,7 +78,7 @@ export function RosterRow({
   emoji,
   avatarUrl,
   pinned = false,
-  sessionKind,
+  sessionIcon,
   avatarStatus = 'idle',
   attentionTone = 'bad',
   timeLabel,
@@ -95,9 +95,6 @@ export function RosterRow({
   testID,
 }: RosterRowProps): React.JSX.Element {
   const { theme } = useAppTheme();
-  const AvatarOverlayIcon = pinned && sessionKind
-    ? resolveSessionKindIcon(sessionKind)
-    : null;
   const pressProgress = useSharedValue(0);
   const pressedStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(
@@ -147,22 +144,9 @@ export function RosterRow({
           avatarUrl={avatarUrl}
           status={resolvedAvatarStatus}
           attentionTone={attentionTone}
+          badgeIcon={sessionIcon}
           variant="roster"
         />
-        {AvatarOverlayIcon ? (
-          <View
-            testID={testID ? `${testID}-avatar-overlay` : undefined}
-            pointerEvents="none"
-            style={[styles.avatarOverlay, { backgroundColor: theme.colors.surfaceFloating }]}
-          >
-            <AvatarOverlayIcon
-              testID={testID ? `${testID}-avatar-overlay-icon` : undefined}
-              size={Space.md}
-              color={theme.colors.inkSecondary}
-              strokeWidth={BorderWidth.strong}
-            />
-          </View>
-        ) : null}
       </View>
       <View style={styles.copy}>
         <View style={styles.nameRow}>
@@ -223,16 +207,6 @@ const styles = StyleSheet.create({
     width: AGENT_AVATAR_METRICS.roster.size,
     height: AGENT_AVATAR_METRICS.roster.size,
     position: 'relative',
-  },
-  avatarOverlay: {
-    position: 'absolute',
-    top: -Space.xs,
-    right: -Space.xs,
-    width: Space.lg,
-    height: Space.lg,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   copy: {
     flex: 1,

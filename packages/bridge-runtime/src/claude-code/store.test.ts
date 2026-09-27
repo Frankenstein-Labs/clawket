@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeStore } from './store.js';
 const cleanups: (() => void)[] = [];
@@ -38,4 +38,14 @@ describe('Claude durable metadata ownership', () => {
     writeFileSync(join(dir, 'sessions.json'), JSON.stringify({ version: 1, ...scope, device: true, sessions: [] }));
     expect(() => open()).toThrow('scope');
   });
+  it('persists a continued native identity and rejects a mismatched public mapping', () => {
+    const { dir, open } = fixture(); const store = open(); const nativeId = randomUUID();
+    const key = `native:${createHash('sha256').update(nativeId).digest('hex').slice(0, 32)}`;
+    store.records.push({ key, nativeId, imported: true, materialized: true, cwd: dir, title: 'Original', createdAt: 1, fingerprints: {} });
+    store.save(); store.close(); const restored = open();
+    expect(restored.records[0]).toMatchObject({ key, nativeId, imported: true });
+    restored.records[0].key = 'native:' + 'a'.repeat(32);
+    expect(() => restored.save()).toThrow('Invalid Claude index');
+  });
+
 });

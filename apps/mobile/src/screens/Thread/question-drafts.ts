@@ -7,6 +7,7 @@ const MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 type Draft = { key: string; updatedAt: number; answers: QuestionAnswers };
 let queue: Promise<unknown> = Promise.resolve();
 const retired = new Set<string>();
+const pendingWrites = new Map<string, { answers: QuestionAnswers; done: Promise<void> }>();
 function serial<T>(work: () => Promise<T>): Promise<T> {
   const next = queue.then(work, work); queue = next.catch(() => {}); return next;
 }
@@ -28,14 +29,31 @@ export function loadQuestionDraft(key: string): Promise<QuestionAnswers | undefi
 }
 export function saveQuestionDraft(key: string, answers: QuestionAnswers): Promise<void> {
   // Snapshot now; queued writes must not observe a later mutable React draft.
-  const snapshot = JSON.parse(JSON.stringify(answers));
-  return serial(async () => {
-    if (retired.has(key) || !validAnswers(snapshot)) return;
-    const drafts = (await read()).filter(d => d.key !== key);
-    drafts.push({ key, updatedAt: Date.now(), answers: snapshot });
-    while (drafts.length > 32 || JSON.stringify(drafts).length > MAX_BYTES) drafts.shift();
-    await AsyncStorage.setItem(STORE, JSON.stringify(drafts));
+  const snapshot: QuestionAnswers = JSON.parse(JSON.stringify(answers));
+  if (retired.has(key) || !validAnswers(snapshot)) return Promise.resolve();
+  const existing = pendingWrites.get(key);
+  if (existing) { existing.answers = snapshot; return existing.done; }
+  const pending = { answers: snapshot, done: Promise.resolve() };
+  pendingWrites.set(key, pending);
+  pending.done = serial(async () => {
+    try {
+      let written: QuestionAnswers | undefined;
+      while (!retired.has(key) && pending.answers !== written) {
+        const drafts = (await read()).filter(d => d.key !== key);
+        if (retired.has(key)) return;
+        // A burst of native input events needs the newest draft, not one
+        // read/write round-trip per keystroke that can lag seconds behind UI.
+        const latest = pending.answers;
+        drafts.push({ key, updatedAt: Date.now(), answers: latest });
+        while (drafts.length > 32 || JSON.stringify(drafts).length > MAX_BYTES) drafts.shift();
+        await AsyncStorage.setItem(STORE, JSON.stringify(drafts));
+        written = latest;
+      }
+    } finally {
+      if (pendingWrites.get(key) === pending) pendingWrites.delete(key);
+    }
   });
+  return pending.done;
 }
 export function removeQuestionDraft(key: string): Promise<void> {
   retired.add(key);

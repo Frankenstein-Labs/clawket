@@ -298,6 +298,7 @@ export function HelpCenterScreen({
       title: t('How to Connect'),
       icon: Terminal,
       paragraphs: [
+        t('To connect Codex, Claude Code or Pi, choose your Agent in Add connection and follow its pairing instructions.'),
         t('Run these commands on the computer running OpenClaw or Hermes, with Node.js and npm installed. Pair uses Relay; pair local uses your local network.'),
         t('In Add connection, choose the backend and enter its pairing code, or scan or import its QR. Local pairing uses QR. If both backends are installed, the CLI prints a result for each. Keep the host running.'),
       ],

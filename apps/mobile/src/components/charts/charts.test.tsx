@@ -13,6 +13,7 @@ jest.mock('react-native', () => {
   );
   const absoluteFillObject = { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 };
   return {
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Pressable: primitive('Pressable'),
     StyleSheet: {
       create: <T,>(styles: T) => styles,

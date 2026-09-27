@@ -907,7 +907,7 @@ export type ModelsOperations = Partial<{
 }>;
 
 export type SkillsOperations = Partial<{
-    status(agentId?: string): Promise<SkillStatusReport>;
+    status(agentId?: string, context?: { sessionKey?: string }): Promise<SkillStatusReport>;
     get(key: string, params?: { agentId?: string; filePath?: string | null }): Promise<SkillDetail>;
     update(key: string, patch: SkillPatch): Promise<{ ok: boolean; skillKey: string; config: unknown }>;
     updateContent(key: string, content: string, agentId?: string): Promise<{ ok: boolean; skillKey: string; path: string }>;

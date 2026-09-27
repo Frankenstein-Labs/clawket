@@ -184,7 +184,7 @@ export interface SessionInfo {
   totalTokensFresh?: boolean;
   contextTokens?: number;
   hasActiveRun?: boolean;
-  attention?: 'approval' | 'error' | 'cron_failed' | null;
+  attention?: 'input' | 'approval' | 'error' | 'cron_failed' | null;
   source?: 'bridge' | 'native';
   allowedActions?: SessionActions;
 }

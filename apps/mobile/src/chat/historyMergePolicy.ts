@@ -270,7 +270,17 @@ export function preserveOptimisticAssistantMessage(
       : findTailUserFallbackMatch(previousLastUser, nextMessages, knownOlderIds);
     const echo = matchingUser ?? fallbackMatch;
     if (!echo) {
-      mergedMessages = [...nextMessages, previousLastUser];
+      // Native extension commands need not be persisted as user turns. Keep a
+      // retained local command before its newer visible result notices, without
+      // reordering canonical assistant/tool turns or guessing missing clocks.
+      let insertAt = nextMessages.length;
+      while (insertAt > 0 && previousLastUser.timestampMs) {
+        const tail = nextMessages[insertAt - 1];
+        if (tail.role !== 'system' || !tail.historyMessageId || !tail.timestampMs
+          || tail.timestampMs < previousLastUser.timestampMs) break;
+        insertAt--;
+      }
+      mergedMessages = [...nextMessages.slice(0, insertAt), previousLastUser, ...nextMessages.slice(insertAt)];
     } else if (previousLastUser.renderKey) {
       // Older backends may omit the send key. Carry the same confirmed match
       // used above into presentation, so a second refresh cannot lose it.
@@ -287,11 +297,17 @@ export function preserveOptimisticAssistantMessage(
   }
 
   mergedMessages = preserveCompletedRunPresentation(previousMessages, mergedMessages);
-  const previousLastAssistant = findLastAssistant(previousMessages);
+  const previousLastAssistant = findLastAssistantAfterIndex(previousMessages, findLastUserIndex(previousMessages))?.message ?? null;
   if (previousLastAssistant?.presentationRunId) return mergedMessages;
   if (!isOptimisticTerminalAssistant(previousLastAssistant)) {
     return mergedMessages;
   }
+
+  const lastUser = findLastUserIndex(mergedMessages);
+  if (previousLastAssistant.historyMessageId && mergedMessages.some((message, index) => (
+    index < lastUser && message.role === 'assistant'
+    && message.historyMessageId === previousLastAssistant.historyMessageId
+  ))) return mergedMessages;
 
   const nextLastAssistant = findLastAssistant(mergedMessages);
   if (!nextLastAssistant) {

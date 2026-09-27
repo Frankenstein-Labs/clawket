@@ -178,11 +178,13 @@ Pi Relay owner-lease conflicts (HTTP 409) retry every two seconds within the sta
 
 ## Claude Code Agent SDK
 
-`src/claude-code/` implements the independent Claude Code runtime using the official SDK and an explicitly selected installed CLI. Native discovery/history is read-only; opaque mappings and acceptance fingerprints may be stored, transcripts and Claude credentials may not. Live ownership includes idle owners and unknown states fail closed. Keep native consent and question identities, respect abort signals, and declare only supported dialogs. See `../../docs/3.1/claude-code.md`; do not change another backend's process or native ownership protocol.
+`src/claude-code/` implements the independent Claude Code runtime using the official SDK and an explicitly selected installed CLI. Native discovery/history reads are read-only; an explicit send or model selection may resume a released imported session using its original ID/cwd. Require fresh native ownership evidence plus a machine-wide Clawket writer lock before starting; release imported processes after each settled turn. Retain native source, opaque key and disabled rename/reset/delete actions. Opaque mappings and acceptance fingerprints may be stored, transcripts and Claude credentials may not. Live ownership includes idle owners and unknown states fail closed. Keep native consent and question identities, respect abort signals, and declare only supported dialogs. See `../../docs/3.1/claude-code.md`; do not change another backend's process or native ownership protocol.
 
 Model choices retain native aliases and optional resolved IDs. Exclude exact native model-switch and interruption envelopes from human chat history without stripping ordinary text discussing commands.
 
 ## Codex App Server
+
+Native thread provenance does not imply a remote owner after an authorized local resume. Keep subsequent turns and settings on the owning App Server, publish ownership to followers, and repeat owner discovery after process restart. A settings-only resume requires the same explicit no-owner and idle-history proof as continuation; uncertain dispatch never opens another writer.
 
 `src/codex/` owns one stdio App Server per pairing configuration. Device pairing selects per-thread cwd from saved projects/native thread metadata; legacy project pairing retains its single cwd. Native thread history remains in Codex storage; only private metadata and prompt fingerprints belong to Clawket. Keep remote methods allowlisted and project IDs opaque. Use exact native turn IDs for steering, stopping and approvals. Never equate a stop acknowledgement or missing RPC response with completion. Preserve pending consent while the phone disconnects, retire it on authoritative resolution, and refuse unsupported interactions. Default to project sandboxing and one-time consent; never enable bypass flags or terminate another Codex client.
 
@@ -198,4 +200,18 @@ Codex device continuity uses versioned local Desktop IPC with bounded frames and
 
 Codex does not create a landing record at startup. Advertise `entryMode: sessions` with an empty `mainSessionKey`; all owned records, including former landing records, are ordinary deletable conversations. Preserve existing IDs/history. A sessionless model list reads the native catalog without creating or selecting a thread; model mutation requires an explicit session.
 
-Claude device discovery supplements native session directories with bounded, read-only project keys from the standard `~/.claude.json`; never expose configuration values or use this fallback across a custom `CLAUDE_CONFIG_DIR`. Explicit project pairings do not read the global project registry.
+Claude device discovery supplements native session directories with bounded, read-only project keys from the standard `~/.claude.json`; never expose configuration values or use this fallback across a custom `CLAUDE_CONFIG_DIR`. Explicit project pairings do not read the global project registry. Untitled Clawket-owned Claude chats take a bounded first-prompt title when accepting their first send; keep explicit/native titles and roll back metadata if acceptance persistence fails.
+
+Independent SDK Relay runtimes reject valid requests beyond their bounded in-flight capacity with an explicit `BRIDGE_BUSY` response before native dispatch. Do not silently drop excess requests or turn a transient overload into a phone handshake timeout. Preserve socket-incarnation fencing for late results.
+
+Claude, Codex and Pi publish question/approval attention in session metadata, including cold roster snapshots, and clear it on native resolution/termination. The shared interaction-attention projection is display-only and never authorizes a tool. Claude file consent shows the exact target and proposed contents/diff while returning the unchanged native input on one-time approval.
+
+SDK Relay heartbeat termination logs fixed cause, pong idle duration, scheduler delay and queued byte count without credentials or payloads. Retain 15-second probes and replacement fencing; recycle only after three consecutive unanswered probe intervals, resetting that budget on a current-socket pong. A delayed/recovered probe is distinct from a disconnect, and unexplained transport closures must not be relabeled as proven heartbeat failures.
+
+Codex skill catalogs resolve optional session scope to an already authorized native/owned project. Reject unknown sessions and mismatched returned project rows; absence of session context retains the configured default project.
+
+Codex Desktop IPC deadlines must outlast native owner discovery plus dispatch (currently 10 seconds each). Only explicit no-owner permits local fallback; routed timeouts, disconnects and generic handler failures retain uncertain dispatch. Do not clear the writer fence or resend after an ambiguous error.
+
+Claude metadata commits must flush the writable exclusive-create handle before atomic rename; reopening it read-only fails `fsync` on Windows. Preserve the old index on write/flush failure. Cross-platform IPC tests use Windows named pipes and platform-native path comparisons.
+
+Claude service project scope uses `realpathSync.native` to match the catalog’s asynchronous native realpath; Windows 8.3 and full paths must not create different scope/cwd identities on restart.

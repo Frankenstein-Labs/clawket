@@ -16,7 +16,7 @@ export type GatewayHistoryCache = {
 
 // Cache-only provenance; never sent over the wire. Some older Gateways supply
 // page-relative fallback IDs, so keep the original projected row ID as well.
-type CachedHistoryMessage = ChatMessage & { cacheRowId?: string };
+type CachedHistoryMessage = ChatMessage & { cacheRowId?: string; sendUncertain?: boolean };
 
 export const DEFAULT_GATEWAY_HISTORY_CACHE: GatewayHistoryCache = {
   async load(connectionId, agentId, sessionKey, limit) {
@@ -373,6 +373,7 @@ function cachedMessageToChatMessage(message: CachedMessage): CachedHistoryMessag
   return {
     id: readNonEmptyString(message.historyMessageId) ?? message.id,
     cacheRowId: message.id,
+    ...(message.sendUncertain ? { sendUncertain: true } : {}),
     role: message.role,
     ...(message.attribution ? { attribution: message.attribution } : {}),
     ...(message.sentLocally ? { sentLocally: true as const } : {}),

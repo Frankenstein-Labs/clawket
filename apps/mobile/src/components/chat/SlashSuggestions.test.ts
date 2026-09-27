@@ -2,6 +2,7 @@ import { Motion } from '../../theme/tokens';
 import { SLASH_SUGGESTION_TIMING_CONFIG } from './SlashSuggestions';
 
 jest.mock('react-native', () => ({
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
   Animated: {
     Value: class {},
     View: 'AnimatedView',

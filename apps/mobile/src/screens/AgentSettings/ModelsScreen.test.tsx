@@ -380,3 +380,28 @@ describe('ModelsScreen', () => {
     expect(view.getByTestId('agent-models-save').props.disabled).toBe(true);
   });
 });
+
+
+it.each(['codex', 'claude-code'] as const)('shows the %s catalog without inventing a global model target', async (backend) => {
+  const { adapter, models } = hermesAdapter();
+  const scoped = { ...adapter, capabilities: CAPABILITY_MATRIX[backend] } as AgentAdapter;
+  const view = render(<ModelsScreen adapter={scoped} agent={{ ...agent, mainSessionKey: '', entryMode: 'sessions' }} online navigation={navigation} />);
+  await waitFor(() => expect(view.getByTestId('agent-model-row-google:pro')).toBeTruthy());
+  expect(view.queryByTestId('agent-models-current')).toBeNull();
+  expect(view.queryByTestId('agent-models-defaults')).toBeNull();
+  fireEvent.press(view.getByTestId('agent-model-row-google:pro'));
+  expect(view.queryByTestId('agent-model-set-default')).toBeNull();
+  expect(models.setSelection).not.toHaveBeenCalled();
+});
+
+it('keeps failed picker selection visible after the picker closes', async () => {
+  const { adapter, models } = hermesAdapter();
+  models.setSelection.mockRejectedValueOnce(new Error('Native model unavailable'));
+  const view = render(<ModelsScreen adapter={adapter} agent={agent} online navigation={navigation} />);
+  await waitFor(() => expect(view.getByTestId('agent-models-current')).toBeTruthy());
+  fireEvent.press(view.getByTestId('agent-models-current'));
+  fireEvent.press(view.getByTestId('models-picker-google:pro'));
+  await waitFor(() => expect(view.getByTestId('agent-models-error')).toBeTruthy());
+  expect(view.getByText('Native model unavailable')).toBeTruthy();
+  expect(view.queryByTestId('models-picker')).toBeNull();
+});

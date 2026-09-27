@@ -17,7 +17,7 @@ jest.mock('../../../components/ui/Sheet', () => ({ Sheet: ({ visible, children, 
 jest.mock('../../../components/ui/SheetHeaderButton', () => ({ SheetHeaderButton: () => null }));
 jest.mock('../../../components/ui/SettingsGroup', () => ({ SettingsDivider: () => null, SettingsRow: (props: any) => require('react').createElement(require('react-native').Pressable, props) }));
 jest.mock('../../../components/ui/Banner', () => ({ Banner: () => null }));
-jest.mock('../../../components/ui/LoadingState', () => ({ LoadingState: () => null }));
+jest.mock('../../../components/ui/ListSkeleton', () => ({ ListSkeleton: () => null }));
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn().mockResolvedValue(true), shareAsync: jest.fn().mockResolvedValue(undefined) }));
 const mockWrite = jest.fn(); const mockDelete = jest.fn();
 jest.mock('expo-file-system', () => ({ Paths: { cache: 'file:///cache/' }, FileMode: { WriteOnly: 'w' },

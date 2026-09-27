@@ -15,6 +15,9 @@ export type RosterDisplayRow = Readonly<{
   preview?: string;
   subtitle?: RosterConnectionGroup['agents'][number]['subtitle'];
   sessionKind?: SessionDescriptor['kind'];
+  /** A conversation row's platform and project, which pick its badge glyph. */
+  sessionChannel?: string;
+  sessionProject?: boolean;
   /** Latest human activity; both the row's time label and its position come from it. */
   lastActivityAt: number | null;
   syncedAt: number | null;
@@ -80,6 +83,8 @@ function buildPinnedRows(
       ...(agent.avatarUrl ? { avatarUrl: agent.avatarUrl } : {}),
       ...(session.preview ? { preview: session.preview } : {}),
       sessionKind: session.kind,
+      ...(session.channel?.trim() ? { sessionChannel: session.channel.trim() } : {}),
+      ...(session.project ? { sessionProject: true } : {}),
       lastActivityAt: sessionActivityAt(session),
       syncedAt: cached ? group.syncedAt : null,
       unreadCount: 0,
@@ -191,8 +196,13 @@ export function resolveRosterPageState(input: Readonly<{
   activeState: string;
   hasError: boolean;
   allRowsLocked?: boolean;
+  /** The active connection has not delivered a live roster yet (first connect without a cache). */
+  awaitingRoster?: boolean;
 }>): RosterPageState {
   if (!input.initialized) return 'loading';
+  // Never claim "no agents" while the first roster is still on its way.
+  if (input.awaitingRoster && input.rowCount === 0 && !input.hasError
+    && (input.activeState === 'connecting' || input.activeState === 'handshaking' || input.activeState === 'ready')) return 'loading';
   if (input.connectionCount === 0 || input.rowCount === 0) return 'empty';
   if (input.allRowsLocked) return 'permission';
   if (input.activeState === 'offline' || input.activeState === 'reconnecting') return 'offline';

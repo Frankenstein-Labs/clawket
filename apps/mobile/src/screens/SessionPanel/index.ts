@@ -4,6 +4,7 @@ export {
   type SessionPanelProps,
   type SessionPanelViewProps,
 } from './SessionPanel';
+export { SessionPanelHost, type SessionPanelHandle } from './SessionPanelHost';
 export {
   availableSessionActions,
   buildSessionPanelAgents,

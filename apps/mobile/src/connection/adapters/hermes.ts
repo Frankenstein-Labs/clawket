@@ -207,7 +207,7 @@ export class HermesAdapter extends GatewayAdapterBase {
       : [];
     this.bridgeCapabilities = Object.freeze([...capabilities]);
     const supportsMultiSession = capabilities.includes(HERMES_MULTI_SESSION_CAPABILITY);
-    this.currentCapabilities = resolveCapabilities('hermes', {
+    this.updateCapabilities(resolveCapabilities('hermes', {
       sessionFiles: capabilities.includes('bridge.session-files.v1'),
       steer: capabilities.includes('hermes.run-steer.v1'),
       documentAttachments: capabilities.includes('hermes.documents.v1'),
@@ -221,7 +221,7 @@ export class HermesAdapter extends GatewayAdapterBase {
           sessionReset: false,
           sessionDelete: false,
         } : {}),
-    });
+    }));
     if (supportsMultiSession) {
       delete this.connection.bridgeOutdated;
     } else {

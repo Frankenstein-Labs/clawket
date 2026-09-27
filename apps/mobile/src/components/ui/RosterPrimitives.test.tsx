@@ -1,7 +1,7 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { View } from 'react-native';
-import { Search } from 'lucide-react-native';
+import { MessageCircle, Search } from 'lucide-react-native';
 import { builtInAccents } from '../../theme/accents';
 import { buildTheme } from '../../theme/theme';
 import {
@@ -30,6 +30,7 @@ import { Companion } from './Companion';
 import { ProEntryButton, PRO_ENTRY_COMPANION_SIZE, PRO_ENTRY_HEIGHT, PRO_ENTRY_HIT_SLOP } from './ProEntryButton';
 import { RosterRow } from './RosterRow';
 import { Skeleton } from './Skeleton';
+import { circleBadgeInset } from './StatusDot';
 import { SystemEventRow, SYSTEM_EVENT_ICON_SIZE } from './SystemEventRow';
 
 let mockScheme: 'light' | 'dark' = 'light';
@@ -43,6 +44,7 @@ jest.mock('react-native', () => {
     ),
   );
   return {
+    ...require('../../../__mocks__/native-animated'),
     Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Image: primitive('Image'),
     Pressable: primitive('Pressable'),
@@ -349,8 +351,7 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
         emoji="C"
         preview="Latest message"
         timeLabel="2h"
-        pinned
-        sessionKind="channel"
+        sessionIcon={MessageCircle}
         onPress={jest.fn()}
       />,
     );
@@ -374,10 +375,25 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
     expect(resting).not.toHaveProperty('borderWidth');
     expect(resting).not.toHaveProperty('borderColor');
     expect(root.props.android_ripple).toBeUndefined();
-    expect(result.getByTestId('roster-row-pin-icon')).toBeTruthy();
     expect(result.getByTestId('roster-row-avatar').props.accessibilityLabel).toBe('Owning Agent');
-    expect(result.getByTestId('roster-row-avatar-overlay')).toBeTruthy();
-    expect(result.getByTestId('roster-row-avatar-overlay-icon')).toBeTruthy();
+    // A conversation row: a grey badge cut out by a canvas ring on the circle at 45°, and no pin.
+    const badge = flattenStyle(result.getByTestId('roster-row-avatar-overlay').props.style);
+    expect(badge).toMatchObject({
+      width: IconSize.md,
+      height: IconSize.md,
+      backgroundColor: theme.colors.surface,
+      borderColor: theme.colors.canvas,
+      borderWidth: BorderWidth.strong,
+    });
+    expect(badge.top).toBeCloseTo(circleBadgeInset(AGENT_AVATAR_METRICS.roster.size, IconSize.md));
+    expect(badge.right).toBeCloseTo(badge.top as number);
+    expect(result.getByTestId('roster-row-avatar-overlay-icon').props.color).toBe(theme.colors.inkSecondary);
+    expect(result.queryByTestId('roster-row-pin-icon')).toBeNull();
+
+    // Only a pinned Agent carries the pin glyph.
+    const agent = render(<RosterRow testID="pinned-agent" agentId="main" name="Main" preview="Reply" pinned onPress={jest.fn()} />);
+    expect(agent.getByTestId('pinned-agent-pin-icon')).toBeTruthy();
+    expect(agent.queryByTestId('pinned-agent-avatar-overlay')).toBeNull();
   });
 
   it('can show an honest unread dot without inventing a message count', () => {
@@ -393,13 +409,17 @@ describe.each(['light', 'dark'] as const)('%s roster primitives', (scheme) => {
       <RosterRow testID="row" agentId="main" name="Main" preview="Reply" live onPress={jest.fn()} {...patch} />,
     );
     const live = row({});
-    expect(flattenStyle(live.getByTestId('row-avatar-live').props.style)).toMatchObject({
+    const liveDot = flattenStyle(live.getByTestId('row-avatar-live').props.style);
+    expect(liveDot).toMatchObject({
       width: 12,
       height: 12,
       backgroundColor: theme.colors.good,
       borderColor: theme.colors.canvas,
       borderWidth: BorderWidth.strong,
     });
+    // Centred on the round avatar's edge, not on its box corner (owner feedback 2026-09-27).
+    expect(liveDot.right).toBeCloseTo(circleBadgeInset(AGENT_AVATAR_METRICS.roster.size, 12));
+    expect(liveDot.bottom).toBeCloseTo(liveDot.right as number);
     live.unmount();
 
     // The runtime serves the live connection's rows from cache while it reconnects.
@@ -599,6 +619,26 @@ describe('AgentAvatar states and motion', () => {
     );
     expect(locked.getByTestId('locked-avatar-locked')).toBeTruthy();
     expect(flattenStyle(locked.getByTestId('locked-avatar-fill').props.style).filter).toEqual([{ saturate: 0.4 }]);
+  });
+
+  it('centres corner badges on the avatar circle at 45 degrees for every avatar size', () => {
+    for (const { size } of Object.values(AGENT_AVATAR_METRICS)) {
+      for (const badge of [12, 16]) {
+        const inset = circleBadgeInset(size, badge);
+        const centreOffset = size - inset - badge / 2 - size / 2;
+        expect(Math.SQRT2 * centreOffset).toBeCloseTo(size / 2);
+      }
+    }
+    // A roster avatar's ring now cuts a notch: the dot's centre is on the edge, 2 points inside the box.
+    expect(circleBadgeInset(56, 12)).toBeCloseTo(2.2, 1);
+
+    const locked = render(<AgentAvatar testID="lock" agentId="main" name="Main" status="locked" />);
+    const lockBadge = flattenStyle(locked.getByTestId('lock-locked').props.style);
+    expect(lockBadge.right).toBeCloseTo(circleBadgeInset(56, Space.lg));
+    expect(lockBadge.bottom).toBeCloseTo(circleBadgeInset(56, Space.lg));
+    const attention = render(<AgentAvatar testID="sheet" agentId="main" name="Main" variant="sheet" status="attention" />);
+    expect(flattenStyle(attention.getByTestId('sheet-attention').props.style).right)
+      .toBeCloseTo(circleBadgeInset(AGENT_AVATAR_METRICS.sheet.size, 12));
   });
 
   it('paints a mounted live dot at once and fades one in when an Agent becomes live', () => {

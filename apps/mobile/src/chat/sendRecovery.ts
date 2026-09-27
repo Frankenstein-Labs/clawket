@@ -22,8 +22,9 @@ export function clearUncertainSends(connectionId: string): void {
   listeners.forEach((listener) => listener());
 }
 
-function hasBackendEcho(history: readonly UiMessage[], message: UiMessage): boolean {
+export function hasBackendEcho(history: readonly UiMessage[], message: UiMessage): boolean {
   return history.some((candidate) => candidate.role === 'user'
+    && !candidate.sendUncertain
     && candidate.id !== message.id && Boolean(message.idempotencyKey)
     && candidate.idempotencyKey === message.idempotencyKey);
 }
@@ -45,14 +46,18 @@ export function useUncertainSends(scope: string | null, history: readonly UiMess
 export function recoverUncertainSends(history: readonly UiMessage[], uncertain: readonly UiMessage[]): UiMessage[] {
   const result = [...history];
   for (const message of uncertain) {
+    const isLocalCopy = (candidate: UiMessage) => candidate.id === message.id
+      || (candidate.sendUncertain && Boolean(message.idempotencyKey)
+        && candidate.idempotencyKey === message.idempotencyKey);
     const confirmed = hasBackendEcho(history, message);
     if (confirmed) {
-      const local = result.findIndex((candidate) => candidate.id === message.id);
-      if (local >= 0) result.splice(local, 1);
+      for (let index = result.length - 1; index >= 0; index -= 1) {
+        if (isLocalCopy(result[index])) result.splice(index, 1);
+      }
       continue;
     }
-    const index = result.findIndex((candidate) => candidate.id === message.id);
-    if (index >= 0) result[index] = { ...result[index], sendUncertain: true };
+    const index = result.findIndex(isLocalCopy);
+    if (index >= 0) result[index] = { ...result[index], id: message.id, sendUncertain: true };
     else {
       const insertion = result.findIndex((candidate) => (candidate.timestampMs ?? 0) > (message.timestampMs ?? 0));
       result.splice(insertion < 0 ? result.length : insertion, 0, { ...message, sendUncertain: true });

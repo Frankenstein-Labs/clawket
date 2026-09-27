@@ -195,8 +195,6 @@
   "YouMind Sprite": "YouMind 精靈",
   "123 456": "123 456",
   "ABC 234": "ABC 234",
-  "Relay connected": "已連上 Relay",
-  "Waiting for Bridge": "等待 Bridge",
   "Ready": "就緒",
   "No agent yet?": "還沒有 Agent？",
   "No network": "網路不可用",
@@ -385,5 +383,6 @@
   "Backup history": "歷史備份",
   "Pi is not responding": "Pi 沒有回應",
   "Codex is not responding": "Codex 沒有回應",
-  "Claude Code is not responding": "Claude Code 沒有回應"
+  "Claude Code is not responding": "Claude Code 沒有回應",
+  "To connect Codex, Claude Code or Pi, choose your Agent in Add connection and follow its pairing instructions.": "連接 Codex、Claude Code 或 Pi 時，請在「新增連線」中選擇對應的 Agent，並按照頁面上的配對說明操作。"
 }

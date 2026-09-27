@@ -6,7 +6,7 @@ import { ModelHealthSheet } from './ModelHealthSheet';
 jest.mock('react-native', () => {
   const R = require('react');
   const host = (name: string) => ({ children, ...props }: any) => R.createElement(name, props, children);
-  return { View: host('View'), Text: host('Text'), Pressable: host('Pressable'), StyleSheet: { create: (value: unknown) => value } };
+  return { Platform: { OS: 'ios' }, View: host('View'), Text: host('Text'), Pressable: host('Pressable'), StyleSheet: { create: (value: unknown) => value } };
 });
 jest.mock('@gorhom/bottom-sheet', () => ({ BottomSheetScrollView: ({ children }: any) => children }));
 jest.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));

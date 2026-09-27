@@ -22,7 +22,6 @@ type Props = {
 
 /** Attachment tiles share the composer's 40-point control scale, plus room for the remove badge. */
 const TILE_SIZE = ControlSize.floatingButton + Space.md;
-const REMOVE_BADGE_OFFSET = -Space.sm;
 const PRESSED_OPACITY = 0.7;
 
 function isFileAttachment(img: PendingImage): boolean {
@@ -118,6 +117,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
     },
     item: {
       position: 'relative',
+      paddingTop: Space.md,
+      paddingRight: Space.md,
     },
     fileItem: {
       width: '75%',
@@ -160,8 +161,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
     },
     removeTarget: {
       position: 'absolute',
-      top: REMOVE_BADGE_OFFSET - Space.md,
-      right: REMOVE_BADGE_OFFSET - Space.md,
+      top: 0,
+      right: 0,
       width: HitSize.md,
       height: HitSize.md,
       alignItems: 'center',

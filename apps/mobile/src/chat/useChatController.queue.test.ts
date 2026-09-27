@@ -7,6 +7,7 @@ import { getMessageQueueStore, messageQueueScopeKey, MESSAGE_QUEUE_LIMIT, resetM
 import * as imagePreparation from './preparePendingImagesForSend';
 import { mapAdapterSessionUpdate, useAdapterChatEvents } from './useAdapterChatEvents';
 import { useChatController } from './useChatController';
+import { useChatModelPicker } from './useChatModelPicker';
 
 const SESSION_KEY = 'agent:main:main';
 
@@ -80,15 +81,15 @@ jest.mock('@react-navigation/native', () => ({
   useIsFocused: jest.fn(() => true),
 }));
 
-jest.mock('react-i18next', () => ({
-  useTranslation: jest.fn(() => ({
-    t: (key: string, options?: Record<string, unknown>) => key.replace(
-      /\{\{\s*(\w+)\s*\}\}/g,
-      (_match, token: string) => String(options?.[token] ?? ''),
-    ),
-    i18n: { language: 'en-US' },
-  })),
-}));
+jest.mock('react-i18next', () => {
+  // Match the real hook's stable translation function so memo invalidation
+  // depends on product state, not an incidental function created by the mock.
+  const t = (key: string, options?: Record<string, unknown>) => key.replace(
+    /\{\{\s*(\w+)\s*\}\}/g,
+    (_match, token: string) => String(options?.[token] ?? ''),
+  );
+  return { useTranslation: jest.fn(() => ({ t, i18n: { language: 'en-US' } })) };
+});
 
 jest.mock('../i18n', () => ({
   __esModule: true,
@@ -335,6 +336,42 @@ describe('useChatController message queue', () => {
     jest.restoreAllMocks();
   });
 
+  it.each(['openclaw', 'hermes'] as const)('clears only the confirmed %s send failure after history recovery', async backend => {
+    const { result, adapter, rerender } = renderController(backend);
+    adapter.prompt.mockRejectedValueOnce(new Error('request timeout'));
+    await typeAndSend(result, 'Network test');
+    const local = historyMock.messages.find(m => m.role === 'user')!;
+    expect(result.current.sendFailure).toBeTruthy();
+    historyMock.messages = [{ ...local, id: 'unrelated-echo', idempotencyKey: 'another-key' }];
+    rerender(undefined);
+    expect(result.current.sendFailure).toBeTruthy();
+    historyMock.messages = [{ ...local, id: 'native-echo' }];
+    rerender(undefined);
+    await flush();
+    expect(result.current.sendFailure).toBeNull();
+    expect(result.current.sendFailureDetails).toBeNull();
+    expect(adapter.prompt).toHaveBeenCalledTimes(1);
+    expect(result.current.listData.filter(m => m.text === 'Network test')).toHaveLength(1);
+  });
+
+  it('keeps a photo and its draft before sending to an explicitly text-only model', async () => {
+    const base = jest.mocked(useChatModelPicker).getMockImplementation()!;
+    const spy = jest.mocked(useChatModelPicker);
+    spy.mockImplementation((props) => ({ ...base(props), currentModelSupportsImages: false }));
+    try {
+      imagePickerMock.pendingImages = [{ uri: 'file:///qa.png', mimeType: 'image/png', base64: 'AAAA' }];
+      const { result, adapter } = renderController('pi');
+      act(() => { result.current.setInput('Look at this photo'); });
+      await act(async () => { result.current.onSend(); });
+      await flush();
+      expect(adapter.prompt).not.toHaveBeenCalled();
+      expect(result.current.input).toBe('Look at this photo');
+      expect(imagePickerMock.clearPendingImages).not.toHaveBeenCalled();
+      expect(result.current.sendFailure).toBe('This model does not accept images. Choose another model or remove the photo.');
+      expect(queuedRows(result)).toHaveLength(0);
+    } finally { spy.mockImplementation(base); }
+  });
+
   it.each(['openclaw', 'hermes'] as const)('%s submits the completed voice text without waiting for a draft render', async (backend) => {
     const { result, adapter } = renderController(backend);
     act(() => { result.current.setInput('stale draft'); });
@@ -392,6 +429,26 @@ describe('useChatController message queue', () => {
       .toEqual(['Previous question', 'Previous answer', 'Current question', 'Current answer streaming']);
     expect(result.current.listData.find(message => message.text === 'Current question')?.renderKey).toBe(sent.renderKey);
     expect(result.current.listData.find(message => message.id === 'old-answer')?.streaming).not.toBe(true);
+  });
+
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'] as const)('removes the %s waiting row when recovery finds a completed reply without a live final event', async (backend) => {
+    const { result, rerender } = renderController(backend);
+    await typeAndSend(result, 'Remember amber harbor');
+    expect(result.current.listData.some(message => message.streaming && !message.text)).toBe(true);
+    const completed = [...historyMock.messages, { id: 'native-answer', role: 'assistant', text: 'READY', timestampMs: Date.now() }];
+    // A history render still sees the remembered run. Its activity effect then
+    // clears the run ref without changing the history array or stream text.
+    historyMock.messages = completed;
+    historyMock.activitySnapshot = { key: SESSION_KEY, messages: [], hasActiveRun: true,
+      activeRun: { runId: 'run-1', text: '', startedAtMs: Date.now() }, requestedAtMs: Date.now() + 1 };
+    rerender(undefined);
+    await flush();
+    historyMock.activitySnapshot = { key: SESSION_KEY, messages: [], hasActiveRun: false, requestedAtMs: Date.now() + 1 };
+    rerender(undefined);
+    expect(result.current.isSending).toBe(false);
+    expect(result.current.activeRunId).toBeNull();
+    expect(result.current.listData.some(message => message.streaming)).toBe(false);
+    expect(result.current.listData.filter(message => message.role === 'assistant').map(message => message.text)).toEqual(['READY']);
   });
 
   it.each(['openclaw', 'hermes'] as const)('keeps a recovered %s tool run stable through a minute without text events', async (backend) => {
@@ -536,13 +593,12 @@ describe('useChatController message queue', () => {
   it('keeps repeated Hermes delta tokens and words verbatim', async () => {
     const { result, handlers } = renderController('hermes');
     await typeAndSend(result, 'Repeat');
+    jest.setSystemTime(Date.now() + 1_000);
     act(() => {
       for (const text of ['ha', 'ha', ' ha', ' ha']) handlers().onUpdate?.(mapAdapterSessionUpdate({
         type: 'agent_message_chunk', sessionKey: SESSION_KEY, runId: 'run-1', text, textMode: 'delta',
       } as any));
     });
-    jest.setSystemTime(Date.now() + 1_000);
-    act(() => { result.current.setInput('next'); });
     expect(result.current.listData.find(row => row.id === 'streaming')?.text).toBe('haha ha ha');
   });
 

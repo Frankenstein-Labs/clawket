@@ -95,7 +95,7 @@ export function GatewayScannerProvider({ children }: { children: React.ReactNode
 
   const connectFromScan = useCallback(async (payload: GatewayScanPayload): Promise<boolean> => {
     let resolved = payload;
-    showOverlay(i18n.t('Switching Gateway...', { ns: 'common' }));
+    showOverlay(i18n.t('Connecting', { ns: 'common' }));
     try {
       resolved = payload.relay?.accessCode ? await claimRelayPairing(payload, relayClaimInFlightRef) : payload;
     } catch (error) {

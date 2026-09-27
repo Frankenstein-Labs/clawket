@@ -15,6 +15,7 @@ export type ModelInfo = {
   provider: string;
   sortOrder?: number;
   resolvedModel?: string;
+  input?: Array<'text' | 'image'>;
   reasoningLevels?: import('@clawket/agent-protocol').ThinkingLevel[];
 };
 
@@ -29,6 +30,7 @@ type Props = {
   connectionState: ConnectionState;
   adapter: AgentAdapter | null;
   sessionKey: string | null;
+  sessionMetadata?: Pick<SessionInfo, 'key' | 'model' | 'modelProvider'>;
   setInput: (value: string) => void;
   setThinkingLevel?: (value: string | null) => void;
   setSessions: (updater: (prev: SessionInfo[]) => SessionInfo[]) => void;
@@ -38,6 +40,7 @@ export function useChatModelPicker({
   connectionState,
   adapter,
   sessionKey,
+  sessionMetadata,
   setInput,
   setThinkingLevel,
   setSessions,
@@ -57,6 +60,8 @@ export function useChatModelPicker({
   const modelLoadRequestRef = useRef(0);
   const modelRefreshRequestRef = useRef(0);
   const modelSelectionRequestRef = useRef(0);
+  const modelValueRevisionRef = useRef(0);
+  const modelMetadataScope = useRef<{ adapter: AgentAdapter | null; sessionKey: string | null } | null>(null);
   requestContextRef.current = { adapter, connectionState, sessionKey };
 
   const isCurrentAdapterRequest = useCallback((
@@ -72,12 +77,13 @@ export function useChatModelPicker({
   }, []);
 
   const hydrateModelSelection = useCallback((selection: ModelSelectionState) => {
+    modelMetadataScope.current = { adapter, sessionKey };
     setAvailableModels((previous) => selection.models?.length ? selection.models : previous);
     if (selection.thinkingLevel) { setNativeThinkingLevel(selection.thinkingLevel); setThinkingLevel?.(selection.thinkingLevel); }
     setAvailableProviders(selection.providers ?? []);
     setCurrentModel(selection.currentModel?.trim() || null);
     setCurrentModelProvider(selection.currentProvider?.trim() || null);
-  }, [setThinkingLevel]);
+  }, [adapter, sessionKey, setThinkingLevel]);
 
   const hydrateModels = useCallback((models: ModelInfo[]) => {
     setAvailableModels(models);
@@ -89,13 +95,40 @@ export function useChatModelPicker({
     const selected = trimmedSessionKey
       ? sessions.find((session) => session.key === trimmedSessionKey) ?? null
       : null;
+    // A newly created session may not be in an older list response yet. Never
+    // borrow a different conversation's model or clear the current selection.
+    if (trimmedSessionKey && !selected) return;
     const fallback = selected ?? sessions[0] ?? null;
     setCurrentModel(fallback?.model?.trim() || null);
     setCurrentModelProvider(fallback?.modelProvider?.trim() || null);
   }, [sessionKey]);
 
+  const selectionSessionKey = adapter?.capabilities.modelPerSession ? sessionKey : null;
+  useEffect(() => {
+    // An unresolved new conversation must not display the previous one's model.
+    // Global selections intentionally survive conversation changes.
+    setCurrentModel(null);
+    setCurrentModelProvider(null);
+    setNativeThinkingLevel(null);
+    modelMetadataScope.current = null;
+  }, [adapter, selectionSessionKey]);
+
+  const metadataKey = sessionMetadata?.key;
+  const metadataModel = sessionMetadata?.model;
+  const metadataProvider = sessionMetadata?.modelProvider;
+  useEffect(() => {
+    // Native initialization can resolve a model after the initial catalog read.
+    // Hermes selections are global: an older session cannot replace them.
+    if (!adapter?.capabilities.modelPerSession || metadataKey !== sessionKey || !metadataModel?.trim()) return;
+    // An event received after a read began is newer than that read's snapshot.
+    modelValueRevisionRef.current += 1;
+    setCurrentModel(metadataModel.trim());
+    setCurrentModelProvider(metadataProvider?.trim() || null);
+  }, [adapter, sessionKey, metadataKey, metadataModel, metadataProvider]);
+
   const loadModelsForPicker = useCallback(async () => {
     const requestId = ++modelLoadRequestRef.current;
+    const valueRevision = modelValueRevisionRef.current;
     const requestAdapter = adapter;
     const models = requestAdapter?.management?.models;
     if (connectionState !== 'ready' || !requestAdapter?.capabilities.models || !models?.list) {
@@ -127,7 +160,7 @@ export function useChatModelPicker({
       if (models.getSelection) {
         const selection = await models.getSelection(requestAdapter.capabilities.modelPerSession ? sessionKey : undefined);
         if (!isCurrent()) return;
-        hydrateModelSelection(selection);
+        if (valueRevision === modelValueRevisionRef.current) hydrateModelSelection(selection);
       }
     } catch (err: unknown) {
       if (!isCurrent()) return;
@@ -149,12 +182,14 @@ export function useChatModelPicker({
 
   const refreshCurrentModel = useCallback(async () => {
     const requestId = ++modelRefreshRequestRef.current;
+    const valueRevision = modelValueRevisionRef.current;
     const requestAdapter = adapter;
     if (connectionState !== 'ready' || !requestAdapter?.capabilities.models) return;
     const connectionId = requestAdapter.connection.id;
     const requestSessionKey = sessionKey;
     const isCurrent = () => (
       requestId === modelRefreshRequestRef.current
+      && valueRevision === modelValueRevisionRef.current
       && isCurrentAdapterRequest(requestAdapter, connectionId, requestSessionKey)
     );
     try {
@@ -164,6 +199,7 @@ export function useChatModelPicker({
         if (!isCurrent()) return;
         const selectedModel = currentState.currentModel?.trim();
         if (selectedModel) {
+          modelMetadataScope.current = { adapter: requestAdapter, sessionKey: requestSessionKey };
           if (currentState.thinkingLevel) { setNativeThinkingLevel(currentState.thinkingLevel); setThinkingLevel?.(currentState.thinkingLevel); }
           if (currentState.models?.length) setAvailableModels(currentState.models);
           setCurrentModel(selectedModel);
@@ -243,6 +279,7 @@ export function useChatModelPicker({
     const provider = slashIdx >= 0 ? providerModel.slice(0, slashIdx) : undefined;
     const previousModel = currentModel;
     const previousProvider = currentModelProvider;
+    modelValueRevisionRef.current += 1;
     setCurrentModel(model || null);
     setCurrentModelProvider(provider ?? null);
     setSessions((prev) =>
@@ -334,11 +371,14 @@ export function useChatModelPicker({
     : null;
 
   const selectedCatalogModel = availableModels.find((item) =>
-    (item.id === currentModel || `${item.provider}/${item.id}` === currentModel)
+    (item.id === currentModel || item.resolvedModel === currentModel || `${item.provider}/${item.id}` === currentModel)
     && (!currentModelProvider || item.provider === currentModelProvider));
-  const currentModelDisplayName = (selectedCatalogModel?.name || currentModel)?.split('/').pop() || null;
+  const currentModelDisplayName = (selectedCatalogModel?.resolvedModel || selectedCatalogModel?.name || currentModel)?.split('/').pop() || null;
 
   return {
+    currentModelSupportsImages: modelMetadataScope.current?.adapter === adapter
+      && modelMetadataScope.current?.sessionKey === sessionKey && selectedCatalogModel?.input?.length
+      ? selectedCatalogModel.input.includes('image') : undefined,
     currentModelDisplayName,
     selectNativeThinkingLevel,
     nativeThinkingLevel,

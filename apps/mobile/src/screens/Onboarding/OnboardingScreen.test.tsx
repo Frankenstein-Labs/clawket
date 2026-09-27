@@ -1,6 +1,7 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { FontSize, Radius } from '../../theme/tokens';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { ControlSize, FontSize, Radius, Space } from '../../theme/tokens';
+import { ChoiceRow } from '../../components/ui/SetupPrimitives';
 import { OnboardingScreen, type OnboardingScreenProps } from './OnboardingScreen';
 
 const mockLightColors = {
@@ -201,6 +202,20 @@ describe('OnboardingScreen', () => {
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
+  });
+
+  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const)('does not claim a completed transport before %s is ready', (initialBackend) => {
+    const props = createProps({ initialBackend });
+    const view = render(<OnboardingScreen {...props} status={{ kind: 'connecting', phase: 'relay_connected' }} />);
+    for (const phase of ['relay_connected', 'waiting_bridge'] as const) {
+      view.rerender(<OnboardingScreen {...props} status={{ kind: 'connecting', phase }} />);
+      expect(view.getByText('common:Connecting')).toBeTruthy();
+      expect(view.queryByText('Relay connected')).toBeNull();
+      expect(view.queryByText('Ready')).toBeNull();
+    }
+    view.rerender(<OnboardingScreen {...props} status={{ kind: 'connecting', phase: 'ready' }} />);
+    expect(view.getByText('Ready')).toBeTruthy();
+    expect(view.queryByText('common:Connecting')).toBeNull();
   });
 
   it('separates backend selection from pairing and returns without retaining a stale code', () => {
@@ -554,6 +569,35 @@ describe('OnboardingScreen', () => {
       expect(choiceStyle).not.toHaveProperty('borderWidth');
       view.unmount();
     }
+  });
+
+  it('keeps title-only choices compact, the help under them and the open-source note after it', () => {
+    const view = render(<OnboardingScreen {...createProps({ initialBackend: undefined })} />);
+    // 68-point rows around a 44-point slot with no gap (owner feedback 2026-09-27).
+    expect(flattenStyle(view.getByTestId('onboarding-backends').props.style)).not.toHaveProperty('gap');
+    for (const kind of ['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model']) {
+      const row = view.getByTestId(`onboarding-backend-${kind}`);
+      const choiceStyle = flattenStyle(row.props.style);
+      expect(choiceStyle.paddingVertical).toBe(Space.md);
+      expect(choiceStyle).not.toHaveProperty('minHeight');
+      expect(flattenStyle(row.props.children[0].props.style).width).toBe(ControlSize.floatingButton);
+    }
+    // "No agent yet?" belongs to the choices; the open-source note follows it instead of anchoring to the bottom.
+    const chooser = view.getByTestId('onboarding-chooser');
+    expect(flattenStyle(chooser.props.style).gap).toBe(Space.sm);
+    expect(within(chooser).getByTestId('onboarding-docs-toggle')).toBeTruthy();
+    const openSource = flattenStyle(view.getByTestId('onboarding-open-source').props.style);
+    expect(openSource.paddingTop).toBe(Space.lg);
+    expect(openSource).not.toHaveProperty('marginTop');
+    // Five or more website links outgrow one line; they wrap instead of running off both edges.
+    fireEvent.press(view.getByTestId('onboarding-docs-toggle'));
+    expect(flattenStyle(view.getByTestId('onboarding-doc-options').props.style)).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap' });
+    view.unmount();
+    // Described choices (Roster add sheet, Cron templates) keep the 52-point tile and two-line roster height.
+    const described = render(<ChoiceRow testID="described-choice" title="Add Connection" description="Connect OpenClaw, Hermes and more" onPress={jest.fn()} />);
+    const describedRow = described.getByTestId('described-choice');
+    expect(flattenStyle(describedRow.props.style)).toMatchObject({ minHeight: ControlSize.rosterRow, paddingVertical: Space.lg });
+    expect(flattenStyle(describedRow.props.children[0].props.style).width).toBe(ControlSize.settingsRow);
   });
 
   it('reports a page view once per mount', () => {

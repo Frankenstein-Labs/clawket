@@ -18,3 +18,15 @@ The owner selected A after reviewing four ear/face variants. Keep the original h
 - Evidence: `/tmp/clawket-companion-acceptance/` (`launcher.png`, `connecting-light.png`, `connecting-dark.png`, `offline-light.png`, `welcome.png`, plus backend history screenshots). Build logs: `/tmp/clawket-brand-ios-final.log`, `/tmp/clawket-brand-android.log`; required gate: `/tmp/clawket-brand-required-final.log`.
 
 The native Design System page now includes a Clawket tab for inspecting the actual shared loading component. Do not infer connection stability from a Loading animation.
+
+## Loading scenes and the tappable cat (owner-approved 2026-09-27)
+
+The owner asked to unify every loading state and to replace the idle breathing cat, so a wait never teaches users to dislike the brand mark. After reviewing five directions on the design canvas ("Clawket 等待动效方案") the owner kept all of them and asked for the cat to be tappable.
+
+- `LoadingState` draws one scene per wait: Peek, Fetch, Yarn and Listen at 22.5 % each, Pounce at 10 %, never the previous scene, another one after nine seconds of waiting. Sheets alternate Peek and Listen at 60 %.
+- Choreography is the approved prototype's keyframes, parsed from CSS keyframe syntax (`src/brand/companion-keyframes.ts`, `companion-scenes.ts`) and sampled on the UI thread into one SVG per scene (`src/components/ui/companion/`). Companion A geometry is unchanged; paws, holes, yarn, cursor, rings and manga marks are additive props.
+- Taps (`src/brand/companion-temper.ts`): a soft-toy press plus one weighted flavour (hop, nuzzle, wink, ear wiggle, tilt, surprise); rapid taps warn with airplane ears and an anger mark, then a claw swipe across the glass after five to seven taps and a sulk; a long press is petting with a purr haptic.
+- A success payoff plays only through `useLoadingHandoff`: after a wait that was visible (0.4 s grace) and ended in success. Failures and fast loads hand over immediately. No simulated success and no delayed content; the loader stays in one overlay position so the scene that waited plays its payoff over the arriving content (Thread, sessions-first entry, first roster).
+- Reduced motion keeps the still Companion; scenes, reactions and haptics stop in the background, on success and on unmount.
+
+Verification (2026-09-27): the real App components were rendered at fixed times through a test harness into SVG and compared frame by frame with the prototype (every scene loop, every payoff, every tap flavour and mood). Unit and component suites cover parsing and easing, seamless loops, the weighted pool, the temper rules, taps, rapid taps, petting and the handoff. Physical-device motion, haptics and performance are not yet verified.

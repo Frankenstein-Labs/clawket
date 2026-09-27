@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import {
   Bot,
+  EyeOff,
   MonitorSmartphone,
   Pencil,
   Pin,
@@ -35,6 +36,7 @@ import { FloatingButton, FLOATING_PRIMARY_BUTTON_SIZE, type FloatingButtonBadge 
 import { ProEntryButton } from '../../components/ui/ProEntryButton';
 import { RenameSheet } from '../../components/ui/RenameSheet';
 import { RosterRow } from '../../components/ui/RosterRow';
+import { resolveSessionTileIcon } from '../../components/ui/sessionKindIcon';
 import {
   SettingsDivider,
   SettingsGroup,
@@ -47,7 +49,7 @@ import {
   useSwipeableRowGroup,
   type SwipeableRowAction,
 } from '../../components/ui/SwipeableRow';
-import { LoadingState } from '../../components/ui/LoadingState';
+import { LoadingState, useLoadingHandoff } from '../../components/ui/LoadingState';
 import { useAppTheme } from '../../theme';
 import {
   ControlSize,
@@ -89,6 +91,8 @@ export type RosterViewProps = Readonly<{
   selectedThread?: Readonly<{ connectionId: string; agentId: string; sessionKey: string }>;
   connectionFailure?: ConnectionUnavailableProps;
   state: RosterPageState;
+  /** The active connection is still opening; the first-load label says so. */
+  connecting?: boolean;
   rows: ReadonlyArray<RosterDisplayRow>;
   activeConnectionId: string | null;
   /** Rows of this connection carry the live dot; see `resolveRosterLiveConnectionId`. */
@@ -275,9 +279,12 @@ function RosterHeader({
   );
 }
 
-function RosterLoading(): React.JSX.Element {
+function RosterLoading({ connecting = false, phase = 'wait' }: { connecting?: boolean; phase?: 'wait' | 'ready' }): React.JSX.Element {
   const { t } = useTranslation('common');
-  return <LoadingState testID="roster-loading" message={t('Loading agents')} pose="connecting" />;
+  // The payoff keeps the last stage label rather than switching copy as the rows arrive.
+  const message = useRef('');
+  if (phase === 'wait') message.current = connecting ? t('Connecting') : t('Loading agents');
+  return <LoadingState testID="roster-loading" message={message.current} pose="connecting" phase={phase} />;
 }
 
 /**
@@ -386,6 +393,7 @@ export function RosterView({
   selectedThread,
   connectionFailure,
   state,
+  connecting = false,
   rows,
   activeConnectionId,
   liveConnectionId = null,
@@ -457,13 +465,19 @@ export function RosterView({
         avatarName={item.avatarName}
         emoji={item.emoji}
         avatarUrl={item.avatarUrl}
-        preview={!activeConnectionOffline && item.working
+        preview={!activeConnectionOffline && item.attention === 'input' ? t('Agent needs your input', { ns: 'chat' })
+          : !activeConnectionOffline && item.working && item.attention === 'approval' ? t('Needs attention')
+          : !activeConnectionOffline && item.working
           ? item.activity === 'thinking' ? t('Thinking…', { ns: 'chat' })
             : item.activity === 'tool' ? t('Using tool', { ns: 'chat' }) : t('Working')
           : item.subtitle?.label ?? item.preview ?? t('No activity yet')}
-        pinned={item.kind === 'pinned_session' || item.agentPinned}
-        sessionKind={item.sessionKind}
-        avatarStatus={activeConnectionOffline ? 'offline' : item.working ? 'working' : 'idle'}
+        pinned={item.kind === 'agent' && item.agentPinned}
+        sessionIcon={item.kind === 'pinned_session' && item.sessionKind ? resolveSessionTileIcon({
+          kind: item.sessionKind,
+          channel: item.sessionChannel,
+          project: item.sessionProject,
+        }) : undefined}
+        avatarStatus={activeConnectionOffline ? 'offline' : item.working && item.attention !== 'input' && item.attention !== 'approval' ? 'working' : 'idle'}
         timeLabel={timeLabel}
         unreadCount={item.unreadCount}
         unreadIndicator="dot"
@@ -472,7 +486,7 @@ export function RosterView({
         cached={item.cached}
         locked={item.locked}
         live={live}
-        accessibilityLabel={[item.name, live ? t('Connected', { ns: 'settings' }) : null, timeLabel, item.cached && item.syncedAt ? `${t('Last synced')} ${relativeTime(item.syncedAt, translateRelativeTime)}` : null, item.working ? t('Working') : null, item.unreadCount > 0 ? t('Unread messages') : null].filter(Boolean).join(', ')}
+        accessibilityLabel={[item.name, live ? t('Connected', { ns: 'settings' }) : null, timeLabel, item.cached && item.syncedAt ? `${t('Last synced')} ${relativeTime(item.syncedAt, translateRelativeTime)}` : null, item.attention === 'input' ? t('Agent needs your input', { ns: 'chat' }) : item.attention === 'approval' ? t('Needs attention') : item.working ? t('Working') : null, item.unreadCount > 0 ? t('Unread messages') : null].filter(Boolean).join(', ')}
         onPress={() => { dismissRoster?.(); open(item); }}
         {...(onLongPressRow ? { onLongPress: () => onLongPressRow(item) } : {})}
       />
@@ -506,6 +520,10 @@ export function RosterView({
     translateRelativeTime,
   ]);
 
+  // The first roster waits under one mounted loader that plays its payoff as the rows arrive.
+  const rosterLoading = !(connectionFailure && rows.length === 0) && (state === 'loading' || (rows.length === 0 && recovering === true));
+  const loaderPhase = useLoadingHandoff(rosterLoading, rows.length > 0);
+
   return (
     <View testID="roster-screen" style={[styles.screen, { backgroundColor: theme.colors.canvas }]}>
       <View pointerEvents="box-none" style={[styles.header, headerInsets]}>
@@ -529,10 +547,8 @@ export function RosterView({
       </View>
       {connectionFailure && rows.length === 0 ? (
         <View style={[styles.list, contentInsets]}><ConnectionUnavailable {...connectionFailure} testID="roster-connection-unavailable" /></View>
-      ) : state === 'loading' || (rows.length === 0 && recovering) ? (
-        <View style={[styles.list, contentInsets]}>
-          <RosterLoading />
-        </View>
+      ) : rosterLoading ? (
+        <View style={styles.list} />
       ) : (
         <FlatList
           testID="roster-list"
@@ -576,6 +592,11 @@ export function RosterView({
           showsVerticalScrollIndicator={false}
         />
       )}
+      {loaderPhase ? (
+        <View pointerEvents={loaderPhase === 'ready' ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, contentInsets]}>
+          <RosterLoading connecting={connecting} phase={loaderPhase} />
+        </View>
+      ) : null}
       <FloatingButton
         testID="roster-add"
         icon={Plus}
@@ -646,6 +667,8 @@ export function RosterScreen({
     activeState: connections.activeState,
     hasError: connections.error !== null,
     allRowsLocked,
+    awaitingRoster: connections.activeConnectionId !== null
+      && !roster.some((group) => group.connection.id === connections.activeConnectionId && group.source === 'live'),
   });
   const offline = !connections.recovering && (connections.recoveryFailed || connections.activeState === 'offline'
     || connections.activeState === 'reconnecting');
@@ -718,7 +741,7 @@ export function RosterScreen({
       case 'unpin_agent': return t('Unpin Agent', { ns: 'common' });
       case 'manage_connection': return t('Manage connection', { ns: 'config' });
       case 'remove_connection': return t('Remove connection', { ns: 'config' });
-      case 'unpin_session': return t('Unpin from roster', { ns: 'common' });
+      case 'unpin_session': return t('Hide from home', { ns: 'common' });
       default: return t('Rename', { ns: 'common' });
     }
   }, [t]);
@@ -766,14 +789,17 @@ export function RosterScreen({
   const rowSwipeActions = useCallback((row: RosterDisplayRow): ReadonlyArray<SwipeableRowAction> => (
     assembleRosterSwipeActions({ row, canRenameSession: canRenameRow(row) }).map((action) => ({
       key: action,
+      // A conversation is hidden from home, never unpinned: only Agents pin (owner decision 2026-09-27).
       icon: action === 'pin_agent' ? Pin
         : action === 'manage_connection' ? Settings2
           : action === 'rename_session' ? Pencil
-            : PinOff,
+            : action === 'unpin_session' ? EyeOff
+              : PinOff,
       label: action === 'pin_agent' ? t('Pin', { ns: 'common' })
         : action === 'manage_connection' ? t('Manage', { ns: 'common' })
           : action === 'rename_session' ? t('Rename', { ns: 'common' })
-            : t('Unpin', { ns: 'common' }),
+            : action === 'unpin_session' ? t('Hide', { ns: 'common' })
+              : t('Unpin', { ns: 'common' }),
       accessibilityLabel: rowActionLabel(action),
       onPress: () => performRowAction(row, action),
     }))
@@ -791,6 +817,7 @@ export function RosterScreen({
     <>
       <RosterView
         selectedThread={presentation === 'sidebar' ? selectedThread : undefined}
+        connecting={connections.activeState === 'connecting' || connections.activeState === 'handshaking'}
         connectionFailure={!connections.recovering && !connections.switching && activeConnection
           && (offline || connectionError) ? {
             name: activeConnection.label,

@@ -167,7 +167,11 @@ export function Sheet({
   dismissOnBackdropPress = true,
   keyboardBehavior = 'interactive',
   keyboardBlurBehavior = 'restore',
-  androidKeyboardInputMode = 'adjustResize',
+  // Edge-to-edge Android keeps the modal portal at full window height even
+  // when the Activity uses adjustResize. Let Gorhom offset interactive sheets;
+  // its adjustResize branch explicitly skips that keyboard-height adjustment.
+  // This prop controls sheet geometry, not the Activity's soft-input mode.
+  androidKeyboardInputMode = 'adjustPan',
   style,
   contentStyle,
   testID,

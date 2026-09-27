@@ -121,6 +121,8 @@ export type AgentSettingsSectionViewProps = Readonly<{
   errorMessage?: string;
   /** The runtime's foreground grace window is open: show quiet reconnecting instead of offline. */
   reconnecting?: boolean;
+  /** The connection is still opening: show quiet connecting instead of offline. */
+  connecting?: boolean;
   pendingAction?: AgentSettingsSectionAction | null;
   onBack: () => void;
   onRetry: () => void;
@@ -494,6 +496,8 @@ export function AgentSettingsSectionScreen({
         state={state}
         errorMessage={errorMessage}
         reconnecting={runtime.recovering && runtime.activeConnectionId === connectionId}
+        connecting={runtime.activeConnectionId === connectionId
+          && (runtime.activeState === 'connecting' || runtime.activeState === 'handshaking')}
         pendingAction={pendingAction}
         onBack={navigation.goBack}
         onRetry={retry}
@@ -559,6 +563,7 @@ export function AgentSettingsSectionView({
   state,
   errorMessage,
   reconnecting = false,
+  connecting = false,
   pendingAction,
   onBack,
   onRetry,
@@ -605,6 +610,13 @@ export function AgentSettingsSectionView({
       placement="inline"
       status="reconnecting"
       message={t('Reconnecting…', { ns: 'common' })}
+    />
+  ) : state === 'offline' && !sectionOwnsOffline && connecting ? (
+    <ConnectionStatusPill
+      testID="agent-settings-section-connecting"
+      placement="inline"
+      status="reconnecting"
+      message={t('Connecting', { ns: 'common' })}
     />
   ) : state === 'offline' && !sectionOwnsOffline ? (
     <ConnectionStatusPill

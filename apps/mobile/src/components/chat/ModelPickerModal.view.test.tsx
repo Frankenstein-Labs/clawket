@@ -213,7 +213,7 @@ describe('ModelPickerModal view', () => {
       initialNumToRender: 18,
       maxToRenderPerBatch: 24,
       windowSize: 10,
-      removeClippedSubviews: true,
+      removeClippedSubviews: false,
       showsVerticalScrollIndicator: true,
     });
     expect(view.getByTestId('model-picker-search').props.compositionSafeBottomSheet).toBe(true);
@@ -304,4 +304,11 @@ it('shows native resolved model IDs below aliases and still submits the original
   expect(view.getByTestId('model-picker-resolved-anthropic:haiku').props.children).toBe(model.resolvedModel);
   fireEvent.press(view.getByTestId('model-picker-row-anthropic:haiku'));
   expect(selected).toHaveBeenCalledWith(model);
+});
+
+it('loads with catalog-shaped placeholder rows instead of a spinner in an empty sheet', () => {
+  const view = render(<ModelPickerModal visible models={[]} loading
+    onSelectModel={jest.fn()} onClose={jest.fn()} />);
+  expect(view.getByTestId('model-picker-loading').props.accessibilityLabel).toBe('Loading models...');
+  expect(view.queryByText('Loading models...')).toBeNull();
 });

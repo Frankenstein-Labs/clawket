@@ -1,3 +1,4 @@
+import { InteractionAttention } from '../interaction-attention.js';
 import { isDeepStrictEqual } from 'node:util';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, lstatSync, realpathSync, existsSync, unlinkSync } from 'node:fs';
@@ -203,14 +204,30 @@ export class CodexService extends EventEmitter {
     } catch (error) {
       // Only the bus's explicit no-owner result proves this request was not delivered.
       // A cached active desktop snapshot still forbids opening another writer.
-      const snapshot = this.desktop!.snapshots.get(r.threadId!);
-      if (!(error instanceof DesktopIpcError) || error.outcome !== 'no-owner' || (snapshot ? desktopTurns(snapshot.state) : []).some((t: any) => ['inProgress', 'running', 'active'].includes(t.status))) throw error;
-      const latest = await this.rpc.request('thread/turns/list', { threadId: r.threadId, limit: 1, itemsView: 'full', sortDirection: 'desc' });
-      if (!Array.isArray(latest.data) || latest.data.some((t: any) => ['inProgress', 'running', 'active'].includes(t.status))) throw new DesktopIpcError('uncertain', 'A native task may still be running. Continue it on your computer.');
+      await this.assertReleasedNative(r, error);
       run.desktop = false;
       await this.thread(r);
       return this.rpc.request('turn/start', params);
     }
+  }
+  private async assertReleasedNative(r: Entry, error: unknown): Promise<void> {
+    const snapshot = this.desktop!.snapshots.get(r.threadId!);
+    if (!(error instanceof DesktopIpcError) || error.outcome !== 'no-owner' || (snapshot ? desktopTurns(snapshot.state) : []).some((t: any) => ['inProgress', 'running', 'active'].includes(t.status))) throw error;
+    const latest = await this.rpc.request('thread/turns/list', { threadId: r.threadId, limit: 1, itemsView: 'full', sortDirection: 'desc' });
+    if (!Array.isArray(latest.data) || latest.data.some((t: any) => ['inProgress', 'running', 'active'].includes(t.status))) throw new DesktopIpcError('uncertain', 'A native task may still be running. Continue it on your computer.');
+  }
+  private async nativeSettings(r: Entry, settings: object): Promise<void> {
+    if (!this.loaded.has(r.id)) {
+      try {
+        await this.desktop!.request('thread-follower-update-thread-settings', { conversationId: r.threadId, threadSettings: settings });
+        return;
+      } catch (error) {
+        await this.assertReleasedNative(r, error);
+        await this.thread(r);
+      }
+    }
+    await this.rpc.request('thread/settings/update', { threadId: r.threadId, ...settings });
+    this.scheduleDesktop(r);
   }
   private desktopSnapshot(threadId: string, snapshot: DesktopSnapshot): void {
     const r = this.records.find(e => e.native && e.threadId === threadId);
@@ -283,9 +300,14 @@ export class CodexService extends EventEmitter {
     void next.finally(() => { if (this.queues.get(record.id) === next) this.queues.delete(record.id); }).catch(() => {});
     return next;
   }
-  private update(update: SessionUpdate): void { this.emit('update', update); }
+  private readonly attention = new InteractionAttention();
+  private update(update: SessionUpdate): void {
+    const patch = this.attention.accept(update);
+    this.emit('update', update);
+    if (patch) this.emit('update', patch);
+  }
   private descriptor(r: Entry): SessionDescriptor {
-    return { connectionId: '', agentId: 'codex', key: r.id, kind: 'direct', title: r.title || basename(r.cwd ?? this.project), updatedAt: r.activity ?? r.created, lastActivityAt: r.activity ?? null, preview: r.preview, model: r.model, modelProvider: r.provider, sessionId: r.threadId, hasActiveRun: this.runs.has(r.id), project: this.options.device ? this.projectDetails(r.cwd ?? this.project) : undefined, canContinue: r.native ? !!this.options.device : undefined, source: r.native ? 'native' : 'bridge', allowedActions: { rename: !r.native, reset: !r.native, delete: !r.native, pin: true } };
+    return { connectionId: '', agentId: 'codex', key: r.id, kind: 'direct', title: r.title || basename(r.cwd ?? this.project), updatedAt: r.activity ?? r.created, lastActivityAt: r.activity ?? null, preview: r.preview, model: r.model, modelProvider: r.provider, sessionId: r.threadId, hasActiveRun: this.runs.has(r.id), attention: this.attention.get(r.id), project: this.options.device ? this.projectDetails(r.cwd ?? this.project) : undefined, canContinue: r.native ? !!this.options.device : undefined, source: r.native ? 'native' : 'bridge', allowedActions: { rename: !r.native, reset: !r.native, delete: !r.native, pin: true } };
   }
   private async thread(r: Entry): Promise<void> {
     if (this.loaded.has(r.id)) return;
@@ -432,8 +454,12 @@ export class CodexService extends EventEmitter {
       }
       case 'models.select': case 'models.thinking': return this.sessionModels(frame, p);
       case 'skills.list': {
-        const result = await this.rpc.request('skills/list', { cwds: [this.project] });
-        return { workspaceDir: basename(this.project), managedSkillsDir: '', skills: (result.data ?? []).filter((d: any) => d.cwd === this.project).flatMap((d: any) => d.skills ?? []).filter((s: any) => s.enabled !== false).slice(0, 500).map((s: any) => ({ name: s.name, description: s.description ?? '', invocation: `$${s.name} `, source: 'codex', bundled: false, filePath: '', baseDir: '', skillKey: s.name, always: false, disabled: false, blockedByAllowlist: false, eligible: true, deletable: false, requirements: {}, missing: {}, configChecks: [], install: [] })) };
+        const entry = p.sessionKey === undefined ? undefined
+          : this.records.find(r => r.id === p.sessionKey) ?? this.native.get(String(p.sessionKey));
+        if (p.sessionKey !== undefined && !entry) throw new Error('Session unavailable; refresh the conversation list');
+        const cwd = canonicalProject(entry?.cwd ?? this.project);
+        const result = await this.rpc.request('skills/list', { cwds: [cwd] });
+        return { workspaceDir: basename(cwd), managedSkillsDir: '', skills: (result.data ?? []).filter((d: any) => d.cwd === cwd).flatMap((d: any) => d.skills ?? []).filter((s: any) => s.enabled !== false).slice(0, 500).map((s: any) => ({ name: s.name, description: s.description ?? '', invocation: `$${s.name} `, source: 'codex', bundled: false, filePath: '', baseDir: '', skillKey: s.name, always: false, disabled: false, blockedByAllowlist: false, eligible: true, deletable: false, requirements: {}, missing: {}, configChecks: [], install: [] })) };
       }
       default: throw new Error('Unsupported Codex operation');
     }
@@ -445,14 +471,14 @@ export class CodexService extends EventEmitter {
         if (frame.method === 'models.select') {
           if (p.scope !== 'session' || !p.sessionKey || p.provider !== r.provider || typeof p.model !== 'string' || !catalog.some(m => m.model === p.model)) throw new Error('Choose an available model for this session');
           if (this.runs.has(r.id)) throw new Error('Stop the task before changing its model');
-          if (r.native) await this.desktop!.request('thread-follower-update-thread-settings', { conversationId: r.threadId, threadSettings: { model: p.model, effort: catalog.find(m => m.model === p.model)?.defaultReasoningEffort } });
+          if (r.native) await this.nativeSettings(r, { model: p.model, effort: catalog.find(m => m.model === p.model)?.defaultReasoningEffort });
           r.model = p.model; r.effort = catalog.find(m => m.model === p.model)?.defaultReasoningEffort; this.save();
         }
         const selected = catalog.find(m => m.model === r.model);
         if (frame.method === 'models.thinking') {
           if (!p.sessionKey || typeof p.level !== 'string' || !selected?.supportedReasoningEfforts?.some((e: any) => e.reasoningEffort === p.level)) throw new Error('This model does not support that reasoning level');
           if (this.runs.has(r.id)) throw new Error('Wait for this task to finish before changing reasoning');
-          if (r.native) await this.desktop!.request('thread-follower-update-thread-settings', { conversationId: r.threadId, threadSettings: { effort: p.level } });
+          if (r.native) await this.nativeSettings(r, { effort: p.level });
           r.effort = p.level; this.save();
         }
         if (!r.effort && selected?.defaultReasoningEffort) { r.effort = selected.defaultReasoningEffort; this.save(); }
@@ -509,18 +535,21 @@ export class CodexService extends EventEmitter {
       if (previous) { if (previous.hash !== hash) throw new Error('Prompt key already used for different content'); return { runId: previous.runId }; }
       if (this.runs.has(r.id)) throw new Error('This session is busy. Stop it or send guidance.');
       if (!projectDescriptor(r.cwd ?? this.project).available) throw new Error('The working directory no longer exists');
-      if (!r.native) await this.thread(r);
-      else await this.desktop!.connect();
+      // Native is immutable provenance, not current ownership. A successful,
+      // authorized resume makes this App Server the owner until it exits.
+      const desktopOwned = r.native && !this.loaded.has(r.id);
+      if (desktopOwned) await this.desktop!.connect();
+      else await this.thread(r);
       const model = this.catalog.find(m => m.model === r.model);
       if (images.length && model && !model.inputModalities?.includes('image')) throw new Error('This model does not support images');
-      if (!r.native && input.thinkingLevel && !model?.supportedReasoningEfforts?.some((e: any) => e.reasoningEffort === input.thinkingLevel)) throw new Error('This model does not support that reasoning level');
+      if (!desktopOwned && input.thinkingLevel && !model?.supportedReasoningEfforts?.some((e: any) => e.reasoningEffort === input.thinkingLevel)) throw new Error('This model does not support that reasoning level');
       if (Object.keys(r.keys).length >= 10000) throw new Error('Start a new conversation to continue');
       const runId = randomUUID();
       Object.defineProperty(r.keys, input.idempotencyKey, { value: { hash, runId }, enumerable: true, configurable: true });
       r.preview = input.text.slice(0, 160); r.activity = Date.now(); if (!r.title) r.title = input.text.trim().slice(0, 80); r.effort = input.thinkingLevel ?? r.effort; this.save();
       this.runs.set(r.id, { id: runId, text: '', started: Date.now(), items: new Map() }); this.update({ type: 'run_started', sessionKey: r.id, runId });
-      const params = { threadId: r.threadId, input: [{ type: 'text', text: input.text }, ...images.map(a => ({ type: 'image', url: `data:${a.mimeType};base64,${a.content}` }))], ...(r.native ? {} : { model: r.model, effort: r.effort }), clientUserMessageId: input.idempotencyKey };
-      const accepted = r.native ? this.desktopTurn(r, params) : this.rpc.request('turn/start', params);
+      const params = { threadId: r.threadId, input: [{ type: 'text', text: input.text }, ...images.map(a => ({ type: 'image', url: `data:${a.mimeType};base64,${a.content}` }))], ...(desktopOwned ? {} : { model: r.model, effort: r.effort }), clientUserMessageId: input.idempotencyKey };
+      const accepted = desktopOwned ? this.desktopTurn(r, params) : this.rpc.request('turn/start', params);
       if (this.starts.size >= 256) this.starts.delete(this.starts.keys().next().value!);
       this.starts.set(runId, accepted);
       void accepted.then(result => {

@@ -195,8 +195,6 @@
   "YouMind Sprite": "YouMind Sprite",
   "123 456": "123 456",
   "ABC 234": "ABC 234",
-  "Relay connected": "Relay bağlandı",
-  "Waiting for Bridge": "Bridge bekleniyor",
   "Ready": "Hazır",
   "No agent yet?": "Henüz Agent'ınız yok mu?",
   "No network": "Ağ yok",
@@ -385,5 +383,6 @@
   "Backup history": "Yedekleme geçmişi",
   "Pi is not responding": "Pi yanıt vermiyor",
   "Codex is not responding": "Codex yanıt vermiyor",
-  "Claude Code is not responding": "Claude Code yanıt vermiyor"
+  "Claude Code is not responding": "Claude Code yanıt vermiyor",
+  "To connect Codex, Claude Code or Pi, choose your Agent in Add connection and follow its pairing instructions.": "Codex, Claude Code veya Pi bağlamak için Bağlantı ekle bölümünde Agent’ınızı seçin ve eşleştirme talimatlarını izleyin."
 }

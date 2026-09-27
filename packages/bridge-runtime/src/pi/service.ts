@@ -1,3 +1,4 @@
+import { InteractionAttention } from '../interaction-attention.js';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, lstatSync, realpathSync, existsSync, unlinkSync } from 'node:fs';
 import { join, basename } from 'node:path';
@@ -115,9 +116,14 @@ export class PiService extends EventEmitter {
     void tail.then(() => { if (this.queues.get(record.id) === tail) this.queues.delete(record.id); });
     return next;
   }
-  private update(update: SessionUpdate): void { this.emit('update', update); }
+  private readonly attention = new InteractionAttention();
+  private update(update: SessionUpdate): void {
+    const patch = this.attention.accept(update);
+    this.emit('update', update);
+    if (patch) this.emit('update', patch);
+  }
   private descriptor(record: RecordEntry): SessionDescriptor {
-    return { connectionId: '', agentId: 'pi', key: record.id, kind: record.id === this.records[0].id ? 'main' : 'direct', title: record.title || basename(this.project), updatedAt: record.activity ?? record.created, lastActivityAt: record.activity ?? null, model: record.model, modelProvider: record.provider, preview: record.preview, hasActiveRun: !!this.processes.get(record.id)?.run, source: 'bridge', allowedActions: { rename: true, reset: true, delete: this.records.length > 1, pin: true } };
+    return { connectionId: '', agentId: 'pi', key: record.id, kind: record.id === this.records[0].id ? 'main' : 'direct', title: record.title || basename(this.project), updatedAt: record.activity ?? record.created, lastActivityAt: record.activity ?? null, model: record.model, modelProvider: record.provider, preview: record.preview, hasActiveRun: !!this.processes.get(record.id)?.run, attention: this.attention.get(record.id), source: 'bridge', allowedActions: { rename: true, reset: true, delete: this.records.length > 1, pin: true } };
   }
   async health(): Promise<object> {
     const live = this.processes.get(this.records[0].id) ?? this.processes.values().next().value ?? await this.process(this.records[0]);

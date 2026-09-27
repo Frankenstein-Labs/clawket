@@ -28,6 +28,7 @@ jest.mock('react-native', () => {
     },
   );
   return {
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Modal: ({ children, visible, ...props }: Record<string, unknown>) => (
       visible ? ReactRuntime.createElement('Modal', props, children) : null
     ),

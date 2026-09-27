@@ -167,9 +167,20 @@ describe('speech admission and upgrade', () => {
 
   it('retries a transient release failure before completing setup cleanup', async () => {
     vi.useFakeTimers();
-    release.mockRejectedValueOnce(Error('storage unavailable'));
+    let releaseStarted!: () => void;
+    const releasing = new Promise<void>(resolve => { releaseStarted = resolve; });
+    release.mockImplementationOnce(() => {
+      releaseStarted();
+      return Promise.reject(Error('storage unavailable'));
+    });
     reserve.mockResolvedValueOnce({ allowed: true }).mockResolvedValueOnce({ allowed: false, reason: 'quota', retryAfterMs: 5000 });
-    const response = run(); await vi.advanceTimersByTimeAsync(101);
+    const response = run();
+    // Native crypto admission work is not driven by the fake clock. Wait until
+    // cleanup starts before advancing the release retry deadline.
+    await releasing;
+    await vi.advanceTimersByTimeAsync(99);
+    expect(release).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect((await response).status).toBe(429);
     expect(release).toHaveBeenCalledTimes(2); expect(upstream).not.toHaveBeenCalled();
   });

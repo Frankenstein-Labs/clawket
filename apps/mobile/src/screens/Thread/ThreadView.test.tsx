@@ -71,6 +71,7 @@ jest.mock('react-native', () => {
     ),
   );
   return {
+    ...require('../../../__mocks__/native-animated'),
     DynamicColorIOS: (variants: unknown) => ({ dynamic: variants }),
     Keyboard: { dismiss: jest.fn() },
     PanResponder: { create: (config: Record<string, unknown>) => ({ panHandlers: { __config: config } }) },
@@ -332,6 +333,7 @@ const copy: ThreadCopy = {
   queued: 'Queued',
   sending: 'Sending…',
   paused: 'Paused',
+  heldHint: 'Not sent · tap to review',
   sent: 'Sent',
   delivered: 'Delivered',
   reconnect: 'Reconnect',
@@ -596,6 +598,18 @@ describe('ThreadView', () => {
     expect(view.queryByText('Atlas', { includeHiddenElements: true })).toBeTruthy();
   });
 
+  it('shows waiting for input without a thinking bubble or working animation', () => {
+    const messages: UiMessage[] = [{ id: 'streaming', role: 'assistant', text: '', streaming: true }, { id: 'sent', role: 'user', text: 'Ask me' }];
+    const view = render(<ThreadView {...createProps({ messages, isRunning: true, interactionAttention: 'input' })} />);
+    expect(view.getByText('Agent needs your input')).toBeTruthy();
+    expect(view.queryByTestId('thread-thinking-streaming')).toBeNull();
+    expect(view.queryByTestId('thread-screen-header-pill-working')).toBeNull();
+    expect(view.getByTestId('thread-message-sent')).toBeTruthy();
+    view.rerender(<ThreadView {...createProps({ messages, isRunning: true, interactionAttention: null })} />);
+    expect(view.getByTestId('thread-thinking-streaming')).toBeTruthy();
+    expect(view.getByTestId('thread-screen-header-pill-working')).toBeTruthy();
+  });
+
   it('keeps the reply bubble present from send until the first token', () => {
     const sent: UiMessage = { id: 'usr_1', role: 'user', text: 'Hello', timestampMs: Date.now() };
     const messageActions = { onCopy: jest.fn(), onToggleFavorite: jest.fn(), onShare: jest.fn() };
@@ -747,6 +761,23 @@ describe('ThreadView', () => {
     view.rerender(<ThreadView {...failureProps} state={{ kind: 'ready' }} />);
     expect(view.getByText('Ready to help.')).toBeTruthy();
     view.rerender(<ThreadView {...failureProps} />);
+    expect(view.queryByTestId('thread-connection-unavailable')).toBeNull();
+    expect(view.getByText('Ready to help.')).toBeTruthy();
+    expect(view.getByTestId('thread-screen-offline')).toBeTruthy();
+  });
+
+  it.each(['openclaw', 'hermes'] as const)('keeps the already-read %s timeline during network loss without hiding new-scope or permission failures', (backend) => {
+    const props = createProps({ capabilities: { ...CAPABILITY_MATRIX[backend] },
+      connectionFailure: { scope: backend, name: 'Computer' }, sessionKey: 'read', onRetry: jest.fn() });
+    const view = render(<ThreadView {...props} state={{ kind: 'ready' }} />);
+    view.rerender(<ThreadView {...props} state={{ kind: 'error', code: 'network', message: 'Offline' }} />);
+    expect(view.getByText('Ready to help.')).toBeTruthy();
+    expect(view.queryByTestId('thread-connection-unavailable')).toBeNull();
+    view.rerender(<ThreadView {...props} state={{ kind: 'error', code: 'pairing_expired', message: 'Pair again' }} />);
+    expect(view.getByTestId('thread-connection-unavailable')).toBeTruthy();
+    view.rerender(<ThreadView {...props} state={{ kind: 'offline' }} connectionFailure={{ scope: backend, name: 'Computer', message: 'Paused' }} />);
+    expect(view.getByTestId('thread-connection-unavailable')).toBeTruthy();
+    view.rerender(<ThreadView {...props} sessionKey="different" state={{ kind: 'offline' }} />);
     expect(view.getByTestId('thread-connection-unavailable')).toBeTruthy();
   });
 
@@ -1689,6 +1720,7 @@ describe('ThreadView', () => {
       queuedMessageActions: { ...queuedMessageActions, canSendNow: true },
     })} />);
     expect(view.getByTestId('thread-meta-usr_2_q1-status').props.accessibilityLabel).toBe('Paused');
+    expect(view.getByTestId('thread-held-usr_2_q1')).toHaveTextContent('Not sent · tap to review');
     fireEvent.press(view.getByTestId('thread-message-usr_2_q1'));
     expect(view.getByTestId('thread-message-actions').props.queuedActions).toMatchObject({ canSendNow: true, editable: true });
     act(() => view.getByTestId('thread-message-actions').props.onClosed());
@@ -2338,13 +2370,88 @@ describe('messenger timeline layout', () => {
     act(() => timeline.props.onCommitLayoutEffect());
     expect(mockScrollToEnd).toHaveBeenCalledTimes(2);
 
-    // Rows removed below a reader near the end never leave the offset past it.
+    // Estimated row heights shrinking must not pull a reader back to the end.
     fireEvent.scroll(timeline, scrollEvent(40));
     mockListLayout.content = 1300;
     act(() => timeline.props.onCommitLayoutEffect());
-    expect(mockScrollToEnd).toHaveBeenCalledTimes(3);
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(2);
     act(() => jest.advanceTimersByTime(20));
-    expect(mockScrollToEnd).toHaveBeenCalledTimes(3);
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['openclaw', 'hermes', 'claude-code'] as const)(
+    'keeps a history drag and momentum authoritative as virtual row estimates change (%s)', (backend) => {
+      jest.useFakeTimers();
+      const view = render(<ThreadView {...createProps({ capabilities: CAPABILITY_MATRIX[backend] })} />);
+      const timeline = view.getByTestId('thread-screen-timeline');
+      mockListLayout.content = 20_000;
+      mockListLayout.viewport = 600;
+      act(() => timeline.props.onCommitLayoutEffect());
+      fireEvent(timeline, 'load', { elapsedTimeInMs: 5 });
+      const position = (height: number, remaining: number) => ({ nativeEvent: {
+        contentSize: { height, width: 393 }, layoutMeasurement: { height: 600, width: 393 },
+        contentOffset: { x: 0, y: height - 600 - remaining },
+      } });
+      // The first finger movement is still inside the old bottom-follow threshold.
+      fireEvent(timeline, 'scrollBeginDrag');
+      fireEvent.scroll(timeline, position(20_000, 15));
+      mockListLayout.content = 20_600;
+      act(() => timeline.props.onCommitLayoutEffect());
+      expect(mockScrollToEnd).not.toHaveBeenCalled();
+      // The real device re-estimated thousands of points while only 1,166 away.
+      fireEvent.scroll(timeline, position(20_600, 1_166));
+      mockListLayout.content = 17_600;
+      act(() => timeline.props.onCommitLayoutEffect());
+      expect(mockScrollToEnd).not.toHaveBeenCalled();
+      fireEvent(timeline, 'scrollEndDrag', position(17_600, 900));
+      fireEvent(timeline, 'momentumScrollBegin');
+      act(() => jest.advanceTimersByTime(200));
+      mockListLayout.content = 15_000;
+      act(() => timeline.props.onCommitLayoutEffect());
+      expect(mockScrollToEnd).not.toHaveBeenCalled();
+      fireEvent(timeline, 'momentumScrollEnd', position(15_000, 1_200));
+      // A late measurement and earlier-history prepend preserve the resting reader too.
+      mockListLayout.content = 12_000;
+      act(() => timeline.props.onCommitLayoutEffect());
+      mockListLayout.content = 24_000;
+      act(() => timeline.props.onCommitLayoutEffect());
+      fireEvent(timeline, 'contentSizeChange', 393, 24_000);
+      act(() => jest.advanceTimersByTime(200));
+      expect(mockScrollToEnd).not.toHaveBeenCalled();
+      expect(view.getByTestId('thread-screen-scroll-to-bottom-container').props.pointerEvents).toBe('auto');
+    },
+  );
+
+  it('resumes following only after a slow drag settles at the end, and cancels settling on another drag', () => {
+    jest.useFakeTimers();
+    const view = render(<ThreadView {...createProps()} />);
+    const timeline = view.getByTestId('thread-screen-timeline');
+    mockListLayout.content = 2000;
+    mockListLayout.viewport = 600;
+    act(() => timeline.props.onCommitLayoutEffect());
+    fireEvent(timeline, 'load', { elapsedTimeInMs: 5 });
+    fireEvent(timeline, 'scrollBeginDrag');
+    fireEvent(timeline, 'scrollEndDrag', scrollEvent(0));
+    act(() => jest.advanceTimersByTime(200));
+    mockListLayout.content = 2050;
+    act(() => timeline.props.onCommitLayoutEffect());
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(1);
+    mockScrollToEnd.mockClear();
+    fireEvent(timeline, 'scrollBeginDrag');
+    fireEvent(timeline, 'scrollEndDrag', scrollEvent(0));
+    fireEvent(timeline, 'scrollBeginDrag');
+    act(() => jest.advanceTimersByTime(200));
+    mockListLayout.content = 2100;
+    act(() => timeline.props.onCommitLayoutEffect());
+    expect(mockScrollToEnd).not.toHaveBeenCalled();
+    fireEvent(timeline, 'scrollEndDrag', scrollEvent(300));
+    view.rerender(<ThreadView {...createProps({ sessionKey: 'another-session' })} />);
+    act(() => jest.advanceTimersByTime(200));
+    act(() => view.getByTestId('thread-screen-timeline').props.onCommitLayoutEffect());
+    fireEvent(view.getByTestId('thread-screen-timeline'), 'load', { elapsedTimeInMs: 5 });
+    mockListLayout.content = 2200;
+    act(() => view.getByTestId('thread-screen-timeline').props.onCommitLayoutEffect());
+    expect(mockScrollToEnd).toHaveBeenCalledWith({ animated: false });
   });
 
   it('glides a new row into view while following, and keeps the exact end for growth, the keyboard and big bursts', () => {

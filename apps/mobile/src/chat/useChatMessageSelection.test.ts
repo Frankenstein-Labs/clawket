@@ -9,6 +9,7 @@ jest.mock('expo-clipboard', () => ({
 }));
 
 jest.mock('react-native', () => ({
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
   StyleSheet: {
     hairlineWidth: 1,
   },

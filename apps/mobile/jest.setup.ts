@@ -8,6 +8,11 @@ jest.mock('react-native-svg', () => {
     Path: host('Path'),
     Text: host('SvgText'),
     Defs: host('Defs'),
+    // Companion loading scenes draw their stage with these.
+    G: host('G'),
+    ClipPath: host('ClipPath'),
+    Circle: host('Circle'),
+    Ellipse: host('Ellipse'),
     LinearGradient: host('LinearGradient'),
     Rect: host('Rect'),
     Stop: host('Stop'),

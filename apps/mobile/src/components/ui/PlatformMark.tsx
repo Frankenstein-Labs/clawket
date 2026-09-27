@@ -13,10 +13,32 @@ const marks = {
   youmind: require('../../../assets/brands/youmind.png'),
 } as const;
 
-/** Product marks; bundled artwork provenance is recorded in assets/brands/SOURCES.md. */
-export function PlatformMark({ platform, size }: { platform: keyof typeof marks | 'local-model'; size?: number }) {
-  if (platform === 'local-model') return <LocalModelMark size={size} />;
-  return <Image accessible={false} source={marks[platform]} resizeMode="contain" style={[platform === 'hermes' || platform === 'codex' ? styles.appIcon : styles.mark, size ? { width: size, height: size } : null]} />;
+type Platform = keyof typeof marks | 'local-model';
+
+/**
+ * Drawn size of each mark in the 44-point chooser slot, tuned by eye on a device screenshot (owner
+ * request 2026-09-27) so a list of brands reads as one size: app artwork brings its own tile and safe
+ * area (Pi's logo keeps 20%), and a filled tile reads larger than a bare glyph of the same width.
+ * Sizes above 44 only spill transparent margin.
+ */
+const BALANCED_SIZE: Readonly<Record<Platform, number>> = {
+  openclaw: 36,
+  'claude-code': 39,
+  hermes: 46,
+  codex: 45,
+  pi: 50,
+  youmind: 36,
+  'local-model': 41,
+};
+
+/**
+ * Product marks; bundled artwork provenance is recorded in assets/brands/SOURCES.md. `balanced` sizes
+ * the mark for a 44-point list slot beside other brands (Onboarding chooser); `size` sets the image box.
+ */
+export function PlatformMark({ platform, size, balanced = false }: { platform: Platform; size?: number; balanced?: boolean }) {
+  const drawn = balanced ? BALANCED_SIZE[platform] : size;
+  if (platform === 'local-model') return <LocalModelMark size={drawn} />;
+  return <Image accessible={false} source={marks[platform]} resizeMode="contain" style={[platform === 'hermes' || platform === 'codex' ? styles.appIcon : styles.mark, drawn ? { width: drawn, height: drawn } : null]} />;
 }
 
 /** Processor outline in the 52-point frame, sized to sit inside the 42-point tile like the app-icon artwork. */

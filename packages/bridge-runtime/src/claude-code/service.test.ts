@@ -4,12 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ send: vi.fn(), close: vi.fn(), roster: vi.fn(), list: vi.fn(), history: vi.fn(), info: vi.fn(), fork: vi.fn(), questions: vi.fn(), interrupt: vi.fn() }));
+const mocks = vi.hoisted(() => ({ starts: vi.fn(), send: vi.fn(), close: vi.fn(), roster: vi.fn(), list: vi.fn(), history: vi.fn(), info: vi.fn(), fork: vi.fn(), questions: vi.fn(), interrupt: vi.fn() }));
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ listSessions: mocks.list, getSessionMessages: mocks.history, getSessionInfo: mocks.info, forkSession: mocks.fork }));
 vi.mock('./saved-projects.js', () => ({ savedClaudeProjects: async () => [] }));
 vi.mock('./owners.js', () => ({ ClaudeOwners: class { snapshot = mocks.roster; } }));
 vi.mock('./session.js', () => ({ claudePromptContent: (input: { text: string }) => { if (!input.text.trim()) throw new Error('empty'); },
   ClaudeSession: class extends EventEmitter {
+    constructor(options: unknown) { super(); mocks.starts(options, this); }
     activeRun: { runId: string } | undefined;
     interactions = { questions: mocks.questions, approvals: () => [] };
     currentModel = 'sonnet';
@@ -24,8 +25,8 @@ import { ClaudeService } from './service.js';
 const services: ClaudeService[] = [], dirs: string[] = [];
 const request = (service: ClaudeService, method: string, params?: Record<string, unknown>) => service.request({ type: 'req', id: randomUUID(), method, params });
 function fixture(device = false) {
-  const project = realpathSync(mkdtempSync(join(tmpdir(), 'clawket-claude-service-'))); dirs.push(project);
-  const options = { project, directory: join(project, 'state'), executable: '/unused/claude', device };
+  const project = realpathSync.native(mkdtempSync(join(tmpdir(), 'clawket-claude-service-'))); dirs.push(project);
+  const options = { project, directory: join(project, 'state'), executable: '/unused/claude', ownershipDirectory: join(project, 'writers'), device };
   const open = () => { const service = new ClaudeService(options); services.push(service); return service; };
   return { project, open, service: open() };
 }
@@ -59,11 +60,35 @@ describe('Claude service durable send and ownership boundary', () => {
     await expect(request(service, 'chat.send', input)).resolves.toHaveProperty('runId');
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
+  it('publishes native question attention and clears it after resolution', async () => {
+    const { service } = fixture();
+    const row = await request(service, 'sessions.create') as { key: string };
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'Ask me', idempotencyKey: 'ask' });
+    const session = mocks.starts.mock.calls.at(-1)![1] as EventEmitter;
+    const updates = vi.fn(); service.on('update', updates);
+    session.emit('update', { type: 'question_requested', sessionKey: row.key, question: { id: 'q', kind: 'input', title: 'Answer' } });
+    expect((await request(service, 'sessions.list') as any[])[0].attention).toBe('input');
+    expect(updates).toHaveBeenCalledWith({ type: 'session_info_update', session: { key: row.key, attention: 'input' } });
+    session.emit('update', { type: 'question_resolved', sessionKey: row.key, questionId: 'q' });
+    expect((await request(service, 'sessions.list') as any[])[0].attention).toBeNull();
+  });
+
+  it('names owned conversations from their first accepted prompt while retaining explicit titles', async () => {
+    const { service, open } = fixture();
+    const first = await request(service, 'sessions.create') as { key: string };
+    const named = await request(service, 'sessions.create', { title: 'My chosen title' }) as { key: string };
+    await request(service, 'chat.send', { sessionKey: first.key, text: '  Diagnose the staging build  ', idempotencyKey: 'first-title' });
+    await request(service, 'chat.send', { sessionKey: named.key, text: 'Do not replace my title', idempotencyKey: 'named-title' });
+    await service.stop();
+    const rows = await request(open(), 'sessions.list') as Array<{ key: string; title: string }>;
+    expect(rows.find(row => row.key === first.key)?.title).toBe('Diagnose the staging build');
+    expect(rows.find(row => row.key === named.key)?.title).toBe('My chosen title');
+  });
   it('never resumes an owned transcript while native ownership is unknown or still present', async () => {
     const { service, open } = fixture(); const row = await request(service, 'sessions.create') as { key: string };
     await request(service, 'chat.send', { sessionKey: row.key, text: 'first', idempotencyKey: 'first' });
     await service.stop(); const restarted = open(); mocks.roster.mockResolvedValue({ known: false, owners: [] });
-    await expect(request(restarted, 'chat.send', { sessionKey: row.key, text: 'next', idempotencyKey: 'next' })).rejects.toThrow('still be open');
+    await expect(request(restarted, 'chat.send', { sessionKey: row.key, text: 'next', idempotencyKey: 'next' })).rejects.toThrow('Could not verify');
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
   it('creates in the explicitly selected discovered project and rejects arbitrary project IDs', async () => {
@@ -81,8 +106,9 @@ describe('Claude service durable send and ownership boundary', () => {
   it('imports native history read-only and forks only the discovered source in its original project', async () => {
     const { project, service } = fixture(); const nativeId = randomUUID(), forkId = randomUUID();
     mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native work', lastModified: 1 }]); mocks.fork.mockResolvedValue({ sessionId: forkId });
+    mocks.roster.mockResolvedValue({ known: true, owners: [{ sessionId: nativeId, status: 'idle' }] });
     const rows = await request(service, 'sessions.list') as { key: string }[];
-    await expect(request(service, 'chat.send', { sessionKey: rows[0].key, text: 'write', idempotencyKey: 'bad' })).rejects.toThrow('read-only');
+    await expect(request(service, 'chat.send', { sessionKey: rows[0].key, text: 'write', idempotencyKey: 'bad' })).rejects.toThrow('unavailable for continuation');
     await expect(request(service, 'sessions.create', { fromSession: 'arbitrary-id' })).rejects.toThrow('Unknown');
     const fork = await request(service, 'sessions.create', { fromSession: rows[0].key }) as { source: string; project: { path: string } };
     expect(fork).toMatchObject({ source: 'bridge', project: { path: project } });
@@ -98,6 +124,107 @@ describe('Claude service durable send and ownership boundary', () => {
     await request(service, 'questions.respond', { sessionKey: row.key, questionId: 'pending', cancelled: true });
     expect(mocks.interrupt).toHaveBeenCalledWith(mocks.send.mock.calls[0][0]);
     expect(await request(service, 'questions.list', { sessionKey: row.key })).toEqual([{ id: 'pending' }]);
+  });
+
+  it('continues a released native session with the same key, native id and cwd, without forking; restart retries do not duplicate', async () => {
+    const { project, service, open } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native', lastModified: 10 }]);
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string; canContinue: boolean }>;
+    expect(row.canContinue).toBe(true);
+    const input = { sessionKey: row.key, text: 'continue original', idempotencyKey: 'native-once' };
+    const sent = await request(service, 'chat.send', input);
+    expect(mocks.starts).toHaveBeenLastCalledWith(expect.objectContaining({ key: row.key, cwd: project, resume: nativeId }), expect.anything());
+    expect(mocks.fork).not.toHaveBeenCalled();
+    expect(await request(service, 'sessions.list')).toEqual([expect.objectContaining({ key: row.key, source: 'native', allowedActions: { rename: false, reset: false, delete: false, pin: true } })]);
+    for (const method of ['sessions.rename', 'sessions.reset', 'sessions.delete']) {
+      await expect(request(service, method, { sessionKey: row.key, title: 'change' })).rejects.toThrow('Native');
+    }
+    await service.stop(); const restarted = open();
+    expect(await request(restarted, 'chat.send', input)).toEqual(sent);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    await request(restarted, 'chat.send', { ...input, idempotencyKey: 'native-two' });
+    expect(mocks.starts.mock.calls.at(-1)?.[0].resume).toBe(nativeId);
+  });
+
+  it.each(['busy', 'idle', 'waiting', 'unknown'])('keeps %s native owners read-only with a precise reason', async status => {
+    const { project, service } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native', lastModified: 10 }]);
+    mocks.roster.mockResolvedValue({ known: true, owners: [{ sessionId: nativeId, status }] });
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string }>;
+    expect(row).toMatchObject({ canContinue: false, continuationBlockedReason: 'in_use' });
+    await expect(request(service, 'chat.send', { sessionKey: row.key, text: 'no', idempotencyKey: 'blocked' })).rejects.toThrow();
+    expect(mocks.starts).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('rechecks native ownership immediately before resume even when discovery said available', async () => {
+    const { project, service } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native', lastModified: 10 }]);
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string }>;
+    mocks.roster.mockResolvedValueOnce({ known: true, owners: [] }).mockResolvedValue({ known: true, owners: [{ sessionId: nativeId, status: 'idle' }] });
+    await expect(request(service, 'chat.send', { sessionKey: row.key, text: 'no', idempotencyKey: 'raced' })).rejects.toThrow('still open');
+    expect(mocks.starts).not.toHaveBeenCalled();
+    mocks.roster.mockResolvedValue({ known: true, owners: [] });
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'yes', idempotencyKey: 'raced' });
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('unknown owners fail closed and a history refresh publishes newly released input state', async () => {
+    const { project, service } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native', lastModified: 10 }]);
+    mocks.roster.mockResolvedValue({ known: false, owners: [] });
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string }>;
+    expect(row).toMatchObject({ canContinue: false, continuationBlockedReason: 'ownership_unknown' });
+    const update = vi.fn(); service.on('update', update);
+    mocks.roster.mockResolvedValue({ known: true, owners: [] });
+    await request(service, 'chat.history', { sessionKey: row.key });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ type: 'session_info_update', session: expect.objectContaining({ key: row.key, canContinue: true }) }));
+  });
+
+  it('excludes a second Bridge writer even when native roster has not registered the first process yet', async () => {
+    const { project, service } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native', lastModified: 10 }]);
+    const second = new ClaudeService({ project, directory: join(project, 'second'), ownershipDirectory: join(project, 'writers'), executable: '/unused/claude' }); services.push(second);
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string }>;
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'one', idempotencyKey: 'one' });
+    await expect(request(second, 'chat.send', { sessionKey: row.key, text: 'two', idempotencyKey: 'two' })).rejects.toThrow('another Clawket Bridge');
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    await service.stop();
+    await request(second, 'chat.send', { sessionKey: row.key, text: 'two', idempotencyKey: 'two' });
+    expect(mocks.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases the imported native process after settlement and resumes on the next turn', async () => {
+    const { project, service } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native', lastModified: 10 }]);
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string }>;
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'one', idempotencyKey: 'one' });
+    const running = mocks.starts.mock.calls.at(-1)![1]; running.activeRun = undefined; running.emit('settled');
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'two', idempotencyKey: 'two' });
+    expect(mocks.close).toHaveBeenCalledTimes(1);
+    expect(mocks.starts).toHaveBeenCalledTimes(2);
+    expect(mocks.starts.mock.calls.at(-1)![0].resume).toBe(nativeId);
+  });
+
+  it('does not resume native conversations merely to display the model catalog', async () => {
+    const { project, service } = fixture(); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: project, summary: 'Native', lastModified: 10 }]);
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string }>;
+    await request(service, 'models.list', { sessionKey: row.key });
+    expect(mocks.starts.mock.calls.at(-1)![0]).toMatchObject({ key: 'model-catalog' });
+    expect(mocks.starts.mock.calls.at(-1)![0].resume).toBeUndefined();
+    await request(service, 'chat.send', { sessionKey: row.key, text: 'first', idempotencyKey: 'first' });
+    await request(service, 'models.list', { sessionKey: row.key });
+    expect(mocks.starts.mock.calls.at(-1)![0].resume).toBeUndefined();
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps missing project histories visible but unavailable for original continuation', async () => {
+    const { project, service } = fixture(true); const nativeId = randomUUID();
+    mocks.list.mockResolvedValue([{ sessionId: nativeId, cwd: join(project, 'missing'), summary: 'Native', lastModified: 10 }]);
+    const [row] = await request(service, 'sessions.list') as Array<{ key: string }>;
+    expect(row).toMatchObject({ canContinue: false, continuationBlockedReason: 'project_unavailable' });
+    await expect(request(service, 'chat.send', { sessionKey: row.key, text: 'no', idempotencyKey: 'no' })).rejects.toThrow();
+    expect(mocks.starts).not.toHaveBeenCalled();
   });
 
 });

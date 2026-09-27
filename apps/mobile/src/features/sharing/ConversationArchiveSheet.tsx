@@ -122,7 +122,7 @@ export function ConversationArchiveSheet({ visible, suspended = false, isPro, on
     headerRight={!renaming ? <SheetHeaderButton icon={MoreHorizontal} accessibilityLabel={t('Archive actions')}
       onPress={() => { Keyboard.dismiss(); setMenu(value => !value); setConfirmDelete(false); }} disabled={updating || deleting} testID="archive-actions" /> : undefined}>
     {error ? <View style={styles.inset}><Banner message={t('Failed to save')} actionLabel={t('Retry')} onAction={() => setRevision(value => value + 1)} /></View> : null}
-    {!entries && !error ? <LoadingState /> : null}
+    {!entries && !error ? <LoadingState size="compact" /> : null}
     {selected || menu ? <View style={styles.inset}><SettingsRow title={t('Back', { ns: 'common' })} leading={<ChevronLeft size={IconSize.md} color={theme.colors.inkSecondary} />}
       onPress={back} disabled={updating || deleting} testID="archive-back" /></View> : null}
     {renaming ? <View style={styles.content}>

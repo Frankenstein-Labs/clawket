@@ -386,5 +386,12 @@
   "Allow this action?": "この操作を許可しますか？",
   "Stop task": "タスクを停止",
   "Your answer": "回答",
-  "Question {{current}} of {{total}}": "質問 {{current}} / {{total}}"
+  "Question {{current}} of {{total}}": "質問 {{current}} / {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "取り込んだ会話は読み取り専用です。文脈を引き継いで新しい会話を始められます。元の会話は変更されません。",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "この会話はパソコンで開かれています。会話を閉じて再確認するか、新しいセッションで続けてください。",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "この会話が使用中か確認できません。再確認するか、新しいセッションで続けてください。",
+  "This conversation’s project folder is unavailable on your computer.": "この会話のプロジェクトフォルダにパソコンからアクセスできません。",
+  "Check again": "再確認",
+  "Not sent · tap to review": "未送信 · タップして確認",
+  "This model does not accept images. Choose another model or remove the photo.": "このモデルは画像に対応していません。別のモデルを選ぶか、写真を削除してください。"
 }

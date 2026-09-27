@@ -386,5 +386,12 @@
   "Allow this action?": "Дозволити цю дію?",
   "Stop task": "Зупинити завдання",
   "Your answer": "Ваша відповідь",
-  "Question {{current}} of {{total}}": "Запитання {{current}} з {{total}}"
+  "Question {{current}} of {{total}}": "Запитання {{current}} з {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "Імпортовані розмови доступні лише для читання. Продовжте з їхнім контекстом у новій розмові; оригінал залишиться без змін.",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "Цю розмову відкрито на комп’ютері. Закрийте її та перевірте знову або продовжте в новому сеансі.",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "Не вдалося перевірити, чи використовується ця розмова. Перевірте знову або продовжте в новому сеансі.",
+  "This conversation’s project folder is unavailable on your computer.": "Папка проєкту цієї розмови недоступна на комп’ютері.",
+  "Check again": "Перевірити знову",
+  "Not sent · tap to review": "Не надіслано · торкніться для перегляду",
+  "This model does not accept images. Choose another model or remove the photo.": "Ця модель не підтримує зображення. Виберіть іншу модель або видаліть фото."
 }

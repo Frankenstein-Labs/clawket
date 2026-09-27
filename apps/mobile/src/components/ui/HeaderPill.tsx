@@ -141,13 +141,15 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: FontSize.secondary,
-    lineHeight: LineHeight.secondary,
+    lineHeight: LineHeight.caption,
     fontWeight: FontWeight.semibold,
+    includeFontPadding: false,
   },
   subtitle: {
     fontSize: FontSize.caption,
-    lineHeight: LineHeight.caption,
+    lineHeight: LineHeight.secondary - Space.xs,
     fontWeight: FontWeight.regular,
+    includeFontPadding: false,
   },
   // The dots sit a step in from the name's left edge; flush-left they read
   // as hanging off the pill (owner-requested 2026-09-11).

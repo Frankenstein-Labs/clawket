@@ -1,5 +1,5 @@
-import { removeQuestionDraft } from './question-drafts';
-import { ChevronRight, MessageCircleQuestion } from 'lucide-react-native';
+import { loadQuestionDraft, saveQuestionDraft, removeQuestionDraft } from './question-drafts';
+import { ChevronRight, MessageCircleQuestion, Circle, CircleCheck } from 'lucide-react-native';
 import { StructuredQuestionForm } from './StructuredQuestionForm';
 import React, { useEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -10,9 +10,8 @@ import { Banner } from '../../components/ui/Banner';
 import { Sheet } from '../../components/ui/Sheet';
 import { Button } from '../../components/ui/Button';
 import { FormTextInput } from '../../components/ui/FormTextInput';
-import { SettingsGroup, SettingsRow } from '../../components/ui';
 import { useAppTheme } from '../../theme';
-import { FontSize, LineHeight, Space, IconSize, Radius, HitSize } from '../../theme/tokens';
+import { FontSize, LineHeight, Space, IconSize, Radius, HitSize, BorderWidth } from '../../theme/tokens';
 
 /** Pending questions survive route changes through the adapter snapshot. Dismissal never answers implicitly. */
 export function AgentQuestions({ adapter, sessionKey }: { adapter: AgentAdapter; sessionKey: string }): React.JSX.Element | null {
@@ -21,6 +20,8 @@ export function AgentQuestions({ adapter, sessionKey }: { adapter: AgentAdapter;
   const [questions, setQuestions] = useState<AgentQuestion[]>([]);
   const [visible, setVisible] = useState(false);
   const [draft, setDraft] = useState('');
+  const [selection, setSelection] = useState<string | null>(null);
+  const draftTouched = useRef(false);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
   const busy = useRef(false);
@@ -51,7 +52,28 @@ export function AgentQuestions({ adapter, sessionKey }: { adapter: AgentAdapter;
     refresh();
     return () => { generation.current++; offUpdate(); offState(); };
   }, [adapter, sessionKey]);
-  useEffect(() => { setDraft(question?.prefill ?? ''); setFailed(false); if (!question) setVisible(false); }, [question?.id]);
+  useEffect(() => {
+    let alive = true;
+    draftTouched.current = false;
+    setDraft(question?.prefill ?? ''); setSelection(null); setFailed(false);
+    if (!question) setVisible(false);
+    if (question && ['select', 'input', 'editor'].includes(question.kind)) {
+      void loadQuestionDraft(`${adapter.connection.id}:${sessionKey}:${question.id}`).then(saved => {
+        const value = saved?.value?.[0];
+        if (!alive || draftTouched.current || value === undefined) return;
+        if (question.kind === 'select') {
+          if (question.options?.includes(value)) setSelection(value);
+        } else setDraft(value);
+      }).catch(() => {});
+    }
+    return () => { alive = false; };
+  }, [question?.id, adapter.connection.id, sessionKey]);
+  const writeDraft = (value: string) => {
+    if (!question) return;
+    draftTouched.current = true;
+    if (question.kind === 'select') setSelection(value); else setDraft(value);
+    void saveQuestionDraft(`${adapter.connection.id}:${sessionKey}:${question.id}`, { value: [value] }).catch(() => {});
+  };
   useEffect(() => {
     if (!question?.expiresAtMs) return;
     const timer = setTimeout(() => setQuestions(items => items.filter(item => item.id !== question.id)), Math.max(0, question.expiresAtMs - Date.now()));
@@ -67,33 +89,48 @@ export function AgentQuestions({ adapter, sessionKey }: { adapter: AgentAdapter;
     catch { if (generation.current === epoch) setFailed(true); }
     finally { busy.current = false; if (generation.current === epoch) setSaving(false); }
   };
-  if (displayedQuestion?.kind === 'form') return <>
-    {question ? <Pressable accessibilityRole="button" accessibilityLabel={t('Respond')} onPress={() => { Keyboard.dismiss(); setVisible(true); }} testID="agent-question-pending" style={styles.prompt}>
+  const pending = question ? <Pressable accessibilityRole="button" accessibilityLabel={t('Respond')} onPress={() => { Keyboard.dismiss(); setVisible(true); }} testID="agent-question-pending" style={styles.prompt}>
       <MessageCircleQuestion size={IconSize.md} color={theme.colors.inkSecondary} />
-      <Text numberOfLines={1} style={[styles.promptLabel, { color: theme.colors.ink }]}>{question.fields?.map(f => f.header).filter(Boolean).join(' · ') || t('Agent needs your input')}</Text>
+      <Text numberOfLines={1} style={[styles.promptLabel, { color: theme.colors.ink }]}>{(question.kind === 'form' ? question.fields?.map(f => f.header).filter(Boolean).join(' · ') : question.title) || t('Agent needs your input')}</Text>
       <Text style={[styles.promptAction, { color: theme.colors.inkSecondary }]}>{t('Respond')}</Text>
       <ChevronRight size={IconSize.sm} color={theme.colors.inkTertiary} />
-    </Pressable> : null}
+    </Pressable> : null;
+  if (displayedQuestion?.kind === 'form') return <>
+    {pending}
     <StructuredQuestionForm question={displayedQuestion} visible={visible && !!question} scope={`${adapter.connection.id}:${sessionKey}`} saving={saving} failed={failed} onClose={() => { if (!busy.current) setVisible(false); }} onSubmit={submit} />
   </>;
+  const compact = displayedQuestion?.kind !== 'editor'
+    && (displayedQuestion?.message?.length ?? 0) < 800
+    && (displayedQuestion?.options?.length ?? 0) <= 6
+    && (displayedQuestion?.options ?? []).every(option => option.length < 120);
+  const Body = compact ? View : BottomSheetScrollView;
   return <>
-    {question ? <Banner message={t('Agent needs your input')} actionLabel={t('Respond')} onAction={() => { Keyboard.dismiss(); setVisible(true); }} testID="agent-question-pending" /> : null}
+    {pending}
     <Sheet visible={visible && !!question} onClose={() => { if (!busy.current) setVisible(false); }} title={displayedQuestion?.title ?? ''}
-      closeAccessibilityLabel={t('Close', { ns: 'common' })} snapPoints={['55%', '85%']} androidKeyboardInputMode="adjustPan" testID="agent-question-sheet"
+      closeAccessibilityLabel={t('Close', { ns: 'common' })} snapPoints={compact ? undefined : ['55%', '85%']} androidKeyboardInputMode="adjustPan" testID="agent-question-sheet"
       footer={<View style={styles.actions}>
         <Button label={t('Cancel', { ns: 'common' })} variant="secondary" disabled={saving} onPress={() => { void submit({ cancelled: true }); }} />
         {displayedQuestion?.kind === 'confirm' ? <>
           <Button label={t('No', { ns: 'common' })} variant="secondary" disabled={saving} onPress={() => { void submit({ confirmed: false }); }} />
           <Button label={t('Yes', { ns: 'common' })} disabled={saving} onPress={() => { void submit({ confirmed: true }); }} />
-        </> : displayedQuestion?.kind !== 'select' ? <Button label={t('Send')} loading={saving} onPress={() => { void submit({ value: draft }); }} /> : null}
+        </> : <Button label={t('Send')} loading={saving} disabled={saving || (displayedQuestion?.kind === 'select' && selection === null)} onPress={() => { if (displayedQuestion?.kind === 'select' && selection === null) return; void submit({ value: displayedQuestion?.kind === 'select' ? selection! : draft }); }} />}
       </View>}>
-      <BottomSheetScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <Body {...(compact ? { style: styles.body } : { contentContainerStyle: styles.body, keyboardShouldPersistTaps: 'handled' as const })}>
         {displayedQuestion?.message ? <Text selectable style={[styles.text, { color: theme.colors.ink }]}>{displayedQuestion?.message}</Text> : null}
-        {displayedQuestion?.kind === 'select' ? <SettingsGroup>{displayedQuestion?.options?.map((option, i) => <SettingsRow key={`${i}:${option}`} title={option} disabled={saving} onPress={() => { void submit({ value: option }); }} />)}</SettingsGroup> : null}
-        {displayedQuestion?.kind === 'input' || displayedQuestion?.kind === 'editor' ? <FormTextInput bottomSheet value={draft} onChangeText={setDraft} placeholder={displayedQuestion?.placeholder} multiline={displayedQuestion?.kind === 'editor'} editable={!saving} maxLength={64000} testID="agent-question-input" /> : null}
+        {displayedQuestion?.kind === 'select' ? <View style={styles.choices}>{displayedQuestion.options?.map((option, i) => {
+          const selected = selection === option;
+          const Icon = selected ? CircleCheck : Circle;
+          return <Pressable key={`${i}:${option}`} accessibilityRole="radio" accessibilityLabel={option} accessibilityState={{ checked: selected, disabled: saving }} disabled={saving}
+            testID={`agent-question-option-${i}`} onPress={() => writeDraft(option)}
+            style={({ pressed }) => [styles.choice, { backgroundColor: selected || pressed ? theme.colors.surface : theme.colors.canvas, borderColor: selected ? theme.colors.ink : theme.colors.line }]}>
+            <Text style={[styles.optionLabel, styles.text, { color: theme.colors.ink }]}>{option}</Text>
+            <Icon size={IconSize.md} color={selected ? theme.colors.ink : theme.colors.inkTertiary} />
+          </Pressable>;
+        })}</View> : null}
+        {displayedQuestion?.kind === 'input' || displayedQuestion?.kind === 'editor' ? <FormTextInput bottomSheet value={draft} onChangeText={writeDraft} placeholder={displayedQuestion?.placeholder} multiline={displayedQuestion?.kind === 'editor'} editable={!saving} maxLength={64000} testID="agent-question-input" /> : null}
         {failed ? <Banner tone="bad" message={t('Could not update this request. Try again.')} /> : null}
-      </BottomSheetScrollView>
+      </Body>
     </Sheet>
   </>;
 }
-const styles = StyleSheet.create({ prompt: { minHeight: HitSize.md, flexDirection: 'row', alignItems: 'center', gap: Space.sm, paddingHorizontal: Space.lg, paddingVertical: Space.sm, borderRadius: Radius.card }, promptLabel: { flex: 1, fontSize: FontSize.secondary, lineHeight: LineHeight.secondary }, promptAction: { fontSize: FontSize.secondary, lineHeight: LineHeight.secondary }, body: { paddingHorizontal: Space.lg, paddingBottom: Space.lg, gap: Space.lg }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Space.sm, justifyContent: 'flex-end' }, text: { fontSize: FontSize.body, lineHeight: LineHeight.body } });
+const styles = StyleSheet.create({ choices: { gap: Space.md }, choice: { minHeight: HitSize.lg, padding: Space.lg, borderRadius: Radius.card, borderWidth: BorderWidth.strong, flexDirection: 'row', alignItems: 'center', gap: Space.md }, optionLabel: { flex: 1 }, prompt: { minHeight: HitSize.md, flexDirection: 'row', alignItems: 'center', gap: Space.sm, paddingHorizontal: Space.lg, paddingVertical: Space.sm, borderRadius: Radius.card }, promptLabel: { flex: 1, fontSize: FontSize.secondary, lineHeight: LineHeight.secondary }, promptAction: { fontSize: FontSize.secondary, lineHeight: LineHeight.secondary }, body: { paddingHorizontal: Space.lg, paddingBottom: Space.lg, gap: Space.lg }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Space.sm, justifyContent: 'flex-end' }, text: { fontSize: FontSize.body, lineHeight: LineHeight.body } });

@@ -126,7 +126,10 @@ describe('Roster model', () => {
       avatarName: 'Main',
       emoji: 'C',
       sessionKind: 'channel',
+      // The conversation badge glyph comes from the platform and project.
+      sessionChannel: 'general',
     });
+    expect(rows[1]).not.toHaveProperty('sessionProject');
     expect(rows.filter((row) => row.connectionId === 'two').every((row) => (
       row.cached
       && row.syncedAt === 100
@@ -251,6 +254,11 @@ describe('Roster model', () => {
     [{ initialized: true, connectionCount: 1, rowCount: 1, activeState: 'offline', hasError: true }, 'offline'],
     [{ initialized: true, connectionCount: 1, rowCount: 1, activeState: 'ready', hasError: true }, 'error'],
     [{ initialized: true, connectionCount: 1, rowCount: 1, activeState: 'ready', hasError: false }, 'ready'],
+    [{ initialized: true, connectionCount: 1, rowCount: 0, activeState: 'handshaking', hasError: false, awaitingRoster: true }, 'loading'],
+    [{ initialized: true, connectionCount: 1, rowCount: 0, activeState: 'ready', hasError: false, awaitingRoster: true }, 'loading'],
+    [{ initialized: true, connectionCount: 1, rowCount: 0, activeState: 'ready', hasError: true, awaitingRoster: true }, 'empty'],
+    [{ initialized: true, connectionCount: 1, rowCount: 0, activeState: 'offline', hasError: false, awaitingRoster: true }, 'empty'],
+    [{ initialized: true, connectionCount: 1, rowCount: 0, activeState: 'ready', hasError: false, awaitingRoster: false }, 'empty'],
   ] as const)('resolves the page state deterministically', (input, expected) => {
     expect(resolveRosterPageState(input)).toBe(expected);
   });

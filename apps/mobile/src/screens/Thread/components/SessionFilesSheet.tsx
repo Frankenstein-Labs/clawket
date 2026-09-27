@@ -10,7 +10,7 @@ import { Sheet } from '../../../components/ui/Sheet';
 import { SheetHeaderButton } from '../../../components/ui/SheetHeaderButton';
 import { SettingsDivider, SettingsRow } from '../../../components/ui/SettingsGroup';
 import { Banner } from '../../../components/ui/Banner';
-import { LoadingState } from '../../../components/ui/LoadingState';
+import { ListSkeleton } from '../../../components/ui/ListSkeleton';
 import { useAppTheme } from '../../../theme';
 import { FontSize, IconSize, LineHeight, Space } from '../../../theme/tokens';
 import { receiveSessionFile, validateSessionFiles } from '../../../services/session-files';
@@ -25,6 +25,7 @@ export function SessionFilesSheet({ visible, adapter, sessionKey, online, onClos
   const { theme } = useAppTheme();
   const [files, setFiles] = useState<SessionFile[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [transfer, setTransfer] = useState<{ id: string; fraction: number } | null>(null);
@@ -35,7 +36,7 @@ export function SessionFilesSheet({ visible, adapter, sessionKey, online, onClos
   useEffect(() => {
     operation.current?.abort();
     if (pending.current) { remove(pending.current.directory); pending.current = null; }
-    setFiles([]); setTransfer(null);
+    setFiles([]); setTransfer(null); setFetched(false);
     return () => { operation.current?.abort(); if (pending.current) { remove(pending.current.directory); pending.current = null; } };
   }, [adapter, sessionKey, online]);
   useEffect(() => {
@@ -43,9 +44,11 @@ export function SessionFilesSheet({ visible, adapter, sessionKey, online, onClos
     if (!visible || !online || !adapter?.sessionFiles) { operation.current?.abort(); return; }
     setLoading(true); setError(false); setFiles([]);
     void adapter.sessionFiles.list(sessionKey).then(value => { if (active) setFiles(validateSessionFiles(value)); })
-      .catch(() => { if (active) setError(true); }).finally(() => { if (active) setLoading(false); });
+      .catch(() => { if (active) setError(true); }).finally(() => { if (active) { setLoading(false); setFetched(true); } });
     return () => { active = false; operation.current?.abort(); };
   }, [visible, adapter, sessionKey, online, retry]);
+  // Until the first answer lands the list is loading, never "no files".
+  const waiting = !error && (loading || (online && Boolean(adapter?.sessionFiles) && !fetched));
   const download = async (item: SessionFile) => {
     if (!adapter?.sessionFiles || !online || operation.current) return;
     const controller = new AbortController(); operation.current = controller;
@@ -88,14 +91,14 @@ export function SessionFilesSheet({ visible, adapter, sessionKey, online, onClos
     headerRight={<SheetHeaderButton icon={RotateCw} accessibilityLabel={t('Refresh', { ns: 'common' })} disabled={loading || Boolean(transfer) || !online} onPress={() => setRetry(value => value + 1)} />}>
     {error ? <Banner message={t('Could not retrieve files')} actionLabel={t('Retry', { ns: 'common' })} onAction={() => setRetry(value => value + 1)} /> : null}
     <BottomSheetScrollView contentContainerStyle={styles.content}>
-      {loading ? <LoadingState /> : files.map((file, index) => <React.Fragment key={file.id}>
+      {waiting ? <ListSkeleton testID="session-files-loading" accessibilityLabel={t('Loading...', { ns: 'common' })} icon detail /> : files.map((file, index) => <React.Fragment key={file.id}>
         {index ? <SettingsDivider inset="content" /> : null}
         <SettingsRow title={file.name} subtitle={transfer?.id === file.id ? `${Math.round(transfer.fraction * 100)}%` : `${Math.ceil(file.size / 1024)} KB`}
           leading={<FileText size={IconSize.md} color={theme.colors.inkSecondary} />}
           trailing={transfer?.id === file.id ? <ActivityIndicator color={theme.colors.inkSecondary} /> : <Download size={IconSize.md} color={theme.colors.inkSecondary} />}
           disabled={!online || Boolean(transfer)} onPress={() => { void download(file); }} testID={`session-file-${index}`} />
       </React.Fragment>)}
-      {!loading && !files.length && !error ? <Text style={[styles.empty, { color: theme.colors.inkSecondary }]}>{online ? t('No shared files yet') : t('Offline', { ns: 'common' })}</Text> : null}
+      {!waiting && !files.length && !error ? <Text style={[styles.empty, { color: theme.colors.inkSecondary }]}>{online ? t('No shared files yet') : t('Offline', { ns: 'common' })}</Text> : null}
     </BottomSheetScrollView>
   </Sheet>;
 }

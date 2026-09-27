@@ -9,7 +9,8 @@ let mockTablet = true;
 jest.mock('react-native', () => {
   const R = require('react');
   const host = (name: string) => ({ children, ...props }: any) => R.createElement(name, props, children);
-  return { View: host('View'), Text: host('Text'), Pressable: host('Pressable'),
+  return {
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default }, View: host('View'), Text: host('Text'), Pressable: host('Pressable'),
     StyleSheet: { create: (s: unknown) => s, absoluteFill: { position: 'absolute' }, flatten: (s: unknown) => s },
     useWindowDimensions: () => ({ width: mockWidth, height: 834, fontScale: 1 }) };
 });

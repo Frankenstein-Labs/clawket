@@ -529,6 +529,16 @@ describe('AgentSettingsSectionView', () => {
     expect(recovering.queryByTestId('agent-settings-section-title')).toBeNull();
     recovering.unmount();
 
+    // A connection that is still opening waits quietly instead of offering Reconnect.
+    const opening = render(
+      <AgentSettingsSectionView
+        {...viewProps('models', { state: 'offline', connecting: true, onRetry })}
+      />,
+    );
+    expect(opening.getByTestId('agent-settings-section-connecting')).toBeTruthy();
+    expect(opening.queryByTestId('agent-settings-section-offline')).toBeNull();
+    opening.unmount();
+
     // Logs present their own offline copy in place, so the title stays.
     const logs = render(
       <AgentSettingsSectionView

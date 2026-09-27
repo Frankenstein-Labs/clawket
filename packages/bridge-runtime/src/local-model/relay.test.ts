@@ -54,7 +54,8 @@ test('a half-open authenticated socket without pong is recycled once, then stopp
     { relayUrl: 'wss://example.test/ws', gatewayId: 'test', relaySecret: 'test' }, () => {});
   relay.start(); const socket = state.sockets[0]; socket.emit('open');
   socket.emit('message', '__clawket_relay_control__:{"event":"relay.ready"}');
-  await vi.advanceTimersByTimeAsync(30000); expect(socket.terminate).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(59_999); expect(socket.terminate).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1); expect(socket.terminate).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(2000); expect(state.sockets).toHaveLength(2);
   relay.stop(); expect(vi.getTimerCount()).toBe(0);
 });

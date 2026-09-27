@@ -21,6 +21,7 @@ describe('Onboarding route model', () => {
       youmind: 'https://youmind.com',
       pi: 'https://pi.dev',
       codex: 'https://learn.chatgpt.com/codex',
+      'claude-code': 'https://code.claude.com/docs/en/overview',
     });
   });
 

@@ -386,5 +386,12 @@
   "Allow this action?": "Permitir esta ação?",
   "Stop task": "Parar tarefa",
   "Your answer": "A sua resposta",
-  "Question {{current}} of {{total}}": "Pergunta {{current}} de {{total}}"
+  "Question {{current}} of {{total}}": "Pergunta {{current}} de {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "As conversas importadas são só de leitura. Continue com o respetivo contexto numa nova conversa; a original permanece inalterada.",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "Esta conversa está aberta no seu computador. Feche-a e verifique novamente ou continue numa nova sessão.",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "Não foi possível verificar se esta conversa está em utilização. Verifique novamente ou continue numa nova sessão.",
+  "This conversation’s project folder is unavailable on your computer.": "A pasta do projeto desta conversa está indisponível no seu computador.",
+  "Check again": "Verificar novamente",
+  "Not sent · tap to review": "Não enviada · toque para rever",
+  "This model does not accept images. Choose another model or remove the photo.": "Este modelo não aceita imagens. Escolha outro modelo ou remova a fotografia."
 }

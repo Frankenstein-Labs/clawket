@@ -9,6 +9,7 @@ const WATERMARKS_VERSION = 1;
 const WATERMARK_SCOPE_PREFIX = 'connection-registry:unread-watermarks:v1:';
 
 const ATTENTION_PRIORITY: Record<NonNullable<SessionDescriptor['attention']>, number> = {
+  input: 3,
   approval: 3,
   cron_failed: 2,
   error: 1,

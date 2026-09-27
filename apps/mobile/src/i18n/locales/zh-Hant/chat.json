@@ -386,5 +386,12 @@
   "Allow this action?": "允許此操作？",
   "Stop task": "停止任務",
   "Your answer": "你的回答",
-  "Question {{current}} of {{total}}": "第 {{current}} / {{total}} 題"
+  "Question {{current}} of {{total}}": "第 {{current}} / {{total}} 題",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "匯入的對話暫時唯讀。可保留上下文，在新對話中繼續，原對話不變。",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "這段對話仍在電腦上開啟。關閉該對話後重新檢查，或在新會話中繼續。",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "暫時無法確認這段對話是否被佔用。請重新檢查，或在新會話中繼續。",
+  "This conversation’s project folder is unavailable on your computer.": "電腦上無法存取這段對話的專案資料夾。",
+  "Check again": "重新檢查",
+  "Not sent · tap to review": "尚未傳送 · 點一下查看",
+  "This model does not accept images. Choose another model or remove the photo.": "此模型不支援圖片，請更換模型或移除照片。"
 }

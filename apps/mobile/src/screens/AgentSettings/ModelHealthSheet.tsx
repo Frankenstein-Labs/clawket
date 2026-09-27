@@ -53,7 +53,7 @@ export function ModelHealthSheet({ visible, adapter, online, onClose }: Readonly
     <BottomSheetScrollView contentContainerStyle={[styles.content, !report && busy ? styles.loading : null]}>
       {failed ? <Banner message={t('Failed to load models')} actionLabel={t('Retry', { ns: 'common' })} onAction={() => void load(false)} /> : null}
       {!online ? <Banner message={t('Offline', { ns: 'common' })} /> : null}
-      {busy && !report ? <LoadingState /> : null}
+      {busy && !report ? <LoadingState size="compact" /> : null}
       {report ? <>
         <SettingsRow title={report.model || t('Unknown model')} subtitle={t('Global model')} subtitleLines={1} />
         <SettingsGroup>{report.providers.map((provider, index) => <React.Fragment key={provider.id}>

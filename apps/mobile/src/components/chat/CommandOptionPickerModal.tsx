@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import * as Haptics from 'expo-haptics';
 import { Check } from 'lucide-react-native';
 import { useTranslation } from 'react-i18next';
 import { Sheet } from '../ui';
+import { ListSkeleton } from '../ui/ListSkeleton';
 import { useAppTheme } from '../../theme';
 import { FontSize, FontWeight, Radius, Space } from '../../theme/tokens';
 
@@ -56,10 +57,7 @@ export function CommandOptionPickerModal({
       testID="command-option-sheet"
     >
       {loading ? (
-        <View style={styles.stateWrap}>
-          <ActivityIndicator size="small" color={theme.colors.accent} />
-          <Text style={styles.stateText}>{t('Loading options...')}</Text>
-        </View>
+        <ListSkeleton testID="command-option-loading" accessibilityLabel={t('Loading options...')} trailing="none" rows={4} style={styles.skeleton} />
       ) : error ? (
         <View style={styles.stateWrap}>
           <Text style={styles.stateText}>{error}</Text>
@@ -124,6 +122,9 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
     rowTitleActive: {
       color: colors.accent,
       fontWeight: FontWeight.semibold,
+    },
+    skeleton: {
+      paddingHorizontal: Space.lg,
     },
     stateWrap: {
       minHeight: 160,

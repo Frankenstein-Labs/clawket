@@ -243,6 +243,14 @@ export const Motion = {
   companionGaze: 1_200,
   companionBlinkPause: 3_200,
   companionCuriosity: 9_600,
+  /** LoadingState stays invisible this long, so waits that end quickly never flash the Companion. */
+  loadingGrace: 400,
+  /** A wait longer than this explains itself and offers the connection page. */
+  loadingSlowHint: 6_000,
+  /** A long wait switches to another Companion scene this often. */
+  loadingSceneRotate: 9_000,
+  /** A loader stays this long after a successful wait to play its payoff over the arriving content. */
+  loadingPayoff: 700,
   avatarDoneFade: 3_000,
   /** Dictation waveform: one soft listening pulse leaves the centre per period while the room is quiet. */
   voiceRipple: 2_600,

@@ -5,8 +5,9 @@ import type { SessionPanelProps } from '../SessionPanel/SessionPanel';
 import { SessionFilesSheet } from './components/SessionFilesSheet';
 import { Button } from '../../components/ui/Button';
 import { Banner } from '../../components/ui/Banner';
-import { Space } from '../../theme/tokens';
-import { Alert, View } from 'react-native';
+import { FontSize, Space } from '../../theme/tokens';
+import { useAppTheme } from '../../theme';
+import { Alert, Keyboard, Text, View } from 'react-native';
 import { createReplyConversation, replyConversationDraft } from '../../services/reply-conversation';
 import { readSkillDraft } from '../../chat/skill-draft';
 import { ManualSessions, useManualSession } from '../../services/manual-sessions';
@@ -205,6 +206,7 @@ function ThreadScreenContent({
   onThreadOpened,
 }: ThreadScreenProps & { focused: boolean }): React.JSX.Element {
   const app = useAppContext();
+  const { theme } = useAppTheme();
   const { isPro, isLoading: subscriptionLoading, showPaywall } = useProPaywall();
   const connections = useConnections();
   const insets = useSafeAreaInsets();
@@ -280,6 +282,7 @@ function ThreadScreenContent({
     () => (nativeReadOnly ? { ...capabilities, chat: false } : capabilities),
     [capabilities, nativeReadOnly],
   );
+  const [checkingNative, setCheckingNative] = useState(false);
   const [branching, setBranching] = useState(false);
   const [branchError, setBranchError] = useState(false);
   const nativeBranchBusy = useRef(false);
@@ -911,7 +914,7 @@ function ThreadScreenContent({
         chatAppearance={app.chatAppearance}
         chatFontSize={app.chatFontSize}
         showAgentAvatar={app.showAgentAvatar}
-        onOpenModelPicker={!sessionPreview && capabilities.models ? () => { controller.openModelPicker(); } : undefined}
+        onOpenModelPicker={!sessionPreview && capabilities.models ? () => { controller.composerRef.current?.blur(); Keyboard.dismiss(); controller.openModelPicker(); } : undefined}
         agentId={agentId}
         agentName={agentName}
         sessionKey={controller.sessionKey ?? sessionKey}
@@ -929,9 +932,19 @@ function ThreadScreenContent({
           : currentSession?.totalTokens}
         contextWindow={currentSession?.contextTokens}
         activityLabel={controller.activityLabel}
+        interactionAttention={rosterSession ? rosterSession.attention : currentSession?.attention}
         capabilities={timelineCapabilities}
-        readOnlyFooter={nativeReadOnly && !sessionPreview ? <View style={{ padding: Space.lg, paddingBottom: Math.max(insets.bottom, Space.lg) }}>
-          <Button label={t('Continue in a new session')} loading={branching} disabled={adapter?.state !== 'ready'} onPress={() => {
+        readOnlyFooter={nativeReadOnly && !sessionPreview ? <View style={{ padding: Space.lg, paddingBottom: Math.max(insets.bottom, Space.lg), gap: Space.md }}>
+          <Text testID="native-session-read-only-hint" style={{ fontSize: FontSize.secondary, color: theme.colors.inkSecondary, textAlign: 'center' }}>
+            {rosterSession?.continuationBlockedReason === 'in_use'
+              ? t('This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.')
+              : rosterSession?.continuationBlockedReason === 'ownership_unknown'
+                ? t('Could not verify whether this conversation is in use. Check again, or continue in a new session.')
+                : rosterSession?.continuationBlockedReason === 'project_unavailable'
+                  ? t('This conversation’s project folder is unavailable on your computer.')
+                  : t('Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.')}
+          </Text>
+          <Button label={t('Continue in a new session')} variant={rosterSession?.continuationBlockedReason ? 'secondary' : 'primary'} loading={branching} disabled={adapter?.state !== 'ready' || checkingNative || rosterSession?.continuationBlockedReason === 'project_unavailable'} onPress={() => {
             if (nativeBranchBusy.current || !adapter?.createSession) return;
             nativeBranchBusy.current = true; setBranching(true); setBranchError(false);
             void ManualSessions.create(adapter, agentId, `native-branch:${sessionKey}`, { fromSession: sessionKey }).then(created => {
@@ -939,6 +952,12 @@ function ThreadScreenContent({
               navigation.replace('Thread', { connectionId, agentId, sessionKey: created.key, from: 'panel' });
             }).catch(() => { if (branchScope.active) setBranchError(true); }).finally(() => { nativeBranchBusy.current = false; if (branchScope.active) setBranching(false); });
           }} />
+          {rosterSession?.continuationBlockedReason ? <Button label={t('Check again')} variant="primary" loading={checkingNative} disabled={adapter?.state !== 'ready' || branching} onPress={() => {
+            if (!adapter || nativeBranchBusy.current) return;
+            nativeBranchBusy.current = true; setBranchError(false); setCheckingNative(true);
+            void adapter.loadSession(sessionKey).catch(() => { if (branchScope.active) setBranchError(true); })
+              .finally(() => { nativeBranchBusy.current = false; if (branchScope.active) setCheckingNative(false); });
+          }} /> : null}
           {branchError ? <Banner tone="bad" message={t('Could not update this request. Try again.')} /> : null}
         </View> : undefined}
         state={state}
@@ -1034,7 +1053,7 @@ function ThreadScreenContent({
         onClose={() => setRunInputId(null)} onCurrent={() => { if (runInputId) controller.onSteer(runInputId); }} onNext={controller.onSend} canSteer={controller.canSteer && controller.activeRunId === runInputId} />
       <SessionFilesSheet visible={sessionFilesVisible && focused && !locked && !sessionPreview && routeIsActive} adapter={adapter} sessionKey={sessionKey}
         online={adapter?.state === 'ready'} onClose={() => setSessionFilesVisible(false)} />
-      <SkillPickerSheet visible={skillPickerVisible && !sessionPreview} adapter={adapter} agentId={agentId}
+      <SkillPickerSheet visible={skillPickerVisible && !sessionPreview} adapter={adapter} agentId={agentId} sessionKey={sessionKey}
         online={adapter?.state === 'ready'} onClose={() => setSkillPickerVisible(false)}
         onManage={() => openAgentSection('skills')}
         onSelect={(skill) => {
@@ -1210,6 +1229,7 @@ export function createThreadCopy(t: TFunction): ThreadCopy {
     queued: t('Queued', { ns: 'chat' }),
     sending: t('Sending…', { ns: 'chat' }),
     paused: t('Paused', { ns: 'chat' }),
+    heldHint: t('Not sent · tap to review', { ns: 'chat' }),
     sent: t('Sent', { ns: 'chat' }),
     delivered: t('Delivered', { ns: 'chat' }),
     uncertain: t('Send unconfirmed', { ns: 'chat' }),

@@ -264,6 +264,11 @@ describe('SessionPanel model', () => {
     [{ initialized: true, hasPermission: true, rowCount: 3, activeState: 'ready', hasError: true }, 'error'],
     [{ initialized: true, hasPermission: true, rowCount: 0, activeState: 'ready', hasError: false }, 'empty'],
     [{ initialized: true, hasPermission: true, rowCount: 3, activeState: 'ready', hasError: false }, 'ready'],
+    [{ initialized: true, hasPermission: true, rowCount: 0, activeState: 'handshaking', hasError: false, awaitingSessions: true }, 'loading'],
+    [{ initialized: true, hasPermission: true, rowCount: 0, activeState: 'ready', hasError: false, awaitingSessions: true }, 'loading'],
+    [{ initialized: true, hasPermission: true, rowCount: 0, activeState: 'ready', hasError: false, awaitingSessions: false }, 'empty'],
+    [{ initialized: true, hasPermission: true, rowCount: 0, activeState: 'offline', hasError: false, awaitingSessions: true }, 'offline'],
+    [{ initialized: true, hasPermission: false, rowCount: 0, activeState: 'handshaking', hasError: false, awaitingSessions: true }, 'permission'],
   ] as const)('resolves page state %#', (input, expected) => {
     expect(resolveSessionPanelPageState(input)).toBe(expected);
   });

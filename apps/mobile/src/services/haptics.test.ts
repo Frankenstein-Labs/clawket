@@ -2,7 +2,9 @@ import * as ExpoHaptics from 'expo-haptics';
 import {
   triggerDragEndHaptic,
   triggerDragStartHaptic,
+  triggerHeavyImpact,
   triggerLightImpact,
+  triggerMediumImpact,
   triggerRigidImpact,
   triggerSelectionHaptic,
 } from './haptics';
@@ -28,6 +30,14 @@ describe('haptics service', () => {
     triggerSelectionHaptic();
 
     expect(ExpoHaptics.selectionAsync).toHaveBeenCalled();
+  });
+
+  it('triggers medium and heavy impacts', () => {
+    triggerMediumImpact();
+    triggerHeavyImpact();
+
+    expect(ExpoHaptics.impactAsync).toHaveBeenNthCalledWith(1, ExpoHaptics.ImpactFeedbackStyle.Medium);
+    expect(ExpoHaptics.impactAsync).toHaveBeenNthCalledWith(2, ExpoHaptics.ImpactFeedbackStyle.Heavy);
   });
 
   it('uses light impact for drag start and end', () => {

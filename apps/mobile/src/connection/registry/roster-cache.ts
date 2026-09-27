@@ -33,6 +33,7 @@ const SESSION_KINDS = new Set<SessionKind>([
   'other',
 ]);
 const ATTENTION_KINDS = new Set<NonNullable<SessionDescriptor['attention']>>([
+  'input',
   'approval',
   'error',
   'cron_failed',
@@ -209,6 +210,8 @@ function normalizeSession(value: unknown, connectionId: string): SessionDescript
     ...(source ? { source } : {}),
     ...(project ? { project } : {}),
     ...(typeof record.canContinue === 'boolean' ? { canContinue: record.canContinue } : {}),
+    ...(['in_use', 'ownership_unknown', 'project_unavailable'].includes(record.continuationBlockedReason as string)
+      ? { continuationBlockedReason: record.continuationBlockedReason as SessionDescriptor['continuationBlockedReason'] } : {}),
     allowedActions: {
       rename: allowedActions.rename,
       reset: allowedActions.reset,
@@ -304,7 +307,8 @@ function buildAgentSummary(
   const previewText = previewSession?.preview;
   const sourceTitle = previewSession && previewSession.key !== agent.mainSessionKey
     ? previewSession.channel || previewSession.title : undefined;
-  const preview = previewText && sourceTitle ? `${sourceTitle}: ${previewText}` : previewText;
+  const preview = previewText && sourceTitle ? `${sourceTitle}: ${previewText}` : previewText
+    ?? (agent.entryMode === 'sessions' && recentSession ? readString(recentSession.title) : undefined);
   return Object.freeze({
     agent,
     sessions: Object.freeze(agentSessions),

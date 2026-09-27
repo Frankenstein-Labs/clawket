@@ -386,5 +386,12 @@
   "Allow this action?": "이 작업을 허용할까요?",
   "Stop task": "작업 중지",
   "Your answer": "답변",
-  "Question {{current}} of {{total}}": "질문 {{current}} / {{total}}"
+  "Question {{current}} of {{total}}": "질문 {{current}} / {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "가져온 대화는 읽기 전용입니다. 기존 맥락을 이어 새 대화에서 계속할 수 있으며, 원본은 변경되지 않습니다.",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "컴퓨터에서 이 대화가 열려 있습니다. 해당 대화를 닫고 다시 확인하거나 새 세션에서 계속하세요.",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "이 대화가 사용 중인지 확인할 수 없습니다. 다시 확인하거나 새 세션에서 계속하세요.",
+  "This conversation’s project folder is unavailable on your computer.": "컴퓨터에서 이 대화의 프로젝트 폴더에 접근할 수 없습니다.",
+  "Check again": "다시 확인",
+  "Not sent · tap to review": "전송 안 됨 · 눌러서 확인",
+  "This model does not accept images. Choose another model or remove the photo.": "이 모델은 이미지를 지원하지 않습니다. 다른 모델을 선택하거나 사진을 삭제해 주세요."
 }

@@ -31,6 +31,7 @@ jest.mock('react-native', () => {
     return result;
   };
   return {
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Pressable: primitive('Pressable'),
     StyleSheet: {
       create: <T,>(styles: T) => styles,

@@ -14,7 +14,7 @@ describe('i18n namespace lookups', () => {
   it('resolves common namespace keys with explicit ns options', async () => {
     await i18n.changeLanguage('zh-Hans');
 
-    expect(i18n.t('Switching Gateway...', { ns: 'common' })).toBe('正在切换网关…');
+    expect(i18n.t('Connecting', { ns: 'common' })).toBe('正在连接');
   });
 });
 

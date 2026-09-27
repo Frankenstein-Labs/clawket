@@ -165,6 +165,13 @@ export abstract class GatewayAdapterBase implements AgentAdapter {
     return this.currentCapabilities;
   }
 
+  protected updateCapabilities(next: Capabilities): void {
+    const keys = Object.keys(next) as Array<keyof Capabilities>;
+    if (keys.length === Object.keys(this.currentCapabilities).length
+      && keys.every((key) => next[key] === this.currentCapabilities[key])) return;
+    this.currentCapabilities = next;
+  }
+
   public get state(): ConnectionState {
     return this.currentState;
   }

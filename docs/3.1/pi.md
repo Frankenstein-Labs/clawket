@@ -83,3 +83,7 @@ npm run test:pi:cli
 2026-09-25 验证结果：required 全绿（Mobile 333 套 / 3,455 项），v1 replay 39 项通过；Pi 定向回归 23 项、真实 Workers 联调 1 套、已构建 CLI 生命周期 1 套通过。测试均为本地执行，没有部署或发布。
 
 Android recovery follow-up: pending extension commands do not necessarily create a Pi user-history entry. The Bridge temporarily projects the accepted input while waiting before agent start, keeping recovered activity on the current turn; it does not alter Pi JSONL or invent durable command history.
+
+2026-09-27 真机补测：原生会话复制分支后的真实模型上下文保留已验证；标准扩展选择题统一为单选卡片加明确发送，短确认/输入框按内容高度展示；未提交的输入/选择按问题身份保存在本机，冷启动恢复但不自动提交。可见扩展结果与压缩摘要按规范化系统记录进入聊天历史，原始模型系统提示保持隐藏。详见夜间验收记录。
+
+Model input metadata from Pi is authoritative. Mobile retains image drafts with a localized pre-send explanation when the selected model explicitly supports text only. Unknown model metadata preserves existing behavior; Bridge validation still applies. A custom models.json must declare image input only for a provider/model that supports it.

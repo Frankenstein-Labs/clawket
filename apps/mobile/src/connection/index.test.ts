@@ -195,7 +195,7 @@ async function createHarness(
 }
 
 async function createMaintenanceHarness(
-  backendKind: 'openclaw' | 'hermes',
+  backendKind: ConnectionDescriptor['backendKind'],
   maintenance: Pick<
     ConnectionCoordinatorOptions,
     'rosterRefreshIntervalMs' | 'hermesProbeIntervalMs'
@@ -230,10 +230,12 @@ async function createMaintenanceHarness(
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function controllableAdapter(
@@ -278,6 +280,39 @@ async function flushMaintenance(): Promise<void> {
 }
 
 describe('ConnectionCoordinator', () => {
+  it('publishes scoped session patches immediately and fences stale roster polling', async () => {
+    const harness = await createHarness();
+    const created = { ...session('alpha', 30), key: 'new-chat', title: 'New chat', canContinue: false, continuationBlockedReason: 'in_use' as const,
+      project: { id: 'qa', name: 'QA', path: '/qa', available: true } };
+    const adapter = createMockAdapter({
+      connection: { ...connectionInput('alpha'), isFreeSlot: true },
+      agents: [agent('alpha')], sessions: [session('alpha', 20)],
+      timeline: [
+        { atMs: 1, update: { type: 'session_info_update', session: created } },
+        { atMs: 2, update: { type: 'session_info_update', session: { key: created.key, title: 'Updated title', canContinue: true } } },
+        { atMs: 3, update: { type: 'session_info_update', session: { key: 'incomplete', title: 'Incomplete' } } },
+        { atMs: 4, update: { type: 'session_info_update', session: { ...created, connectionId: 'beta', title: 'Wrong connection' } } },
+      ],
+    });
+    harness.coordinator.setAdapterFactory(() => adapter);
+    await harness.coordinator.start();
+    const pending = deferred<SessionDescriptor[]>();
+    const list = jest.spyOn(adapter, 'listSessions').mockReturnValueOnce(pending.promise);
+    const refresh = harness.coordinator.refreshRoster();
+    for (let i = 0; i < 10 && !list.mock.calls.length; i++) await flushMaintenance();
+    const rows = () => harness.coordinator.getSnapshot().roster[0].agents[0].sessions;
+    adapter.replayTimeline(1);
+    expect(rows().find(row => row.key === created.key)).toMatchObject(created);
+    adapter.replayTimeline();
+    expect(rows().find(row => row.key === created.key)).toMatchObject({ title: 'Updated title', project: created.project });
+    expect(rows().find(row => row.key === created.key)).not.toHaveProperty('continuationBlockedReason');
+    expect(rows()).toHaveLength(2);
+    pending.resolve([session('alpha', 20)]);
+    await refresh;
+    expect(rows().find(row => row.key === created.key)?.title).toBe('Updated title');
+    await harness.coordinator.stop();
+  });
+
   it.each(['openclaw', 'hermes'] as const)(
     'retires the previous process owner before a hot-reloaded %s runtime starts',
     async (backendKind) => {
@@ -360,8 +395,8 @@ describe('ConnectionCoordinator', () => {
     expect(harness.coordinator.getSnapshot().launchPaywallShownThisProcess).toBe(true);
   });
 
-  it.each(['openclaw', 'hermes'] as const)(
-    'refreshes %s roster when the same adapter reaches ready after connect failed',
+  it.each(['openclaw', 'hermes', 'claude-code', 'codex', 'pi'] as const)(
+    'keeps %s failure visible through retries and refreshes only after ready',
     async (backendKind) => {
       const secureStorage = new MemorySecureStorage();
       const store = new ConnectionStore({ secureStorage, legacyStorage });
@@ -402,10 +437,24 @@ describe('ConnectionCoordinator', () => {
       await coordinator.start();
       expect(coordinator.getSnapshot()).toMatchObject({
         activeState: 'error',
+        recoveryFailed: true,
         error: { operation: 'connect', connectionId: 'alpha' },
       });
       expect(listAgentsCalls).toBe(0);
       expect(listSessionsCalls).toBe(0);
+
+      for (const state of ['reconnecting', 'connecting', 'handshaking'] as const) {
+        control.emitState(state);
+        await coordinator.refreshRoster();
+        expect(coordinator.getSnapshot()).toMatchObject({
+          activeState: state,
+          recoveryFailed: true,
+          recovering: false,
+          error: { operation: 'connect', connectionId: 'alpha' },
+        });
+        expect(listAgentsCalls).toBe(0);
+        expect(listSessionsCalls).toBe(0);
+      }
 
       now = 200;
       control.emitState('ready');
@@ -413,7 +462,7 @@ describe('ConnectionCoordinator', () => {
 
       const snapshot = coordinator.getSnapshot();
       const live = snapshot.roster.find((group) => group.connection.id === 'alpha');
-      expect(snapshot).toMatchObject({ activeState: 'ready', switching: false, error: null });
+      expect(snapshot).toMatchObject({ activeState: 'ready', switching: false, recoveryFailed: false, error: null });
       expect(snapshot.connectionDetails.alpha?.lastReadyAt).toBe(200);
       expect(live).toMatchObject({ source: 'live', syncedAt: 200 });
       expect(listAgentsCalls).toBe(1);
@@ -507,7 +556,7 @@ describe('ConnectionCoordinator', () => {
     },
   );
 
-  it('does not let a pre-reconnect roster response satisfy the new ready scan', async () => {
+  it.each(['response', 'error'] as const)('does not let a pre-reconnect roster %s affect the new ready scan', async (outcome) => {
     const secureStorage = new MemorySecureStorage();
     const store = new ConnectionStore({ secureStorage, legacyStorage });
     await store.load();
@@ -547,14 +596,22 @@ describe('ConnectionCoordinator', () => {
     expect(coordinator.getSnapshot().roster[0]?.source).toBe('cache');
     now = 200;
     control.emitState('ready');
-    pendingAgents.resolve([agent('alpha')]);
+    const staleErrors: string[] = [];
+    const stopObserving = coordinator.subscribe(() => {
+      const message = coordinator.getSnapshot().error?.message;
+      if (message) staleErrors.push(message);
+    });
+    if (outcome === 'error') pendingAgents.reject(new Error('old roster request timed out'));
+    else pendingAgents.resolve([agent('alpha')]);
     await staleRefresh;
     await flushMaintenance();
+    stopObserving();
 
     const snapshot = coordinator.getSnapshot();
     expect(listAgents).toHaveBeenCalledTimes(2);
     expect(snapshot.connectionDetails.alpha?.lastReadyAt).toBe(200);
     expect(snapshot.roster[0]).toMatchObject({ source: 'live', syncedAt: 200 });
+    expect(staleErrors).toEqual([]);
     await coordinator.stop();
   });
 
@@ -1462,6 +1519,97 @@ describe('ConnectionCoordinator', () => {
       'foreground',
     );
     await coordinator.stop();
+  });
+
+  describe.each(['openclaw', 'hermes', 'claude-code', 'codex', 'pi'] as const)('%s probe ownership', (backendKind) => {
+    it('retains a failure from the reconnect started by this probe', async () => {
+      jest.useFakeTimers();
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter();
+        jest.spyOn(adapter, 'probe').mockResolvedValueOnce(false);
+        jest.spyOn(adapter, 'connect').mockRejectedValueOnce(new Error('reconnect rejected'));
+        await expect(harness.coordinator.probeActive()).resolves.toBe(false);
+        jest.advanceTimersByTime(20_000);
+        expect(harness.coordinator.getSnapshot()).toMatchObject({ recoveryFailed: true,
+          error: { operation: 'probe', message: 'reconnect rejected' } });
+      } finally { await harness.coordinator.stop(); jest.useRealTimers(); }
+    });
+
+    it.each([true, false])('checks health after a roster failure before deciding recovery (healthy=%s)', async (healthy) => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter();
+        jest.spyOn(adapter, 'listSessions').mockRejectedValueOnce(new Error('request timed out'));
+        const pending = deferred<boolean>();
+        const probe = jest.spyOn(adapter, 'probe').mockReturnValueOnce(pending.promise);
+        const disconnect = jest.spyOn(adapter, 'disconnect');
+        const connect = jest.spyOn(adapter, 'connect');
+        await harness.coordinator.refreshRoster();
+        await flushMaintenance();
+        expect(probe).toHaveBeenCalledWith(5_000);
+        expect(disconnect).not.toHaveBeenCalled();
+        expect(harness.coordinator.getSnapshot().error).toBeNull();
+        pending.resolve(healthy);
+        await flushMaintenance();
+        if (healthy) {
+          expect(disconnect).not.toHaveBeenCalled();
+          expect(harness.coordinator.getSnapshot().error).toMatchObject({ operation: 'roster' });
+        } else {
+          expect(disconnect).toHaveBeenCalledTimes(1);
+          expect(connect).toHaveBeenCalledTimes(1);
+          expect(harness.coordinator.getSnapshot()).toMatchObject({ activeState: 'ready', recoveryFailed: false, error: null });
+        }
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it.each(['failed', 'rejected', 'succeeded'] as const)('ignores a %s probe from a retired connection phase', async (outcome) => {
+      const secureStorage = new MemorySecureStorage();
+      const store = new ConnectionStore({ secureStorage, legacyStorage });
+      await store.load();
+      await store.add({ ...connectionInput('alpha'), backendKind });
+      const dashboardStorage = new MemoryDashboardStorage();
+      let control!: ReturnType<typeof controllableAdapter>;
+      const coordinator = new ConnectionCoordinator({
+        store,
+        cache: new RosterCache({ storage: dashboardStorage }),
+        watermarks: new UnreadWatermarks({ storage: dashboardStorage }),
+        rosterRefreshIntervalMs: 0,
+        hermesProbeIntervalMs: 0,
+        adapterFactory: (_record, descriptor) => {
+          control = controllableAdapter(descriptor, async emitState => {
+            emitState('connecting'); emitState('ready');
+          });
+          return control.adapter;
+        },
+      });
+      try {
+        await coordinator.start();
+        const pending = deferred<boolean>();
+        const probeMock = jest.spyOn(control.adapter, 'probe').mockReturnValue(pending.promise);
+        const disconnect = jest.spyOn(control.adapter, 'disconnect');
+        const connect = jest.spyOn(control.adapter, 'connect');
+        const probe = coordinator.probeActive(undefined, 'foreground');
+        await Promise.resolve();
+        expect(probeMock).toHaveBeenCalledTimes(1);
+        control.emitState('reconnecting');
+        control.emitState('handshaking');
+        // Failures must not tear down a recovered socket; a stale success must
+        // not finish recovery while its replacement is still authenticating.
+        if (outcome !== 'succeeded') control.emitState('ready');
+        if (outcome === 'rejected') pending.reject(new Error('old socket timed out'));
+        else pending.resolve(outcome === 'succeeded');
+        await probe;
+        expect(disconnect).not.toHaveBeenCalled();
+        expect(connect).not.toHaveBeenCalled();
+        expect(coordinator.getSnapshot()).toMatchObject({
+          activeState: outcome === 'succeeded' ? 'handshaking' : 'ready',
+          recovering: outcome === 'succeeded', recoveryFailed: false, error: null,
+        });
+      } finally { await coordinator.stop(); }
+    });
   });
 
   it('refreshes active roster on the injected interval and clears timers on switch and stop', async () => {

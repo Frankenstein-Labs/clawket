@@ -76,6 +76,154 @@ function modelSelection(
 }
 
 describe('useChatModelPicker', () => {
+  it('does not let an earlier selection refresh overwrite native initialization metadata', async () => {
+    let resolveSelection!: (value: ModelSelectionState) => void;
+    const adapter = createAdapter({ backendKind: 'claude-code', getSelection: jest.fn(() => new Promise<ModelSelectionState>(resolve => { resolveSelection = resolve; })) });
+    const { result, rerender } = renderHook<ReturnType<typeof useChatModelPicker>, { model?: string }>(({ model }) => useChatModelPicker({
+      adapter, connectionState: 'ready', sessionKey: 'current',
+      sessionMetadata: { key: 'current', model }, setInput: jest.fn(), setSessions: jest.fn(),
+    }), { initialProps: {} });
+    rerender({ model: 'native-new-model' });
+    await act(async () => { resolveSelection(modelSelection('stale-model', 'anthropic')); });
+    expect(result.current.currentModel).toBe('native-new-model');
+  });
+
+  it('does not let an earlier read undo an explicit model choice', async () => {
+    let resolveSelection!: (value: ModelSelectionState) => void;
+    const adapter = createAdapter({ backendKind: 'claude-code',
+      getSelection: jest.fn(() => new Promise<ModelSelectionState>(resolve => { resolveSelection = resolve; })),
+      setSelection: jest.fn().mockResolvedValue(modelSelection('chosen-model', 'anthropic')),
+    });
+    const { result } = renderHook(() => useChatModelPicker({ adapter, connectionState: 'ready', sessionKey: 'current', setInput: jest.fn(), setSessions: jest.fn() }));
+    await act(async () => { result.current.onSelectModel({ id: 'chosen-model', name: 'Chosen model', provider: 'anthropic' }); });
+    await act(async () => { resolveSelection(modelSelection('stale-model', 'anthropic')); });
+    expect(result.current.currentModel).toBe('chosen-model');
+  });
+
+  it('keeps newly resolved metadata when an older picker selection completes, without leaving loading stuck', async () => {
+    let resolveSelection!: (value: ModelSelectionState) => void;
+    const adapter = createAdapter({ backendKind: 'claude-code', list: jest.fn().mockResolvedValue([]),
+      getSelection: jest.fn().mockResolvedValueOnce(modelSelection('', 'anthropic'))
+        .mockImplementationOnce(() => new Promise<ModelSelectionState>(resolve => { resolveSelection = resolve; })),
+    });
+    const { result, rerender } = renderHook<ReturnType<typeof useChatModelPicker>, { model?: string }>(({ model }) => useChatModelPicker({
+      adapter, connectionState: 'ready', sessionKey: 'current',
+      sessionMetadata: { key: 'current', model }, setInput: jest.fn(), setSessions: jest.fn(),
+    }), { initialProps: {} });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { result.current.openModelPicker(); await Promise.resolve(); });
+    expect(result.current.modelPickerLoading).toBe(true);
+    rerender({ model: 'native-new-model' });
+    await act(async () => { resolveSelection(modelSelection('stale-model', 'anthropic')); });
+    expect(result.current.currentModel).toBe('native-new-model');
+    expect(result.current.modelPickerLoading).toBe(false);
+  });
+
+  it('clears the previous session model while a new Claude session has no resolved model', async () => {
+    const adapter = createAdapter({
+      backendKind: 'claude-code',
+      getSelection: jest.fn((key: string) => Promise.resolve(modelSelection(key === 'old' ? 'claude-sonnet-test' : '', 'anthropic'))),
+      listSessions: jest.fn().mockResolvedValue([{ key: 'old', model: 'claude-sonnet-test', modelProvider: 'anthropic' }]),
+    });
+    const { result, rerender } = renderHook<ReturnType<typeof useChatModelPicker>, { key: string }>(({ key }) => useChatModelPicker({
+      adapter, connectionState: 'ready', sessionKey: key, setInput: jest.fn(), setSessions: jest.fn(),
+    }), { initialProps: { key: 'old' } });
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.currentModel).toBe('claude-sonnet-test');
+    rerender({ key: 'new' });
+    expect(result.current.currentModelDisplayName).toBeNull();
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.currentModel).toBeNull();
+    expect(result.current.currentModelProvider).toBeNull();
+  });
+
+  it('keeps the global Hermes model when changing conversations', async () => {
+    const adapter = createAdapter({ backendKind: 'hermes', getSelection: jest.fn().mockResolvedValue(modelSelection('deepseek-test', 'deepseek')) });
+    const { result, rerender } = renderHook<ReturnType<typeof useChatModelPicker>, { key: string }>(({ key }) => useChatModelPicker({
+      adapter, connectionState: 'ready', sessionKey: key, setInput: jest.fn(), setSessions: jest.fn(),
+    }), { initialProps: { key: 'old' } });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ key: 'new' });
+    expect(result.current.currentModel).toBe('deepseek-test');
+    await act(async () => { await Promise.resolve(); });
+  });
+
+  it('hydrates a newly initialized session model without reopening the picker', async () => {
+    const adapter = createAdapter({ backendKind: 'claude-code', getSelection: jest.fn().mockResolvedValue(modelSelection('', 'anthropic')) });
+    const { result, rerender } = renderHook<ReturnType<typeof useChatModelPicker>, { model?: string }>(({ model }) => useChatModelPicker({
+      adapter, connectionState: 'ready', sessionKey: 'branch',
+      sessionMetadata: { key: 'branch', model }, setInput: jest.fn(), setSessions: jest.fn(),
+    }), { initialProps: {} });
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.currentModelDisplayName).toBeNull();
+    rerender({ model: 'claude-sonnet-test' });
+    expect(result.current.currentModelDisplayName).toBe('claude-sonnet-test');
+  });
+
+  it('ignores unrelated and globally scoped session model metadata', async () => {
+    for (const backendKind of ['claude-code', 'hermes'] as const) {
+      const adapter = createAdapter({ backendKind, getSelection: jest.fn().mockResolvedValue(modelSelection('current', 'provider')) });
+      const { result, rerender, unmount } = renderHook<ReturnType<typeof useChatModelPicker>, { key: string; model: string }>(({ key, model }) => useChatModelPicker({
+        adapter, connectionState: 'ready', sessionKey: 'selected',
+        sessionMetadata: { key, model }, setInput: jest.fn(), setSessions: jest.fn(),
+      }), { initialProps: { key: 'other', model: 'unrelated' } });
+      await act(async () => { await Promise.resolve(); });
+      expect(result.current.currentModel).toBe('current');
+      if (backendKind === 'hermes') {
+        rerender({ key: 'selected', model: 'old-session-model' });
+        expect(result.current.currentModel).toBe('current');
+      }
+      unmount();
+    }
+  });
+
+  it('shows the resolved native model for an alias without changing its write identity', async () => {
+    const adapter = createAdapter({ backendKind: 'claude-code', getSelection: jest.fn().mockResolvedValue(modelSelection('default', 'anthropic', {
+      models: [{ id: 'default', name: 'Default (recommended)', provider: 'anthropic', resolvedModel: 'claude-opus-test[1m]' }],
+    })) });
+    const { result } = renderHook(() => useChatModelPicker({ adapter, connectionState: 'ready', sessionKey: 'new', setInput: jest.fn(), setSessions: jest.fn() }));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.currentModel).toBe('default');
+    expect(result.current.currentModelDisplayName).toBe('claude-opus-test[1m]');
+  });
+
+  it.each([
+    { input: ['text'], expected: false },
+    { input: ['text', 'image'], expected: true },
+    { input: undefined, expected: undefined },
+  ])('uses the selected provider image capability: $expected', async ({ input, expected }) => {
+    const adapter = createAdapter({ backendKind: 'pi', getSelection: jest.fn().mockResolvedValue(modelSelection('same', 'selected', {
+      models: [
+        { id: 'same', name: 'Other', provider: 'other', input: ['text', 'image'] },
+        { id: 'same', name: 'Selected', provider: 'selected', input: input as Array<'text' | 'image'> | undefined },
+      ],
+    })) });
+    const { result } = renderHook(() => useChatModelPicker({ adapter, connectionState: 'ready', sessionKey: 'new', setInput: jest.fn(), setSessions: jest.fn() }));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.currentModelSupportsImages).toBe(expected);
+  });
+
+  it('does not borrow the previous session image restriction while refreshing another session', async () => {
+    const getSelection = jest.fn().mockResolvedValueOnce(modelSelection('text', 'p', {
+      models: [{ id: 'text', name: 'Text', provider: 'p', input: ['text'] }],
+    })).mockImplementation(() => new Promise(() => {}));
+    const adapter = createAdapter({ backendKind: 'pi', getSelection });
+    const { result, rerender } = renderHook<ReturnType<typeof useChatModelPicker>, { key: string }>(({ key }) => useChatModelPicker({ adapter, connectionState: 'ready', sessionKey: key, setInput: jest.fn(), setSessions: jest.fn() }), { initialProps: { key: 'first' } });
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.currentModelSupportsImages).toBe(false);
+    rerender({ key: 'second' });
+    expect(result.current.currentModelSupportsImages).toBeUndefined();
+  });
+
+  it('does not replace a new conversation model with another session from a stale list', async () => {
+    const selection = jest.fn().mockResolvedValueOnce(modelSelection('current', 'anthropic')).mockResolvedValue(modelSelection('', ''));
+    const adapter = createAdapter({ getSelection: selection, listSessions: jest.fn().mockResolvedValue([{ key: 'another', model: 'wrong' }]) });
+    const { result } = renderHook(() => useChatModelPicker({ adapter, connectionState: 'ready', sessionKey: 'new', setInput: jest.fn(), setSessions: jest.fn() }));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await result.current.refreshCurrentModel(); });
+    expect(result.current.currentModel).toBe('current');
+  });
+
   let consoleErrorSpy: jest.SpyInstance;
   const mockedAnalytics = analyticsEvents as jest.Mocked<typeof analyticsEvents>;
 
@@ -362,7 +510,7 @@ describe('useChatModelPicker', () => {
     }));
   });
 
-  it('keeps the last visible model until a replacement adapter refresh resolves', async () => {
+  it('does not show another backend model while a replacement adapter refresh resolves', async () => {
     let resolveSelection: ((value: ModelSelectionState) => void) | null = null;
     const hermes = createAdapter({
       backendKind: 'hermes',
@@ -388,7 +536,7 @@ describe('useChatModelPicker', () => {
     currentAdapter = openClaw;
     rerender(undefined);
     await act(async () => { await Promise.resolve(); });
-    expect(result.current.currentModelHeaderLabel).toBe('openai-codex/gpt-5.3-codex');
+    expect(result.current.currentModelHeaderLabel).toBeNull();
 
     await act(async () => {
       resolveSelection?.(modelSelection('gpt-5.4', 'openai'));

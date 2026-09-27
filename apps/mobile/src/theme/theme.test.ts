@@ -191,6 +191,10 @@ describe('Clawket 3.0 theme tokens', () => {
       companionGaze: 1_200,
       companionBlinkPause: 3_200,
       companionCuriosity: 9_600,
+      loadingGrace: 400,
+      loadingSlowHint: 6_000,
+      loadingSceneRotate: 9_000,
+      loadingPayoff: 700,
       voiceRipple: 2_600,
     });
     expect(Shadow.floating).toEqual({

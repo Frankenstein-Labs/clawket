@@ -34,6 +34,7 @@ export type ModelDetailSheetProps = Readonly<{
   error: string | null;
   canDelete: boolean;
   canEditCost: boolean;
+  canSelectCurrent?: boolean;
   onClose: () => void;
   onSetDefault: (row: AgentModelRow) => void;
   onToggleFallback: (row: AgentModelRow) => void;
@@ -99,6 +100,7 @@ export function ModelDetailSheet({
   error,
   canDelete,
   canEditCost,
+  canSelectCurrent = true,
   onClose,
   onSetDefault,
   onToggleFallback,
@@ -229,7 +231,7 @@ export function ModelDetailSheet({
             </View>
           ) : (
             <SettingsGroup>
-              <SettingsRow
+              {manage || canSelectCurrent ? <SettingsRow
                 testID="agent-model-set-default"
                 title={manage
                   ? t('Set as default model', { ns: 'settings' })
@@ -237,7 +239,7 @@ export function ModelDetailSheet({
                 value={row.current ? t('Current', { ns: 'config' }) : busy && !manage ? t('Loading...', { ns: 'common' }) : undefined}
                 disabled={row.current || (manage ? !online : writeLocked)}
                 onPress={() => onSetDefault(row)}
-              />
+              /> : null}
               {manage ? (
                 <>
                   <SettingsDivider inset="content" />

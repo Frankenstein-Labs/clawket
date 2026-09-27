@@ -136,3 +136,11 @@ it('preserves native model priority for catalog, selection and settings replies'
     expect(catalog.map(m => [m.id, m.sortOrder])).toEqual([['new', 0], ['old', 1]]);
   }
 });
+
+
+it('forwards the selected conversation when listing project skills', async () => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const result = adapter.management.skills!.status!('codex', { sessionKey: 'native:qa-project' });
+  expect(JSON.parse(sockets[0].sent.at(-1)!)).toMatchObject({ method: 'skills.list', params: { sessionKey: 'native:qa-project' } });
+  sockets[0].reply(); await result;
+});

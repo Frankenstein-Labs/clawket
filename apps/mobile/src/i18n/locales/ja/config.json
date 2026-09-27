@@ -195,8 +195,6 @@
   "YouMind Sprite": "YouMindスプライト",
   "123 456": "123 456",
   "ABC 234": "ABC 234",
-  "Relay connected": "Relayに接続済み",
-  "Waiting for Bridge": "Bridgeを待機中",
   "Ready": "準備完了",
   "No agent yet?": "まだエージェントがありませんか？",
   "No network": "ネットワークなし",
@@ -385,5 +383,6 @@
   "Backup history": "バックアップ履歴",
   "Pi is not responding": "Pi が応答していません",
   "Codex is not responding": "Codex が応答していません",
-  "Claude Code is not responding": "Claude Code が応答していません"
+  "Claude Code is not responding": "Claude Code が応答していません",
+  "To connect Codex, Claude Code or Pi, choose your Agent in Add connection and follow its pairing instructions.": "Codex、Claude Code、Pi に接続するには、「接続を追加」で Agent を選び、表示されるペアリング手順に従ってください。"
 }

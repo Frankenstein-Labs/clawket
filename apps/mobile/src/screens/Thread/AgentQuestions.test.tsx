@@ -1,7 +1,9 @@
 jest.mock('lucide-react-native', () => ({ Circle: () => null, CircleCheck: () => null, Square: () => null, SquareCheck: () => null, ChevronRight: () => null, MessageCircleQuestion: () => null }));
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Keyboard } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { loadQuestionDraft } from './question-drafts';
 import { AgentQuestions } from './AgentQuestions';
 import { createMockAdapter, type AgentQuestion } from '@clawket/agent-protocol';
 
@@ -19,6 +21,13 @@ jest.mock('@gorhom/bottom-sheet', () => ({ BottomSheetScrollView: ({ children }:
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: { colors: { ink: 'black' } } }) }));
 jest.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
+beforeEach(() => {
+  const values = new Map<string, string>();
+  (AsyncStorage.getItem as jest.Mock).mockImplementation(async key => values.get(key) ?? null);
+  (AsyncStorage.setItem as jest.Mock).mockImplementation(async (key, value) => { values.set(key, value); });
+  (AsyncStorage.removeItem as jest.Mock).mockImplementation(async key => { values.delete(key); });
+});
+
 function setup(question: AgentQuestion) {
   const adapter = createMockAdapter({ connection: { id: 'c', backendKind: 'pi', transportKind: 'local', label: 'Pi', createdAt: 1, isFreeSlot: true } });
   const respond = jest.fn(async () => {});
@@ -30,7 +39,7 @@ it('restores a question, preserves a failed draft and only resolves an explicit 
   const { adapter, respond } = setup({ id: 'q', kind: 'input', title: 'Name', expiresAtMs: null });
   respond.mockRejectedValueOnce(new Error('offline'));
   const view = render(<AgentQuestions adapter={adapter} sessionKey="s" />);
-  await waitFor(() => expect(view.getByText('Agent needs your input')).toBeTruthy());
+  await waitFor(() => expect(view.getByText('Respond')).toBeTruthy());
   expect(respond).not.toHaveBeenCalled(); fireEvent.press(view.getByText('Respond'));
   expect(Keyboard.dismiss).toHaveBeenCalled();
   fireEvent.changeText(view.getByTestId('agent-question-input'), '  exact draft\n');
@@ -38,7 +47,7 @@ it('restores a question, preserves a failed draft and only resolves an explicit 
   await waitFor(() => expect(view.getByText('Could not update this request. Try again.')).toBeTruthy());
   expect(view.getByTestId('agent-question-input').props.value).toBe('  exact draft\n');
   fireEvent.press(view.getByText('Send'));
-  await waitFor(() => expect(view.queryByText('Agent needs your input')).toBeNull());
+  await waitFor(() => expect(view.queryByText('Respond')).toBeNull());
   expect(respond).toHaveBeenLastCalledWith('s', 'q', { value: '  exact draft\n' });
 });
 it('cancels without granting confirmation and ignores a late snapshot from another session', async () => {
@@ -113,4 +122,51 @@ it('lets Claude multi-select questions toggle independent checkboxes and submit 
   expect(view.getByTestId('codex-question-option-0').props.accessibilityState.checked).toBe(false);
   fireEvent.press(view.getByText('Unit')); fireEvent.press(view.getByText('Send'));
   await waitFor(() => expect(respond).toHaveBeenCalledWith('s', 'claude-multi', { answers: { tests: ['Integration', 'Unit'] } }));
+});
+
+
+it('requires explicit submission for a Pi choice, retains failed selection and supports changing the selected option', async () => {
+  const { adapter, respond } = setup({ id: 'pi-select', kind: 'select', title: 'Choose a color', options: ['Blue', 'Green'], expiresAtMs: null });
+  const view = render(<AgentQuestions adapter={adapter} sessionKey="s" />);
+  await waitFor(() => expect(view.getByTestId('agent-question-pending')).toBeTruthy());
+  fireEvent.press(view.getByTestId('agent-question-pending'));
+  fireEvent.press(view.getByText('Send'));
+  expect(respond).not.toHaveBeenCalled();
+  fireEvent.press(view.getByTestId('agent-question-option-0'));
+  expect(view.getByTestId('agent-question-option-0').props.accessibilityState.checked).toBe(true);
+  expect(respond).not.toHaveBeenCalled();
+  fireEvent.press(view.getByTestId('agent-question-option-1'));
+  expect(view.getByTestId('agent-question-option-0').props.accessibilityState.checked).toBe(false);
+  respond.mockRejectedValueOnce(new Error('offline'));
+  fireEvent.press(view.getByText('Send'));
+  await waitFor(() => expect(view.getByText('Could not update this request. Try again.')).toBeTruthy());
+  expect(view.getByTestId('agent-question-option-1').props.accessibilityState.checked).toBe(true);
+  fireEvent.press(view.getByText('Send'));
+  await waitFor(() => expect(respond).toHaveBeenCalledTimes(2));
+  expect(respond).toHaveBeenLastCalledWith('s', 'pi-select', { value: 'Green' });
+});
+
+
+it.each(['input', 'editor', 'select'] as const)('restores a pending Pi %s draft after remount without submitting it', async (kind) => {
+  const id = `pi-restored-${kind}`;
+  const { adapter, respond } = setup({ id, kind, title: 'Retain draft', options: ['Blue', 'Green'], prefill: kind === 'editor' ? 'Original' : undefined, expiresAtMs: null });
+  const first = render(<AgentQuestions adapter={adapter} sessionKey="s" />);
+  await waitFor(() => expect(first.getByText('Respond')).toBeTruthy());
+  fireEvent.press(first.getByTestId('agent-question-pending'));
+  if (kind === 'select') fireEvent.press(first.getByTestId('agent-question-option-1'));
+  else fireEvent.changeText(first.getByTestId('agent-question-input'), '  saved exact draft  ');
+  const expected = kind === 'select' ? 'Green' : '  saved exact draft  ';
+  await act(async () => { expect(await loadQuestionDraft(`c:s:${id}`)).toEqual({ value: [expected] }); });
+  first.unmount();
+  const second = render(<AgentQuestions adapter={adapter} sessionKey="s" />);
+  await waitFor(() => expect(second.getByText('Respond')).toBeTruthy());
+  fireEvent.press(second.getByTestId('agent-question-pending'));
+  await waitFor(() => {
+    if (kind === 'select') expect(second.getByTestId('agent-question-option-1').props.accessibilityState.checked).toBe(true);
+    else expect(second.getByTestId('agent-question-input').props.value).toBe(expected);
+  });
+  expect(respond).not.toHaveBeenCalled();
+  fireEvent.press(second.getByText('Cancel'));
+  await waitFor(() => expect(respond).toHaveBeenCalledWith('s', id, { cancelled: true }));
+  await act(async () => { expect(await loadQuestionDraft(`c:s:${id}`)).toBeUndefined(); });
 });

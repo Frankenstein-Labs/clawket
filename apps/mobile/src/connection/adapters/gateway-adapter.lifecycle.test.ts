@@ -809,6 +809,24 @@ it('pages OpenClaw physical history with native offsets while retaining Hermes o
 
 
 describe('session-file capability negotiation', () => {
+  it.each(['openclaw', 'hermes'] as const)('preserves %s capability identity across equivalent health evidence', async (backend) => {
+    const fake = new LifecycleGateway();
+    Object.assign(fake, { supportsMethod: () => true });
+    const adapter = backend === 'openclaw'
+      ? new OpenClawAdapter(connection(backend), { gateway: gateway(fake), historyCache: null })
+      : new HermesAdapter(connection(backend), { gateway: gateway(fake), historyCache: null });
+    const evidence = () => backend === 'openclaw'
+      ? fake.emit('connection', { state: 'ready' })
+      : fake.emit('health', { status: 'ok', hermesApiReachable: true, capabilities: ['bridge.session-files.v1'] });
+    evidence();
+    const capabilities = adapter.capabilities;
+    evidence();
+    expect(adapter.capabilities).toBe(capabilities);
+    expect(adapter.capabilities.sessionFiles).toBe(true);
+    adapter.disconnect();
+    expect(adapter.capabilities.sessionFiles).toBe(false);
+  });
+
   it('hides OpenClaw retrieval until both methods are advertised and clears it on disconnect', () => {
     const fake = new LifecycleGateway(); let available = false;
     Object.assign(fake, { supportsMethod: () => available });

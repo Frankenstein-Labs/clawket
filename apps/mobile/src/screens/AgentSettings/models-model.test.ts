@@ -242,3 +242,19 @@ describe('Agent models model', () => {
     expect(displayModelName('bare', groups)).toBe('bare');
   });
 });
+
+
+it('rejects a session model write without a concrete conversation', () => {
+  expect(() => buildModelSelectionWrite({ id: 'native', provider: 'custom' }, { modelPerSession: true }, { ...agent, mainSessionKey: '' })).toThrow('Choose a conversation');
+});
+
+it('preserves native recommendation order in the model catalog and search', () => {
+  const bundle = { mode: 'select', catalog: null, draft: { primary: '', fallbacks: [], thinkingDefault: '', allowlist: null }, selection: {
+    currentModel: '', currentProvider: '', currentBaseUrl: '', models: [
+      { id: 'z', name: 'Z newest', provider: 'native', sortOrder: 0 },
+      { id: 'a', name: 'A older', provider: 'native', sortOrder: 1 },
+    ],
+  } } as ModelsBundle;
+  expect(buildAgentModelGroups(bundle)[0]!.rows.map(row => row.id)).toEqual(['z', 'a']);
+  expect(buildAgentModelGroups(bundle, 'native')[0]!.rows.map(row => row.id)).toEqual(['z', 'a']);
+});

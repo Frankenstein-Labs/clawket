@@ -1,3 +1,4 @@
+jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: { colors: { inkSecondary: '#666666' } } }) }));
 jest.mock('./ConversationEntry', () => ({ ConversationEntry: () => require('react').createElement('ConversationEntry') }));
 jest.mock('../../components/ui/Button', () => ({ Button: () => null }));
 jest.mock('../../components/ui/Banner', () => ({ Banner: () => null }));
@@ -7,7 +8,7 @@ import { createReplyConversation } from '../../services/reply-conversation';
 jest.mock('../../services/reply-conversation', () => ({ createReplyConversation: jest.fn(), replyConversationDraft: (message: any) => message.role === 'assistant' && !message.streaming ? message.text : null }));
 jest.mock('./components/DraftRecoverySheet', () => ({ DraftRecoverySheet: () => null }));
 jest.mock('./components/RunInputSheet', () => ({ RunInputSheet: () => null }));
-let mockSkillPickerProps: { onSelect: (skill: any) => void } | null = null;
+let mockSkillPickerProps: { sessionKey?: string; onSelect: (skill: any) => void } | null = null;
 jest.mock('./components/SkillPickerSheet', () => ({ SkillPickerSheet: (props: any) => { mockSkillPickerProps = props; return null; } }));
 jest.mock('./components/SelectedSkill', () => ({ SelectedSkill: () => null }));
 jest.mock('../../services/incoming-share', () => ({ IncomingShareStore: { list: jest.fn(async () => []), remove: jest.fn(async () => undefined) } }));
@@ -51,7 +52,10 @@ const mockRuntime = {
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
   return {
+    Text: ({ children, ...props }: { children?: React.ReactNode }) => ReactRuntime.createElement('Text', props, children),
     Alert: { alert: jest.fn() },
+    Keyboard: { dismiss: jest.fn() },
+    Platform: { OS: 'android', select: (options: Record<string, unknown>) => options.android ?? options.default },
     AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
     StyleSheet: {
       create: <T,>(styles: T) => styles,
@@ -227,6 +231,7 @@ function createController(): Record<string, unknown> {
     isSending: false,
     listData: [{ id: 'message-1', role: 'assistant', text: 'Hello' }],
     loadingMoreHistory: false,
+    openModelPicker: jest.fn(),
     modelPickerError: null,
     modelPickerLoading: false,
     modelPickerVisible: false,
@@ -304,6 +309,7 @@ describe('ThreadScreen connection container', () => {
   it('clears a selected skill with the composer instead of recreating a hidden draft', async () => {
     const props = createNavigationProps();
     const view = render(<ThreadScreen {...props} />);
+    expect(mockSkillPickerProps?.sessionKey).toBe('agent:atlas:main');
     await act(async () => mockSkillPickerProps?.onSelect({ name: 'arxiv', invocation: '$arxiv' }));
     mockController.input = '$arxiv\n\nSummarize';
     view.rerender(<ThreadScreen {...props} />);
@@ -312,9 +318,9 @@ describe('ThreadScreen connection container', () => {
     expect(mockController.setInput).toHaveBeenLastCalledWith('');
   });
 
-  it('keeps native Pi history read-only and explicitly branches into a private session', async () => {
+  it.each(['pi', 'claude-code'] as const)('explains native %s read-only history and explicitly branches with its context', async (backend) => {
     const props = createNavigationProps();
-    const pi = { ...adapter, connection: { ...adapter.connection, backendKind: 'pi' }, capabilities: CAPABILITY_MATRIX.pi, state: 'ready', createSession: jest.fn() };
+    const pi = { ...adapter, connection: { ...adapter.connection, backendKind: backend }, capabilities: CAPABILITY_MATRIX[backend], state: 'ready', createSession: jest.fn() };
     mockConnections = { ...mockConnections, activeAdapter: pi, roster: [{ connection: { id: 'connection-1' }, agents: [{ agent: { agentId: 'atlas' }, sessions: [{ key: props.route.params.sessionKey, source: 'native', kind: 'direct' }] }] }] };
     mockRuntime.getSnapshot.mockReturnValue({ activeConnectionId: 'connection-1', activeAdapter: pi } as any);
     const { ManualSessions } = require('../../services/manual-sessions');
@@ -323,10 +329,36 @@ describe('ThreadScreen connection container', () => {
       render(<ThreadScreen {...props} />);
       expect(mockThreadViewProps?.capabilities.chat).toBe(false);
       const footer = mockThreadViewProps?.readOnlyFooter as React.ReactElement<any>;
-      await act(async () => footer.props.children[0].props.onPress());
+      expect(footer.props.children[0].props.children).toBe('Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.');
+      await act(async () => footer.props.children[1].props.onPress());
       expect(create).toHaveBeenCalledWith(pi, 'atlas', `native-branch:${props.route.params.sessionKey}`, { fromSession: props.route.params.sessionKey });
       expect(props.navigation.replace).toHaveBeenCalledWith('Thread', expect.objectContaining({ sessionKey: 'private-branch' }));
     } finally { create.mockRestore(); }
+  });
+
+  it.each([
+    ['in_use', 'This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.'],
+    ['ownership_unknown', 'Could not verify whether this conversation is in use. Check again, or continue in a new session.'],
+    ['project_unavailable', 'This conversation’s project folder is unavailable on your computer.'],
+  ])('explains native continuation blocked by %s and refreshes status without sending', async (reason, hint) => {
+    const props = createNavigationProps();
+    const native = { ...adapter, capabilities: CAPABILITY_MATRIX['claude-code'], state: 'ready', loadSession: jest.fn().mockResolvedValue({ messages: [] }) };
+    mockConnections = { ...mockConnections, activeAdapter: native, roster: [{ connection: { id: 'connection-1' }, agents: [{ agent: { agentId: 'atlas' }, sessions: [{ key: props.route.params.sessionKey, source: 'native', canContinue: false, continuationBlockedReason: reason }] }] }] };
+    render(<ThreadScreen {...props} />);
+    const footer = mockThreadViewProps?.readOnlyFooter as React.ReactElement<any>;
+    expect(footer.props.children[0].props.children).toBe(hint);
+    expect(footer.props.children[1].props.disabled).toBe(reason === 'project_unavailable');
+    await act(async () => footer.props.children[2].props.onPress());
+    expect(native.loadSession).toHaveBeenCalledWith(props.route.params.sessionKey);
+  });
+
+  it.each(['claude-code', 'codex'] as const)('shows the regular composer for a resumable native %s conversation', backend => {
+    const props = createNavigationProps();
+    const native = { ...adapter, capabilities: CAPABILITY_MATRIX[backend] };
+    mockConnections = { ...mockConnections, activeAdapter: native, roster: [{ connection: { id: 'connection-1' }, agents: [{ agent: { agentId: 'atlas' }, sessions: [{ key: props.route.params.sessionKey, source: 'native', canContinue: true }] }] }] };
+    render(<ThreadScreen {...props} />);
+    expect(mockThreadViewProps?.capabilities.chat).toBe(true);
+    expect(mockThreadViewProps?.readOnlyFooter).toBeUndefined();
   });
 
   let consoleErrorSpy: jest.SpyInstance;
@@ -1129,7 +1161,7 @@ describe('ThreadScreen connection container', () => {
     expect(mockThreadOverlayProps?.onChooseFile).toBeUndefined();
   });
 
-  it.each(['openclaw', 'hermes'] as const)('dismisses the composer before opening sessions or settings on %s', backend => {
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'] as const)('dismisses the composer before opening sessions, settings or models on %s', backend => {
     adapter.capabilities = { ...CAPABILITY_MATRIX[backend] };
     const props = createNavigationProps();
     const calls: string[] = [];
@@ -1141,6 +1173,9 @@ describe('ThreadScreen connection container', () => {
     expect(calls).toEqual(['blur', 'sessions']);
     act(() => mockThreadViewProps?.onOpenSettings?.());
     expect(blur).toHaveBeenCalledTimes(2);
+    act(() => mockThreadViewProps?.onOpenModelPicker?.());
+    expect(blur).toHaveBeenCalledTimes(3);
+    expect(mockController.openModelPicker).toHaveBeenCalledTimes(1);
     expect(props.navigation.navigate).toHaveBeenCalledWith('AgentSettings', { connectionId: 'connection-1', agentId: 'atlas' });
   });
 

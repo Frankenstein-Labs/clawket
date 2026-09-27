@@ -2,9 +2,12 @@ import React from 'react';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { ConversationEntry } from './ConversationEntry';
 
-jest.mock('react-native', () => ({ ...jest.requireActual('react-native'), View: 'View', ActivityIndicator: 'ActivityIndicator' }));
+jest.mock('react-native', () => ({ ...jest.requireActual('react-native'), View: 'View' }));
+jest.mock('lucide-react-native', () => ({ ChevronLeft: () => null }));
 
 let mockPanel: any;
+let mockLoading: any = null;
+let mockPill: any = null;
 const mockAdapter = { connection: { id: 'c' } };
 const mockSnapshot = { initialized: true, activeConnectionId: 'c', activeAdapter: mockAdapter,
   roster: [{ connection: { id: 'c' }, agents: [{ agent: { agentId: 'codex', name: 'Codex' }, sessions: [{ key: 'existing' }] }] }] };
@@ -16,14 +19,44 @@ jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0 }) }));
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: { colors: { canvas: '#fff', inkSecondary: '#888' } } }) }));
 jest.mock('../../contexts/ProPaywallContext', () => ({ useProPaywall: () => ({ showPaywall: jest.fn() }) }));
-jest.mock('../../components/ui/ScreenHeader', () => ({ ScreenHeader: () => null }));
+jest.mock('../../components/ui/FloatingButton', () => ({ FloatingButton: () => null }));
+jest.mock('../../components/ui/HeaderPill', () => ({ HeaderPill: (props: any) => { mockPill = props; return null; } }));
+jest.mock('../../components/ui/LoadingState', () => ({
+  LoadingState: (props: any) => { mockLoading = props; return null; },
+  useLoadingHandoff: (loading: boolean) => (loading ? 'wait' : null),
+}));
 jest.mock('../SessionPanel', () => ({ SessionPanel: (props: any) => { mockPanel = props; return null; } }));
 jest.mock('../../services/session-preferences', () => ({ SessionPreferencesService: { getLastSession: (...args: any[]) => mockPreferences.getLastSession() } }));
 jest.mock('../../services/manual-sessions', () => ({ ManualSessions: { create: (...args: any[]) => mockCreate(...args) } }));
 
-const navigation = { replace: jest.fn(), goBack: jest.fn() };
+const navigation = { replace: jest.fn(), goBack: jest.fn(), navigate: jest.fn() };
 const props = { navigation, route: { params: { connectionId: 'c', agentId: 'codex', sessionKey: '', from: 'roster' } } } as any;
-beforeEach(() => { jest.clearAllMocks(); mockPreferences.getLastSession.mockResolvedValue(null); mockCreate.mockResolvedValue({ key: 'created' }); });
+beforeEach(() => {
+  jest.clearAllMocks(); mockLoading = null; mockPill = null;
+  mockPreferences.getLastSession.mockResolvedValue(null); mockCreate.mockResolvedValue({ key: 'created' });
+});
+
+it('waits with the chat header and the shared Companion loading state, following the real stage', async () => {
+  let finishActivate!: () => void;
+  let finishRoster!: () => void;
+  mockRuntime.activate.mockReturnValueOnce(new Promise<void>(resolve => { finishActivate = resolve; }));
+  mockRuntime.refreshRoster.mockReturnValueOnce(new Promise<void>(resolve => { finishRoster = resolve; }));
+  const view = render(<ConversationEntry {...props} />);
+  expect(mockPill).toMatchObject({ agentId: 'codex', name: 'Codex', subtitle: '' });
+  expect(mockLoading).toMatchObject({ pose: 'connecting', message: 'Connecting' });
+  // A long wait offers the connection page, where status and reconnect live.
+  mockLoading.slowAction.onPress();
+  expect(navigation.navigate).toHaveBeenCalledWith('Connection', { connectionId: 'c' });
+  await act(async () => { finishActivate(); });
+  expect(mockLoading).toMatchObject({ message: 'Loading sessions' });
+  await act(async () => { finishRoster(); });
+  await waitFor(() => expect(mockPanel.visible).toBe(true));
+  // The loading state leaves once the picker opens; the header stays behind the sheet.
+  mockLoading = null;
+  view.rerender(<ConversationEntry {...props} />);
+  expect(mockLoading).toBeNull();
+  expect(mockPill).toMatchObject({ name: 'Codex' });
+});
 
 it('opens the scoped picker without creating a placeholder conversation', async () => {
   render(<ConversationEntry {...props} />);

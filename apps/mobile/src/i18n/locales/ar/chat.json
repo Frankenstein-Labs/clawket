@@ -386,5 +386,12 @@
   "Allow this action?": "السماح بهذا الإجراء؟",
   "Stop task": "إيقاف المهمة",
   "Your answer": "إجابتك",
-  "Question {{current}} of {{total}}": "السؤال {{current}} من {{total}}"
+  "Question {{current}} of {{total}}": "السؤال {{current}} من {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "المحادثات المستوردة للقراءة فقط. تابع بسياقها في محادثة جديدة؛ ستبقى المحادثة الأصلية دون تغيير.",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "هذه المحادثة مفتوحة على الكمبيوتر. أغلقها ثم تحقق مجددًا، أو تابع في جلسة جديدة.",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "تعذر التحقق مما إذا كانت هذه المحادثة قيد الاستخدام. تحقق مجددًا أو تابع في جلسة جديدة.",
+  "This conversation’s project folder is unavailable on your computer.": "مجلد مشروع هذه المحادثة غير متاح على الكمبيوتر.",
+  "Check again": "التحقق مجددًا",
+  "Not sent · tap to review": "لم تُرسل · اضغط للمراجعة",
+  "This model does not accept images. Choose another model or remove the photo.": "هذا النموذج لا يدعم الصور. اختر نموذجًا آخر أو أزل الصورة."
 }

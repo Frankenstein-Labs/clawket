@@ -1,5 +1,6 @@
 import { ClaudeFault } from './errors.js';
 import { randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentQuestion, ApprovalRequest, SessionUpdate } from '@clawket/agent-protocol';
 
@@ -65,8 +66,12 @@ export class ClaudeInteractions {
       catch { return { behavior: 'deny', message: 'This question format cannot be shown safely. Ask in plain text.', toolUseID: options.toolUseID }; }
     } else {
       const isPlan = toolName === 'ExitPlanMode';
-      const command = typeof input.command === 'string' ? input.command
-        : isPlan && typeof input.plan === 'string' ? input.plan : JSON.stringify(input, null, 2);
+      const fileReview = toolName === 'Write' && typeof input.file_path === 'string' && typeof input.content === 'string'
+        ? `${basename(input.file_path)}\n${input.file_path}\n\n${input.content}`
+        : toolName === 'Edit' && typeof input.file_path === 'string' && typeof input.old_string === 'string' && typeof input.new_string === 'string'
+          ? `${basename(input.file_path)}\n${input.file_path}\n\n${input.old_string.split('\n').map(line => `- ${line}`).join('\n')}\n${input.new_string.split('\n').map(line => `+ ${line}`).join('\n')}${input.replace_all === true ? '\n(replace all matches)' : ''}` : undefined;
+      const command = fileReview ?? (typeof input.command === 'string' ? input.command
+        : isPlan && typeof input.plan === 'string' ? input.plan : JSON.stringify(input, null, 2));
       if (command.length > 64_000) return { behavior: 'deny', message: 'This request is too large to review safely.', toolUseID: options.toolUseID };
       approval = { kind: 'exec', id, command,
         category: toolName === 'Bash' ? 'command' : /^(Write|Edit|NotebookEdit)$/.test(toolName) ? 'file' : 'permissions',

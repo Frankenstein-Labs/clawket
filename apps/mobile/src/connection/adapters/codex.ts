@@ -4,7 +4,9 @@ import {
   type ConnectionState, type SessionDescriptor, type SessionHistory, type SessionUpdate,
   type AgentQuestion, type PromptInput, type ManagementOperations, type ModelSelectionState, type ModelSelectionWriteResult,
 } from '@clawket/agent-protocol';
+import { generateId } from '../../services/gateway-auth';
 import { RelayWsTransport } from '../transports/relay-ws';
+import { bridgeUnavailableDelay } from './bridge-availability';
 import type { WebSocketFactory } from '../transports/types';
 
 type Listeners = {
@@ -29,10 +31,10 @@ export class CodexAdapter implements AgentAdapter {
   readonly management: ManagementOperations;
   private transport: RelayWsTransport;
   private currentState: ConnectionState = 'idle';
-  private sequence = 0;
   private epoch = 0;
   private handshakeError: AdapterError | null = null;
   private unavailableAttempts = 0;
+  private previouslyReady = false;
   private connectPromise: Promise<void> | null = null;
   private cancelConnect: (() => void) | null = null;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason: Error) => void; timer: ReturnType<typeof setTimeout> }>();
@@ -58,7 +60,7 @@ export class CodexAdapter implements AgentAdapter {
       if (change.state !== 'ready') this.setState(change.state === 'closed' ? 'offline' : change.state);
     });
     this.transport.onClose(() => { this.epoch++; this.rejectPending(); });
-    this.management = { approvals: { listExec: sessionKey => this.rpc('approvals.list', { sessionKey }), resolveExec: async (id, decision) => { await this.rpc('approvals.resolve', { id, decision }); } }, skills: { status: () => this.rpc('skills.list') }, models: {
+    this.management = { approvals: { listExec: sessionKey => this.rpc('approvals.list', { sessionKey }), resolveExec: async (id, decision) => { await this.rpc('approvals.resolve', { id, decision }); } }, skills: { status: (_agentId, context) => this.rpc('skills.list', context?.sessionKey ? { sessionKey: context.sessionKey } : {}) }, models: {
       list: async () => withNativeModelOrder(await this.rpc<ModelSelectionState>('models.list')).models,
       getSelection: async key => withNativeModelOrder(await this.rpc<ModelSelectionState>('models.list', { sessionKey: key ?? undefined })),
       setSelection: async params => withNativeModelOrder(await this.rpc<ModelSelectionWriteResult>('models.select', { ...params })),
@@ -84,13 +86,15 @@ export class CodexAdapter implements AgentAdapter {
       if (health.backend !== 'codex') throw new AdapterError('unsupported', 'Endpoint is not a Codex Bridge');
       this.capabilities.attachments = true; this.capabilities.projects = health.projects === true;
       this.handshakeError = null; this.unavailableAttempts = 0;
+      this.previouslyReady = true;
       this.transport.markReady(); this.setState('ready');
     } catch (error) {
       if (epoch !== this.epoch) return;
       this.handshakeError = error instanceof AdapterError ? error : null;
       const unavailable = this.handshakeError?.code === 'bridge_offline';
-      // An absent computer cannot recover through rapid phone handshakes.
-      const delay = unavailable ? Math.min(120_000, 30_000 * 2 ** Math.min(this.unavailableAttempts++, 2)) : 0;
+      // A recovered owner may return seconds after this response. Bound that
+      // fast window, then preserve the longer absent-computer backoff.
+      const delay = unavailable ? bridgeUnavailableDelay(this.unavailableAttempts++, this.previouslyReady) : 0;
       this.transport.retryHandshake(delay);
     }
   }
@@ -116,13 +120,14 @@ export class CodexAdapter implements AgentAdapter {
   disconnect(): void {
     this.epoch++; this.cancelConnect?.(); this.connectPromise = null;
     this.transport.disconnect(); this.rejectPending(); this.setState('offline');
-    this.handshakeError = null; this.unavailableAttempts = 0;
+    this.handshakeError = null;
+    if (!this.previouslyReady) this.unavailableAttempts = 0;
   }
 
-  async probe(): Promise<boolean> {
+  async probe(timeoutMs = 5_000): Promise<boolean> {
     const epoch = this.epoch;
     try {
-      const health = await this.rpc<{ backend: string; vision: boolean; model: string; projects?: boolean }>('health');
+      const health = await this.rpc<{ backend: string; vision: boolean; model: string; projects?: boolean }>('health', {}, timeoutMs);
       if (epoch !== this.epoch || health.backend !== 'codex') return false;
       this.capabilities.attachments = true; this.capabilities.projects = health.projects === true;
       return true;
@@ -159,10 +164,12 @@ export class CodexAdapter implements AgentAdapter {
   }
 
 
-  private rpc<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    const id = `${this.record.id}-${this.epoch}-${++this.sequence}`;
+  private rpc<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = method === 'models.select' ? 190_000 : 20_000): Promise<T> {
+    // Fresh identity across adapter replacement and process restarts; late replies
+    // must never resolve a different request on the same saved connection.
+    const id = generateId();
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new AdapterError('timeout', 'Codex request timed out')); }, method === 'models.select' ? 190_000 : 20_000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new AdapterError('timeout', 'Codex request timed out')); }, timeoutMs);
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer });
       try { this.transport.send(JSON.stringify({ type: 'req', id, method, params })); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }

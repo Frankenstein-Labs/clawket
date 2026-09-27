@@ -9,7 +9,8 @@ let mockLink: () => void;
 jest.mock('react-native', () => {
   const R = require('react');
   const host = (name: string) => ({ children, ...props }: any) => R.createElement(name, props, children);
-  return { View: host('View'), Text: host('Text'), Image: host('Image'), Pressable: host('Pressable'),
+  return {
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default }, View: host('View'), Text: host('Text'), Image: host('Image'), Pressable: host('Pressable'),
     StyleSheet: { create: (value: unknown) => value }, Keyboard: { dismiss: jest.fn() },
     TextInput: { State: { currentlyFocusedInput: () => null } },
     AppState: { addEventListener: (_: string, callback: typeof mockForeground) => { mockForeground = callback; return { remove: jest.fn() }; } },

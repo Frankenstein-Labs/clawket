@@ -69,6 +69,8 @@ const mockRefreshRoster = jest.fn(async () => mockRoster);
 const mockProbeActive = jest.fn(async () => true);
 const mockReconnectConnection = jest.fn(async (_id: string): Promise<void> => undefined);
 
+// The Companion scenes have their own suite; this screen only has to host the loading state.
+jest.mock('../../components/ui/companion/CompanionScene', () => ({ CompanionScene: () => null }));
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
   const host = (name: string) => ReactRuntime.forwardRef(
@@ -487,7 +489,8 @@ describe('RosterScreen', () => {
     expect(view.getByTestId('roster-row-agent:live:main-attention')).toBeTruthy();
     expect(view.getByTestId('roster-row-agent:live:builder-unread')).toBeTruthy();
     expect(view.getByTestId('roster-row-session:live:agent:main:main:channel:ops')).toBeTruthy();
-    expect(view.getByTestId('roster-row-session:live:agent:main:main:channel:ops-pin-icon')).toBeTruthy();
+    // A conversation shown on home carries its badge but no pin: pinning is only for Agents.
+    expect(view.queryByTestId('roster-row-session:live:agent:main:main:channel:ops-pin-icon')).toBeNull();
     expect(view.getByTestId(
       'roster-row-session:live:agent:main:main:channel:ops-avatar-overlay',
     )).toBeTruthy();
@@ -519,6 +522,16 @@ describe('RosterScreen', () => {
       locked: true,
     }));
     expect(onLongPressRow).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'main' }));
+  });
+
+  it('shows a pending question as input needed instead of active work', () => {
+    mockRoster = [group('live', 'live', [agent('live', 'main')])];
+    mockRoster = mockRoster.map(group => ({ ...group, agents: group.agents.map(agent => ({ ...agent, attention: 'input' as const, sessions: agent.sessions.map(session => ({ ...session, attention: 'input' as const, hasActiveRun: true })) })) }));
+    mockConnections = snapshot({ connections: [connection('live')], roster: mockRoster });
+    const view = render(<RosterScreen {...props()} />);
+    expect(view.getByText('Agent needs your input')).toBeTruthy();
+    expect(view.queryByTestId('roster-row-agent:live:main-avatar-working-ring')).toBeNull();
+    expect(view.getByTestId('roster-row-agent:live:main').props.accessibilityLabel).toContain('Agent needs your input');
   });
 
   it('marks the live connection\'s rows only while the roster mixes connections', () => {
@@ -803,15 +816,20 @@ describe('RosterScreen', () => {
     });
     const view = render(<RosterScreen {...screenProps} />);
     const pinned = view.getByTestId('roster-row-session:live:agent:main:main:channel:ops');
-    expect(view.getByTestId('roster-row-session:live:agent:main:main:channel:ops-pin-icon')).toBeTruthy();
+    expect(view.getByTestId('roster-row-session:live:agent:main:main:channel:ops-avatar-overlay')).toBeTruthy();
+    // The swipe tray hides the conversation from home; it never says unpin.
+    expect(view.getByTestId('roster-swipe-session:live:agent:main:main:channel:ops-action-unpin_session')
+      .props.accessibilityLabel).toBe('Hide from home');
+    expect(view.getByText('Hide')).toBeTruthy();
 
     fireEvent(pinned, 'longPress');
+    expect(view.getByText('Hide from home')).toBeTruthy();
     fireEvent.press(view.getByTestId('roster-action-unpin_session'));
     expect(onUnpinSession).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pinned_session' }));
 
     view.rerender(<RosterScreen {...screenProps} pinnedSessionKeys={{}} />);
     expect(view.queryByTestId('roster-row-session:live:agent:main:main:channel:ops')).toBeNull();
-    expect(view.queryByTestId('roster-row-session:live:agent:main:main:channel:ops-pin-icon')).toBeNull();
+    expect(view.queryByTestId('roster-row-session:live:agent:main:main:channel:ops-avatar-overlay')).toBeNull();
 
     view.rerender(<RosterScreen {...screenProps} />);
 
@@ -866,6 +884,28 @@ describe('RosterScreen', () => {
     const empty = render(<RosterScreen {...props()} />);
     expect(empty.getByText('No agents on this connection')).toBeTruthy();
     expect(flattenStyle(empty.getByTestId('roster-empty').props.style).fontSize).toBe(FontSize.secondary);
+  });
+
+  it('shows the connecting companion instead of an empty roster before the first live roster arrives', () => {
+    mockRoster = [];
+    mockConnections = snapshot({ activeState: 'handshaking', roster: [] });
+    const connecting = render(<RosterScreen {...props()} />);
+    expect(connecting.getByTestId('roster-loading')).toBeTruthy();
+    expect(connecting.getByLabelText('Connecting')).toBeTruthy();
+    expect(connecting.queryByText('No agents on this connection')).toBeNull();
+    connecting.unmount();
+
+    // Ready but the roster refresh has not landed: still loading, now for the agent list.
+    mockConnections = snapshot({ activeState: 'ready', roster: [] });
+    const loadingAgents = render(<RosterScreen {...props()} />);
+    expect(loadingAgents.getByLabelText('Loading agents')).toBeTruthy();
+    loadingAgents.unmount();
+
+    // A stale cached group is not proof of a live roster either.
+    mockRoster = [{ ...group('live', 'cache'), agents: [] }];
+    mockConnections = snapshot({ activeState: 'connecting', roster: mockRoster });
+    const cached = render(<RosterScreen {...props()} />);
+    expect(cached.getByTestId('roster-loading')).toBeTruthy();
   });
 
   it('keeps cached content visible across error, offline, and permission states', () => {

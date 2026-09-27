@@ -73,10 +73,12 @@ it('keeps extension questions scoped, validates choices, and rejects stale or du
   setup(); const key = (await request('sessions.list'))[0].key; await request('chat.send', { sessionKey: key, text: 'hello', idempotencyKey: 'one' });
   children[0].emit('event', { type: 'extension_ui_request', id: 'q', method: 'select', title: 'Pick', options: ['One', 'Two'] });
   expect(await request('questions.list', { sessionKey: key })).toHaveLength(1);
+  expect((await request('sessions.list')).find((row: any) => row.key === key).attention).toBe('input');
   await expect(request('questions.respond', { sessionKey: key, questionId: 'q', value: 'forged' })).rejects.toThrow('Invalid response');
   await expect(request('questions.respond', { sessionKey: 'other', questionId: 'q', value: 'One' })).rejects.toThrow();
   await request('questions.respond', { sessionKey: key, questionId: 'q', value: 'Two' });
   expect(children[0].sent.at(-1)).toMatchObject({ type: 'extension_ui_response', value: 'Two' });
+  expect((await request('sessions.list')).find((row: any) => row.key === key).attention).toBeNull();
   await expect(request('questions.respond', { sessionKey: key, questionId: 'q', value: 'One' })).rejects.toThrow('no longer pending');
 });
 it('rejects arbitrary paths, unsupported RPC operations, malformed prompts, and model changes while busy', async () => {

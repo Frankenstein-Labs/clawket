@@ -6,7 +6,7 @@ import { loadConversationExport } from '../../services/conversation-export';
 import { ConversationExportSheet } from './ConversationExportSheet';
 jest.mock('react-native', () => {
   const R = require('react'); const host = (name: string) => ({ children, ...props }: any) => R.createElement(name, props, children);
-  return { View: host('View'), Text: host('Text'), Pressable: host('Pressable'), StyleSheet: { create: (value: unknown) => value } };
+  return { Platform: { OS: 'ios' }, View: host('View'), Text: host('Text'), Pressable: host('Pressable'), StyleSheet: { create: (value: unknown) => value } };
 });
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: { colors: { inkSecondary: '#555' } } }) }));
 jest.mock('@gorhom/bottom-sheet', () => ({ BottomSheetScrollView: ({ children }: any) => children }));
@@ -20,7 +20,7 @@ jest.mock('../../components/ui/SettingsGroup', () => ({
   SettingsRow: (props: any) => require('react').createElement(require('react-native').Pressable, props),
 }));
 jest.mock('../../components/ui/Banner', () => ({ Banner: ({ message }: any) => require('react').createElement(require('react-native').Text, null, message) }));
-jest.mock('../../components/ui/LoadingState', () => ({ LoadingState: () => null }));
+jest.mock('../../components/ui/LoadingState', () => ({ LoadingState: ({ testID, message }: any) => testID ? require('react').createElement(require('react-native').Text, { testID }, message) : null }));
 jest.mock('../../services/conversation-export', () => ({ loadConversationExport: jest.fn(), formatConversationExport: () => '# Example' }));
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn().mockResolvedValue(true), shareAsync: jest.fn().mockResolvedValue(undefined) }));
 const mockWrite = jest.fn(); const mockDelete = jest.fn();
@@ -31,6 +31,16 @@ const target = { key: 'main', title: 'Example' };
 const adapter = { state: 'ready' } as AgentAdapter;
 const data = { title: 'Example', messages: [] };
 beforeEach(() => { jest.clearAllMocks(); jest.mocked(loadConversationExport).mockResolvedValue(data); });
+
+test('waits for an opening connection instead of calling it offline', () => {
+  const view = render(<ConversationExportSheet target={target} adapter={{ state: 'handshaking' } as AgentAdapter} onClose={jest.fn()} />);
+  expect(view.getByTestId('conversation-export-connecting')).toBeTruthy();
+  expect(view.queryByText('Offline')).toBeNull();
+  expect(loadConversationExport).not.toHaveBeenCalled();
+  view.rerender(<ConversationExportSheet target={target} adapter={{ state: 'offline' } as AgentAdapter} onClose={jest.fn()} />);
+  expect(view.getByText('Offline')).toBeTruthy();
+  expect(view.queryByTestId('conversation-export-connecting')).toBeNull();
+});
 test('prepares without opening native sharing, then shares only on an explicit format choice and cleans its file', async () => {
   const view = render(<ConversationExportSheet target={target} adapter={adapter} onClose={() => undefined} />);
   await waitFor(() => expect(view.getByTestId('conversation-export-markdown')).toBeTruthy());

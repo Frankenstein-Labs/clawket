@@ -470,6 +470,10 @@ describe.each(['light', 'dark'] as const)('%s thread primitives', (scheme) => {
     });
     expect(sheetStyle).not.toHaveProperty('borderWidth');
     expect(result.UNSAFE_getByType(BottomSheetView).props.testID).toBe('sheet');
+    expect(result.UNSAFE_getByType(BottomSheetModal).props).toMatchObject({
+      keyboardBehavior: 'interactive',
+      android_keyboardInputMode: 'adjustPan',
+    });
     expect(sheetStyle.maxHeight).toBeCloseTo(resolveSheetContentHeightLimit(812 * 0.9));
     expect(flattenStyle(result.getByTestId('sheet-handle', {
       includeHiddenElements: true,

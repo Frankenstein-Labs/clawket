@@ -150,6 +150,7 @@ function areUiMessagesEquivalent(prev: UiMessage[], next: UiMessage[]): boolean 
     if (a.presentationRunId !== b.presentationRunId) return false;
     if (a.role !== b.role) return false;
     if (a.sentLocally !== b.sentLocally || JSON.stringify(a.attribution) !== JSON.stringify(b.attribution)) return false;
+    if (a.sendUncertain !== b.sendUncertain) return false;
     if (a.text !== b.text) return false;
     if (a.idempotencyKey !== b.idempotencyKey) return false;
     if (a.timestampMs !== b.timestampMs) return false;
@@ -260,6 +261,9 @@ function projectHistoryMessage(message: ChatMessage): Record<string, unknown> {
 
   return {
     ...raw,
+    // Normalized system rows are deliberate transcript notices. Raw backend
+    // system envelopes above remain hidden (they can contain model prompts).
+    displaySystem: message.role === 'system',
     content: content.length === 1 && content[0].type === 'text'
       ? message.text
       : content,
@@ -269,6 +273,14 @@ function projectHistoryMessage(message: ChatMessage): Record<string, unknown> {
 
 function projectSessionHistory(history: SessionHistory): Record<string, unknown>[] {
   return history.messages.map(projectHistoryMessage);
+}
+
+function latestUserTurnKey(messages: UiMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === 'user') return message.idempotencyKey ?? message.renderKey ?? message.id;
+  }
+  return null;
 }
 
 type Params = {
@@ -635,6 +647,19 @@ export function useChatHistoryState({
       let prevRole: string | undefined;
 
       for (const message of history) {
+        if (message.role === 'system' && message.displaySystem === true) {
+          flushAssistantTurn();
+          const text = extractText(message.content);
+          const timestampMs = parseMessageTimestamp(message);
+          const id = typeof message.id === 'string' ? `system_history_${message.id}` : stableMessageId('system', timestampMs, text);
+          if (text.trim() && !uiMessages.some(row => row.id === id)) uiMessages.push({
+            id, historyMessageId: typeof message.id === 'string' ? message.id : undefined,
+            role: 'system', text, timestampMs: timestampMs > 0 ? timestampMs : undefined,
+          });
+          prevRole = 'system';
+          continue;
+        }
+
         if (message.role === 'user') {
           flushAssistantTurn();
           const rawText = extractText(message.content);
@@ -697,7 +722,9 @@ export function useChatHistoryState({
             || fileAttachments?.map((file) => file.fileName ?? file.mimeType).join('|')
             || '';
           const attribution = normalizeMessageAttribution(message.attribution);
-          const userMsgId = stableMessageId('user', msgTs, attribution
+          const cacheRowId = typeof message.cacheRowId === 'string' && /^usr_/.test(message.cacheRowId)
+            ? message.cacheRowId : undefined;
+          const userMsgId = cacheRowId ?? stableMessageId('user', msgTs, attribution
             ? `${typeof message.id === 'string' ? message.id : JSON.stringify(attribution)}:${userIdSeed}` : userIdSeed);
           if (uiMessages.some((item) => item.id === userMsgId)) continue;
 
@@ -707,6 +734,7 @@ export function useChatHistoryState({
             role: 'user',
             ...(attribution ? { attribution } : {}),
             ...(message.sentLocally === true ? { sentLocally: true as const } : {}),
+            ...(message.sendUncertain === true ? { sendUncertain: true } : {}),
             text: displayText,
             idempotencyKey,
             timestampMs: msgTs > 0 ? msgTs : undefined,
@@ -1123,7 +1151,8 @@ export function useChatHistoryState({
     key: string,
     options?: ReconcileAssistantOptions,
   ) => {
-    const requestKey = buildReconcileRequestKey(key, options);
+    const userTurnKey = latestUserTurnKey(messagesRef.current);
+    const requestKey = JSON.stringify([buildReconcileRequestKey(key, options), userTurnKey]);
     const inFlight = historyReconcileInFlightRef.current.get(requestKey);
     if (inFlight) {
       dbg(`reconcile: reuse in-flight request for key=${requestKey}`);
@@ -1139,6 +1168,13 @@ export function useChatHistoryState({
       let latestAssistant: (typeof history)[number] | undefined;
       for (let index = history.length - 1; index >= 0; index--) {
         const message = history[index];
+        if (message.role === 'user') {
+          // Some native transcripts wrap tool output in a user envelope. Only
+          // an actual prompt starts another turn; never borrow its predecessor.
+          const toolResultsOnly = Array.isArray(message.content) && message.content.length > 0
+            && message.content.every(block => block?.type === 'tool_result');
+          if (!toolResultsOnly) break;
+        }
         if (message.role !== 'assistant') continue;
         if (isAssistantDeliveryMirrorMessage(message)) continue;
         if (isAssistantSilentReplyMessage(message)) continue;
@@ -1160,11 +1196,21 @@ export function useChatHistoryState({
 
       setMessages((prev) => {
         if (scopeVersion !== historyScopeVersionRef.current || !sessionKeysMatch(sessionKeyRef.current, key)) return prev;
+        if (latestUserTurnKey(prev) !== userTurnKey) return prev;
+        const sourceId = typeof latestRec.id === 'string' ? latestRec.id : undefined;
+        if (sourceId) {
+          const userBoundary = prev.findLastIndex(message => message.role === 'user');
+          if (prev.some((message, index) => index < userBoundary && message.role === 'assistant'
+            && (message.historyMessageId ?? message.id) === sourceId)) return prev;
+        }
         dbg(`reconcile:setMessages key=${key} | finalTextLen=${finalText.length} | ${summarizeMessages('prev', prev)}`);
 
         let currentRunIdx = -1;
         let lastAssistantIdx = -1;
         for (let index = prev.length - 1; index >= 0; index--) {
+          // A prior final/abort row belongs to its own prompt. In particular,
+          // reconnect may already have loaded a canonical reply for this turn.
+          if (prev[index].role === 'user') break;
           if (prev[index].role !== 'assistant') continue;
           if (lastAssistantIdx < 0) lastAssistantIdx = index;
           if (prev[index].id.startsWith('final_') || prev[index].id.startsWith('abort_')) {

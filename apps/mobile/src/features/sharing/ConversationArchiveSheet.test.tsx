@@ -7,7 +7,7 @@ import { ConversationArchives } from '../../services/conversation-archives';
 import { ConversationArchiveSheet } from './ConversationArchiveSheet';
 jest.mock('react-native', () => {
   const R = require('react'); const host = (name: string) => ({ children, ...props }: any) => R.createElement(name, props, children);
-  return { Keyboard: { dismiss: jest.fn() }, View: host('View'), Text: host('Text'), Pressable: host('Pressable'), StyleSheet: { create: (value: unknown) => value } };
+  return { Platform: { OS: 'ios' }, Keyboard: { dismiss: jest.fn() }, View: host('View'), Text: host('Text'), Pressable: host('Pressable'), StyleSheet: { create: (value: unknown) => value } };
 });
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: { colors: { inkSecondary: '#555' } } }) }));
 jest.mock('@gorhom/bottom-sheet', () => ({ BottomSheetScrollView: ({ children }: any) => children,

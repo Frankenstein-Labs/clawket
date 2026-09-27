@@ -386,5 +386,12 @@
   "Allow this action?": "Разрешить это действие?",
   "Stop task": "Остановить задачу",
   "Your answer": "Ваш ответ",
-  "Question {{current}} of {{total}}": "Вопрос {{current}} из {{total}}"
+  "Question {{current}} of {{total}}": "Вопрос {{current}} из {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "Импортированные беседы доступны только для чтения. Продолжите с их контекстом в новой беседе; исходная останется без изменений.",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "Этот разговор открыт на компьютере. Закройте его и проверьте снова или продолжите в новом сеансе.",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "Не удалось проверить, используется ли этот разговор. Проверьте снова или продолжите в новом сеансе.",
+  "This conversation’s project folder is unavailable on your computer.": "Папка проекта этого разговора недоступна на компьютере.",
+  "Check again": "Проверить снова",
+  "Not sent · tap to review": "Не отправлено · нажмите для просмотра",
+  "This model does not accept images. Choose another model or remove the photo.": "Эта модель не поддерживает изображения. Выберите другую модель или удалите фото."
 }

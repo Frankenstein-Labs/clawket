@@ -8,7 +8,7 @@ type SessionOptions = {
   key: string;
   cwd: string;
   executable: string;
-  /** Only an already-owned, durably recorded session may be supplied here. */
+  /** Only a durably mapped session with freshly verified ownership may be supplied here. */
   resume?: string;
   sessionId?: string;
   model?: string;

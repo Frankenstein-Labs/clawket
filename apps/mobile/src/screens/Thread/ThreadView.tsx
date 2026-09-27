@@ -33,7 +33,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import remend from 'remend';
-import type { Capabilities } from '@clawket/agent-protocol';
+import type { Capabilities, SessionDescriptor } from '@clawket/agent-protocol';
 import {
   PanelLeft,
   ArrowDown,
@@ -94,7 +94,7 @@ import { ReplyFailureSheet } from '../../components/chat/ReplyFailureSheet';
 import { RunResult } from '../../components/chat/RunResult';
 import { RunCard } from '../../components/ui/RunCard';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { LoadingState } from '../../components/ui/LoadingState';
+import { LoadingState, useLoadingHandoff } from '../../components/ui/LoadingState';
 import { ConnectionUnavailable, type ConnectionUnavailableProps } from '../../components/ui/ConnectionUnavailable';
 import { SystemEventRow } from '../../components/ui/SystemEventRow';
 import { triggerLightImpact } from '../../services/haptics';
@@ -226,6 +226,7 @@ export type ThreadCopy = Readonly<{
   queued?: string;
   sending?: string;
   paused?: string;
+  heldHint?: string;
   sent?: string;
   delivered?: string;
   uncertain?: string;
@@ -303,6 +304,7 @@ export type ThreadViewProps = Readonly<{
   contextUsed?: number;
   contextWindow?: number;
   activityLabel?: string | null;
+  interactionAttention?: SessionDescriptor['attention'];
   capabilities: Capabilities;
   state: ThreadContentState;
   messages: ReadonlyArray<UiMessage>;
@@ -427,6 +429,7 @@ export function ThreadView({
   contextUsed,
   contextWindow,
   activityLabel,
+  interactionAttention,
   capabilities,
   state,
   messages,
@@ -530,13 +533,28 @@ export function ThreadView({
   ), [theme, wallpaperActive]);
   const offline = state.kind === 'offline' || state.kind === 'error';
   const [savedScope, setSavedScope] = useState<string | null>(null);
+  const readableScope = `${connectionFailure?.scope ?? ''}\u0000${sessionKey ?? ''}`;
+  const hasReadableContent = messages.length > 0 || runCards.length > 0;
+  const [lastReadyScope, setLastReadyScope] = useState<string | null>(null);
   useEffect(() => {
     if (state.kind === 'ready' || state.kind === 'empty') setSavedScope(null);
   }, [state.kind]);
-  const showConnectionFailure = Boolean(connectionFailure && savedScope !== connectionFailure.scope
-    && offline);
-
+  useEffect(() => {
+    if (state.kind === 'ready' && hasReadableContent) setLastReadyScope(readableScope);
+    else setLastReadyScope((previous) => previous === readableScope ? previous : null);
+  }, [state.kind, readableScope, hasReadableContent]);
   const connectionOutage = state.kind === 'error' && ['network', 'timeout', 'server', 'bridge_offline', 'gateway_offline'].includes(state.code);
+  const retainReadableConversation = lastReadyScope === readableScope && hasReadableContent
+    && !connectionFailure?.message && (state.kind === 'offline' || connectionOutage);
+  const showConnectionFailure = Boolean(connectionFailure && savedScope !== connectionFailure.scope
+    && offline && !retainReadableConversation);
+  // The Companion covers the timeline while it waits, then plays its success payoff over the arriving content.
+  const loaderActive = !(showConnectionFailure && connectionFailure)
+    && (state.kind === 'loading' || (state.kind === 'reconnecting' && messages.length === 0));
+  const loaderPhase = useLoadingHandoff(loaderActive, state.kind === 'ready' || state.kind === 'empty');
+  const loaderMessage = useRef('');
+  if (loaderActive) loaderMessage.current = state.kind === 'reconnecting' ? t('Reconnecting…') : connectingLabel ?? copy.loadingHistory;
+
   const locked = state.kind === 'locked';
   // A scheduled run's transcript is read, not continued: the header names it and the composer stays away.
   const isCronSession = Boolean(sessionKey?.includes(':cron:'));
@@ -550,7 +568,10 @@ export function ThreadView({
   );
   const replyEntrance = useReplyEntranceDelay(messages, sessionKey, messageSubmittedAt, reduceMotion);
   const presentedRunning = isRunning && !replyEntrance.holding;
-  const headerSubtitle = state.kind === 'reconnecting' ? t('Reconnecting…') : resolveThreadHeaderSubtitle({
+  const awaitingInput = interactionAttention === 'input' || interactionAttention === 'approval';
+  const headerSubtitle = state.kind === 'reconnecting' ? t('Reconnecting…')
+    : awaitingInput ? interactionAttention === 'input' ? t('Agent needs your input', { ns: 'chat' }) : t('Needs attention', { ns: 'common' })
+    : resolveThreadHeaderSubtitle({
     capabilities,
     state,
     isRunning: presentedRunning,
@@ -567,7 +588,7 @@ export function ThreadView({
   // shows lifting dots where the subtitle sits, and the reply bubble carries
   // the actual activity.
   const avatarStatus = locked ? 'locked' : offline ? 'offline' : 'idle';
-  const headerWorking = presentedRunning && state.kind !== 'reconnecting';
+  const headerWorking = presentedRunning && !awaitingInput && state.kind !== 'reconnecting';
   const canOpenSessions = capabilities.sessions && Boolean(onOpenSessionPanel);
   // The screen decides availability from the full capability set (attachments,
   // skills, commands, thinking, cron, tools); the view only needs the handler.
@@ -584,7 +605,7 @@ export function ThreadView({
     return () => clearInterval(timer);
   }, []);
   const [expandedTools, setExpandedTools] = useState<ReadonlySet<string>>(new Set());
-  const showReplyPlaceholder = presentedRunning && !locked && !sessionPreview
+  const showReplyPlaceholder = presentedRunning && !awaitingInput && !locked && !sessionPreview
     && !messages.some((message) => message.id === REPLY_PLACEHOLDER_ID
       || (message.role === 'assistant' && message.streaming === true));
   // Carries the controller's identity for this run's reply, so the first
@@ -592,8 +613,10 @@ export function ThreadView({
   const replyPlaceholder = useMemo(() => (pendingReplyRenderKey
     ? { ...REPLY_PLACEHOLDER, renderKey: pendingReplyRenderKey } : REPLY_PLACEHOLDER), [pendingReplyRenderKey]);
   const timelineMessages = useMemo(
-    () => showReplyPlaceholder ? [replyPlaceholder, ...replyEntrance.messages] : replyEntrance.messages,
-    [replyEntrance.messages, replyPlaceholder, showReplyPlaceholder],
+    () => awaitingInput
+      ? replyEntrance.messages.filter(message => !(message.role === 'assistant' && message.streaming && !message.text.trim()))
+      : showReplyPlaceholder ? [replyPlaceholder, ...replyEntrance.messages] : replyEntrance.messages,
+    [awaitingInput, replyEntrance.messages, replyPlaceholder, showReplyPlaceholder],
   );
   // Whether the previous render showed this session as an authoritative empty
   // conversation: its first message then enters like any later one.
@@ -635,6 +658,11 @@ export function ThreadView({
   previewWasVisible.current = Boolean(sessionPreview);
   const returningToBottomRef = useRef(false);
   const readerScrollingRef = useRef(false);
+  const readerSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelReaderSettle = useCallback(() => {
+    if (readerSettleTimerRef.current !== null) clearTimeout(readerSettleTimerRef.current);
+    readerSettleTimerRef.current = null;
+  }, []);
   const distanceFromBottomRef = useRef(0);
   const scrollMetricsRef = useRef({ height: 0, viewport: 0, offset: 0 });
   const timelineRef = useRef<FlashListRef<ThreadTimelineRow>>(null);
@@ -718,17 +746,10 @@ export function ThreadView({
     const { tailKey, rows } = committedRowsRef.current;
     committedLayoutRef.current = { list, content, viewport, tailKey, rows };
     if (!previous || !timelineLoaded() || composerExpandedRef.current || returningToBottomRef.current) return;
-    // Rows removed below a reader near the end, or a taller viewport once the
-    // keyboard hides, would leave the offset past the new end (iOS keeps it and
-    // shows blank space until the next touch).
-    const overshoot = (previous.content - content) + (viewport - previous.viewport);
-    if (!followNewMessagesRef.current) {
-      if (overshoot > 0 && overshoot >= distanceFromBottomRef.current) {
-        cancelBottomFollow();
-        snapToEnd();
-      }
-      return;
-    }
+    // Virtualized history replaces estimated row heights while scrolling.
+    // A smaller total is not evidence that the reader is beyond the end:
+    // FlashList moves the visible anchor as those estimates settle.
+    if (readerScrollingRef.current || !followNewMessagesRef.current) return;
     cancelBottomFollow();
     // A new row at the end glides in; a growing reply, a keyboard or composer
     // that moves the viewport, and anything that shrinks keep the exact end.
@@ -740,7 +761,7 @@ export function ThreadView({
     const glide = withinBudget && (followGlideRef.current
       || (appended && growth > 0 && viewport === previous.viewport));
     followToEnd(glide);
-  }, [cancelBottomFollow, followToEnd, snapToEnd, timelineLoaded]);
+  }, [cancelBottomFollow, followToEnd, timelineLoaded]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollButtonProgress = useSharedValue(0);
   useEffect(() => {
@@ -755,6 +776,7 @@ export function ThreadView({
   }));
   const scrollToBottom = useCallback(() => {
     const far = distanceFromBottomRef.current > Space.lg;
+    cancelReaderSettle();
     readerScrollingRef.current = false;
     setShowScrollToBottom(false);
     // A reader already at the end is pinned by the commit that adds the new
@@ -767,7 +789,7 @@ export function ThreadView({
     returningToBottomRef.current = animated;
     followNewMessagesRef.current = !animated;
     timelineRef.current?.scrollToEnd({ animated });
-  }, [cancelBottomFollow, endFollowGlide, reduceMotion, timelineLoaded]);
+  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide, reduceMotion, timelineLoaded]);
   const refreshScrollButton = useCallback(() => {
     const { height, viewport, offset } = scrollMetricsRef.current;
     if (viewport <= 0) return;
@@ -786,9 +808,6 @@ export function ThreadView({
     };
     scrollMetricsRef.current = metrics;
     refreshScrollButton();
-    if (!returningToBottomRef.current && readerScrollingRef.current) {
-      followNewMessagesRef.current = distanceFromBottomRef.current <= Space.lg;
-    }
     // Rows inserted above a short top-anchored list (older history, a preview
     // unlocked) make the anchor correction push the offset past the end; iOS
     // keeps it there as blank space until the next touch. A reader's own
@@ -799,7 +818,14 @@ export function ThreadView({
       snapToEnd();
     }
   }, [refreshScrollButton, snapToEnd]);
+  const settleReaderScroll = useCallback(() => {
+    cancelReaderSettle();
+    if (!readerScrollingRef.current) return;
+    readerScrollingRef.current = false;
+    followNewMessagesRef.current = distanceFromBottomRef.current <= Space.lg;
+  }, [cancelReaderSettle]);
   const finishScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    cancelReaderSettle();
     if (returningToBottomRef.current) {
       returningToBottomRef.current = false;
       followNewMessagesRef.current = true;
@@ -808,16 +834,25 @@ export function ThreadView({
       return;
     }
     updateScrollPosition(event);
-    readerScrollingRef.current = false;
-  }, [snapToEnd, updateScrollPosition]);
+    settleReaderScroll();
+  }, [cancelReaderSettle, settleReaderScroll, snapToEnd, updateScrollPosition]);
+  const handleScrollEndDrag = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    updateScrollPosition(event);
+    // A slow drag may produce no momentum events. Give native momentum a
+    // chance to start before deciding that the reader has stopped.
+    cancelReaderSettle();
+    readerSettleTimerRef.current = setTimeout(settleReaderScroll, 150);
+  }, [cancelReaderSettle, settleReaderScroll, updateScrollPosition]);
   const handleTimelineLoad = useCallback(() => { loadedTimelineRef.current = timelineRef.current; }, []);
   const handleScrollBeginDrag = useCallback(() => {
     // The reader's finger takes over any glide in flight.
+    cancelReaderSettle();
+    cancelBottomFollow();
     endFollowGlide();
     returningToBottomRef.current = false;
     readerScrollingRef.current = true;
     followNewMessagesRef.current = false;
-  }, [endFollowGlide]);
+  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide]);
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
     const changed = scrollMetricsRef.current.height !== height;
     scrollMetricsRef.current.height = height;
@@ -834,6 +869,7 @@ export function ThreadView({
     } else refreshScrollButton();
   }, [refreshScrollButton, scheduleBottomFollow]);
   useLayoutEffect(() => {
+    cancelReaderSettle();
     cancelBottomFollow();
     endFollowGlide();
     followNewMessagesRef.current = true;
@@ -842,8 +878,8 @@ export function ThreadView({
     scrollMetricsRef.current = { height: 0, viewport: 0, offset: 0 };
     readerScrollingRef.current = false;
     setShowScrollToBottom(false);
-    return cancelBottomFollow;
-  }, [cancelBottomFollow, endFollowGlide, sessionKey]);
+    return () => { cancelBottomFollow(); cancelReaderSettle(); };
+  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide, sessionKey]);
   useEffect(() => {
     if (scrollToBottomRequestAt != null) scrollToBottom();
   }, [scrollToBottomRequestAt, scrollToBottom]);
@@ -1075,9 +1111,7 @@ export function ThreadView({
                 onViewSaved={messages.length > 0 || runCards.length > 0 ? () => setSavedScope(connectionFailure.scope) : undefined}
               />
             </View>
-          ) : (state.kind === 'loading' || (state.kind === 'reconnecting' && messages.length === 0)) ? (
-            <View style={[styles.centeredState, { paddingTop: timelineTopClearance }]}><LoadingState testID="thread-history-loading" message={state.kind === 'reconnecting' ? t('Reconnecting…') : connectingLabel ?? copy.loadingHistory} pose={connectingLabel ? 'connecting' : 'loading'} /></View>
-          ) : messages.length === 0 && (state.kind === 'error' || state.kind === 'offline') ? (
+          ) : loaderActive ? null : messages.length === 0 && (state.kind === 'error' || state.kind === 'offline') ? (
             <View style={[styles.sessionContent, { paddingTop: timelineTopClearance }]}><ConnectionUnavailable name={agentName} message={state.kind === 'error' ? state.message : undefined} onRetry={onRetry} /></View>
           ) : state.kind === 'locked' ? (
             <View
@@ -1105,10 +1139,11 @@ export function ThreadView({
                 onScrollBeginDrag={handleScrollBeginDrag}
                 onScroll={updateScrollPosition}
                 scrollEventThrottle={16}
+                onMomentumScrollBegin={cancelReaderSettle}
                 onMomentumScrollEnd={finishScroll}
                 onContentSizeChange={handleContentSizeChange}
                 onLayout={handleTimelineLayout}
-                onScrollEndDrag={updateScrollPosition}
+                onScrollEndDrag={handleScrollEndDrag}
                 getItemType={getTimelineRowType}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
@@ -1135,6 +1170,17 @@ export function ThreadView({
               ) : null}
             </>
           )}
+          {/* One mounted loader for the wait and its payoff, so the scene that waited is the one that celebrates. */}
+          {loaderPhase ? (
+            <View
+              pointerEvents={loaderPhase === 'ready' ? 'none' : 'box-none'}
+              style={[StyleSheet.absoluteFill, styles.centeredState, { paddingTop: timelineTopClearance }]}
+            >
+              <LoadingState testID="thread-history-loading" phase={loaderPhase} message={loaderMessage.current}
+                pose={connectingLabel ? 'connecting' : 'loading'}
+                slowAction={connectionFailure?.onManage ? { label: t('Manage connection', { ns: 'config' }), onPress: connectionFailure.onManage } : undefined} />
+            </View>
+          ) : null}
         </Animated.View>
         {timelineItems.length > 0 && !locked ? (
           <Animated.View
@@ -1665,6 +1711,7 @@ function ThreadMessageRowContent({
   /** Row long-press forwarded to the album so photos open the same actions. */
   onLongPress?: () => void;
 }>): React.JSX.Element | null {
+  const { colors } = useConversationTheme();
   if (message.role !== 'assistant' && message.role !== 'user') return null;
   const attachmentCount = message.imageUris?.length ?? 0;
   const fileAttachments = (message.fileAttachments ?? []).filter(file => (
@@ -1704,6 +1751,9 @@ function ThreadMessageRowContent({
       ) : null}
       {!hasBubble && message.role === 'user' ? (
         <UserMessageMeta message={message} status={status} copy={copy} />
+      ) : null}
+      {message.role === 'user' && message.delivery === 'held' && copy.heldHint ? (
+        <Text testID={`thread-held-${message.id}`} style={{ alignSelf: 'flex-end', color: colors.inkSecondary, fontSize: FontSize.caption, lineHeight: LineHeight.caption, paddingTop: Space.xs }}>{copy.heldHint}</Text>
       ) : null}
       {favorited ? (
         <FavoriteIndicator messageId={message.id} role={isIncomingParticipant(message) ? 'assistant' : message.role} />

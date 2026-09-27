@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 const mock = vi.hoisted(() => ({ control: vi.fn(), background: vi.fn(), fetch: vi.fn(), home: '' }));
 vi.mock('node:os', async (original) => ({ ...await original<typeof import('node:os')>(), homedir: () => mock.home }));
 vi.mock('./claude-code-lifecycle.js', () => ({ claudeControl: mock.control, startClaudeBackground: mock.background }));
@@ -50,14 +50,14 @@ it('isolates the default Preview and Production pairing files', async () => {
   await handleClaudeCommand(['pair', '--project', project, '--preview']);
   await handleClaudeCommand(['pair', '--project', project]);
   const paths = mock.background.mock.calls.map(c => c[0][c[0].indexOf('--config') + 1]);
-  expect(paths[0]).toContain('/preview/runtime.json'); expect(paths[1]).toContain('/production/runtime.json'); expect(paths[0]).not.toBe(paths[1]);
+  expect(paths[0]).toContain(join('preview', 'runtime.json')); expect(paths[1]).toContain(join('production', 'runtime.json')); expect(paths[0]).not.toBe(paths[1]);
   await handleClaudeCommand(['pair', '--foreground', '--local', '--address', '127.0.0.1', '--project', project, '--preview']);
   await handleClaudeCommand(['pair', '--foreground', '--local', '--address', '127.0.0.1', '--project', project]);
   const configs = paths.map(p => JSON.parse(readFileSync(p, 'utf8')));
   expect(configs[0].port).not.toBe(configs[1].port);
   expect(configs[0].token).not.toBe(configs[1].token);
   // Remove only this temporary project's state in the isolated test home.
-  for (const p of paths) rmSync(p.replace(/\/(preview|production)\/runtime.json$/, ''), { recursive: true, force: true });
+  for (const p of paths) rmSync(dirname(dirname(p)), { recursive: true, force: true });
 });
 
 it('refuses contradictory scope flags and never widens an existing project pairing', async () => {

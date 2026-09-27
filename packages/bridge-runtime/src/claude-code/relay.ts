@@ -69,6 +69,9 @@ export class ClaudeRelay {
     const socket = new WebSocket(url, { ...this.relayNetwork, headers: { Authorization: `Bearer ${this.config.relaySecret}` }, maxPayload: WEBSOCKET_FRAME_LIMIT_BYTES, handshakeTimeout: 15_000 });
     this.socket = socket;
     let alive = true;
+    let missedPongs = 0;
+    let lastPongAt = 0;
+    let lastPingCheckAt = 0;
     let ownerLeasePending = false;
     socket.on('open', () => {
       if (this.socket !== socket || this.stopped) { socket.terminate(); return; }
@@ -78,12 +81,25 @@ export class ClaudeRelay {
           this.log('claude-code relay readiness timeout'); socket.terminate();
         }
       }, 15_000);
+      lastPongAt = lastPingCheckAt = Date.now();
       this.ping = setInterval(() => {
-        if (!alive) { socket.terminate(); return; }
+        const now = Date.now();
+        const schedulerDelayMs = Math.max(0, now - lastPingCheckAt - 15_000);
+        lastPingCheckAt = now;
+        if (!alive) missedPongs++;
+        if (missedPongs >= 3) {
+          this.log(`claude-code relay heartbeat timeout idleMs=${Math.max(0, now - lastPongAt)} schedulerDelayMs=${schedulerDelayMs} queuedBytes=${socket.bufferedAmount}`);
+          socket.terminate(); return;
+        }
+        if (!alive) this.log(`claude-code relay heartbeat delayed missedPongs=${missedPongs}`);
         alive = false; socket.ping();
       }, 15_000);
     });
-    socket.on('pong', () => { if (this.socket === socket) alive = true; });
+    socket.on('pong', () => {
+      if (this.socket !== socket) return;
+      if (missedPongs) this.log(`claude-code relay heartbeat recovered missedPongs=${missedPongs}`);
+      alive = true; missedPongs = 0; lastPongAt = Date.now();
+    });
     socket.on('message', raw => {
       if (this.socket !== socket || this.stopped) return;
       const text = raw.toString();
@@ -100,7 +116,18 @@ export class ClaudeRelay {
         } catch { this.log('claude-code invalid relay control'); }
         return;
       }
-      if (++this.pending > 16) { this.pending--; this.log('claude-code request capacity reached'); return; }
+      if (this.pending >= 16) {
+        this.log('claude-code request capacity reached');
+        try {
+          const frame = JSON.parse(text);
+          if (frame?.type === 'req' && typeof frame.id === 'string' && frame.id.length > 0 && frame.id.length <= 200) {
+            this.send(JSON.stringify({ type: 'res', id: frame.id, ok: false,
+              error: { code: 'BRIDGE_BUSY', message: 'The Bridge is handling other requests. Please retry.' } }));
+          }
+        } catch { /* Malformed frames cannot be correlated with a client request. */ }
+        return;
+      }
+      this.pending++;
       void (async () => {
         let id: string | undefined;
         try {

@@ -25,6 +25,7 @@ import {
   serializeControlEnvelope,
 } from './control';
 import { parsePositiveInt } from './utils';
+import { rememberPendingRequest, takePendingRequest } from './pending-requests';
 
 export function allowMessage(
   runtime: RelayRuntime,
@@ -303,26 +304,22 @@ export async function handleGatewayMessage(
   }
   if (connectResId) {
     if (runtime.policy.routeRequestsByOrigin) {
-      const mappedClientId = runtime.requestClientByReqId.get(connectResId);
-      if (mappedClientId) {
-        const mappedClient = runtime.clients.get(mappedClientId);
-        runtime.requestClientByReqId.delete(connectResId);
-        if (mappedClient?.readyState === WebSocket.OPEN) {
-          mappedClient.send(text);
-          touchClientActivity(runtime, mappedClientId);
-          logRuntimeTelemetry(runtime, 'request_response_delivered', {
-            role: 'gateway',
-            targetClientId: mappedClientId,
-            clientCount: runtime.clients.size,
-          });
-          return;
-        }
-        logRuntimeTelemetry(runtime, 'request_response_target_missing', {
+      const target = takePendingRequest(runtime, connectResId);
+      runtime.connectReqClientByReqId.delete(connectResId);
+      if (target) {
+        target.socket.send(text);
+        touchClientActivity(runtime, target.clientId);
+        logRuntimeTelemetry(runtime, 'request_response_delivered', {
           role: 'gateway',
-          targetClientId: mappedClientId,
+          diagnosticId: (target.socket.deserializeAttachment() as SocketAttachment)?.diagnosticId,
           clientCount: runtime.clients.size,
         });
+      } else {
+        logRuntimeTelemetry(runtime, 'request_response_target_missing', {
+          role: 'gateway', clientCount: runtime.clients.size,
+        });
       }
+      return;
     }
     const targetClientId = runtime.connectReqClientByReqId.get(connectResId);
     if (targetClientId) {
@@ -454,6 +451,8 @@ export function handleInactiveClientMessage(runtime: RelayRuntime, attachment: S
 export function prepareClientMessage(runtime: RelayRuntime, attachment: SocketAttachment, text: string): boolean | null {
   const isConnectStart = isConnectStartReqFrame(text);
   const requestFrame = parseRequestFrame(text);
+  if (runtime.policy.routeRequestsByOrigin && requestFrame
+    && !rememberPendingRequest(runtime, attachment.clientId, requestFrame.id)) return null;
   if (isConnectStart) {
     if (runtime.activeClientId !== attachment.clientId) {
       selectActiveClient(runtime, attachment.clientId);
@@ -466,7 +465,6 @@ export function prepareClientMessage(runtime: RelayRuntime, attachment: SocketAt
       runtime.challengeClientId = null;
     }
   } else if (runtime.policy.routeRequestsByOrigin) {
-    if (requestFrame) runtime.requestClientByReqId.set(requestFrame.id, attachment.clientId);
     if (runtime.activeClientId !== attachment.clientId) {
       selectActiveClient(runtime, attachment.clientId);
       logRuntimeTelemetry(runtime, 'active_client_switched', {
@@ -548,6 +546,7 @@ export function rejectClientRequestWithoutBridge(
   if (!runtime.policy.rejectRequestWithoutOwner) return false;
   const frame = parseRequestFrame(text);
   if (!frame || isConnectStartReqFrame(text)) return false;
+  takePendingRequest(runtime, frame.id);
 
   const response = JSON.stringify({
     type: 'res',

@@ -11,12 +11,15 @@ const mockRemove = jest.fn();
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
   const host = (name: string) => ({ children, ...props }: any) => ReactRuntime.createElement(name, props, children);
-  return { View: host('View'), Text: host('Text'),
+  return { View: host('View'), Text: host('Text'), Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     StyleSheet: { create: (value: unknown) => value, absoluteFill: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }, flatten: (value: unknown) => value },
     AppState: { currentState: 'active', addEventListener: (_: string, callback: (state: string) => void) => { mockLifecycle = callback; return { remove: mockRemove }; } },
   };
 });
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: { colors: { ink: '#191b1d', canvas: '#ffffff' } } }) }));
+jest.mock('./Button', () => ({ Button: (props: Record<string, unknown>) => require('react').createElement('Button', props) }));
+// Scenes have their own suite; here the loading state only has to host one.
+jest.mock('./companion/CompanionScene', () => ({ CompanionScene: (props: Record<string, unknown>) => require('react').createElement('CompanionScene', props) }));
 jest.mock('react-native-reanimated', () => {
   const ReactRuntime = require('react');
   const identity = (value: unknown) => value;
@@ -48,6 +51,27 @@ it('stops decorative motion in the background and releases its listener', () => 
   expect(withRepeat).toHaveBeenCalledTimes(3);
   view.unmount();
   expect(mockRemove).toHaveBeenCalled();
+});
+
+it('labels an unlabeled wait for assistive technology and offers a compact size for sheets', () => {
+  const view = render(<LoadingState testID="loading" size="compact" />);
+  const group = view.getByTestId('loading');
+  expect(group.props.accessibilityLabel).toBe('Loading...');
+  expect(group.props.accessibilityState).toEqual({ busy: true });
+  expect(view.UNSAFE_root.findAll((node: { props: { style?: { paddingVertical?: number } } }) => node.props.style?.paddingVertical === 32).length).toBeGreaterThan(0);
+  view.unmount();
+});
+
+it('explains a long wait and offers one reachable action outside the progress group', () => {
+  jest.useFakeTimers();
+  const onPress = jest.fn();
+  const view = render(<LoadingState testID="loading" message="Connecting" slowAction={{ label: 'Manage connection', onPress }} />);
+  expect(view.queryByTestId('loading-slow')).toBeNull();
+  act(() => { jest.advanceTimersByTime(Motion.loadingSlowHint); });
+  expect(view.getByTestId('loading-slow').props.children).toBe('Taking longer than usual');
+  expect(view.getByTestId('loading').props.children).not.toContainEqual(expect.objectContaining({ props: expect.objectContaining({ testID: 'loading-slow-action' }) }));
+  view.unmount();
+  jest.useRealTimers();
 });
 
 it('keeps a readable loading state without motion and never animates errors', () => {

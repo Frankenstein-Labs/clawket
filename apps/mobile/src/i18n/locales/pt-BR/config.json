@@ -195,8 +195,6 @@
   "YouMind Sprite": "YouMind Sprite",
   "123 456": "123 456",
   "ABC 234": "ABC 234",
-  "Relay connected": "Relay conectado",
-  "Waiting for Bridge": "Aguardando o Bridge",
   "Ready": "Pronto",
   "No agent yet?": "Ainda não tem um Agent?",
   "No network": "Sem rede",
@@ -385,5 +383,6 @@
   "Backup history": "Histórico de backups",
   "Pi is not responding": "Pi não está respondendo",
   "Codex is not responding": "Codex não está respondendo",
-  "Claude Code is not responding": "Claude Code não está respondendo"
+  "Claude Code is not responding": "Claude Code não está respondendo",
+  "To connect Codex, Claude Code or Pi, choose your Agent in Add connection and follow its pairing instructions.": "Para conectar Codex, Claude Code ou Pi, escolha seu Agent em Adicionar conexão e siga as instruções de emparelhamento."
 }

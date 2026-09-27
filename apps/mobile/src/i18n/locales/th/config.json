@@ -195,8 +195,6 @@
   "YouMind Sprite": "YouMind Sprite",
   "123 456": "123 456",
   "ABC 234": "ABC 234",
-  "Relay connected": "เชื่อมต่อ Relay แล้ว",
-  "Waiting for Bridge": "กำลังรอ Bridge",
   "Ready": "พร้อม",
   "No agent yet?": "ยังไม่มี Agent ใช่ไหม",
   "No network": "ไม่มีเครือข่าย",
@@ -385,5 +383,6 @@
   "Backup history": "ประวัติการสำรองข้อมูล",
   "Pi is not responding": "Pi ไม่ตอบสนอง",
   "Codex is not responding": "Codex ไม่ตอบสนอง",
-  "Claude Code is not responding": "Claude Code ไม่ตอบสนอง"
+  "Claude Code is not responding": "Claude Code ไม่ตอบสนอง",
+  "To connect Codex, Claude Code or Pi, choose your Agent in Add connection and follow its pairing instructions.": "หากต้องการเชื่อมต่อ Codex, Claude Code หรือ Pi ให้เลือก Agent ในเพิ่มการเชื่อมต่อ แล้วทำตามคำแนะนำในการจับคู่"
 }

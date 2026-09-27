@@ -7,7 +7,7 @@ import {
   type ViewStyle,
   View,
 } from 'react-native';
-import { Lock } from 'lucide-react-native';
+import { Lock, type LucideIcon } from 'lucide-react-native';
 import Animated, {
   cancelAnimation,
   useAnimatedStyle,
@@ -22,13 +22,14 @@ import {
   ControlSize,
   FontSize,
   FontWeight,
+  IconSize,
   LineHeight,
   Motion,
   Radius,
   Space,
 } from '../../theme/tokens';
 import { resolveAgentAvatarImageSource } from '../../utils/agent-avatar-uri';
-import { StatusDot } from './StatusDot';
+import { circleBadgeInset, StatusDot } from './StatusDot';
 
 export type AgentAvatarVariant = 'roster' | 'header' | 'settings' | 'sheet' | 'panel';
 /** `live` marks an Agent on the connection the phone is live on (owner decision 2026-09-26). */
@@ -85,6 +86,11 @@ export type AgentAvatarProps = Readonly<{
   variant?: AgentAvatarVariant;
   status?: AgentAvatarStatus;
   attentionTone?: AgentAttentionTone;
+  /**
+   * Glyph of a conversation badge on the top-right of the circle, for a
+   * conversation that stands in for its Agent (a roster conversation row).
+   */
+  badgeIcon?: LucideIcon;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }>;
@@ -120,6 +126,7 @@ export function AgentAvatar({
   variant = 'roster',
   status = 'idle',
   attentionTone = 'warn',
+  badgeIcon: BadgeIcon,
   style,
   testID,
 }: AgentAvatarProps): React.JSX.Element {
@@ -171,6 +178,16 @@ export function AgentAvatar({
   const liveDotStyle = useAnimatedStyle(() => ({ opacity: liveOpacity.value }));
   const isMuted = status === 'offline' || status === 'locked';
   const statusDotColor = attentionTone === 'bad' ? theme.colors.bad : theme.colors.warn;
+  // The lock badge shares the dots' corner: centred on the circle at 45°.
+  const lockPosition = useMemo(() => {
+    const inset = circleBadgeInset(metrics.size, Space.lg);
+    return { right: inset, bottom: inset };
+  }, [metrics.size]);
+  // The conversation badge mirrors them on the top-right of the circle.
+  const badgePosition = useMemo(() => {
+    const inset = circleBadgeInset(metrics.size, IconSize.md);
+    return { top: inset, right: inset };
+  }, [metrics.size]);
   const resolvedAvatarSource = !emoji ? resolveAgentAvatarImageSource(avatarUrl) : null;
 
   return (
@@ -209,11 +226,32 @@ export function AgentAvatar({
           />
         ) : null}
       </View>
+      {/* A grey disc cut out by a canvas ring: a white disc vanished on the
+          canvas and floated off the box corner (owner feedback 2026-09-27). */}
+      {BadgeIcon ? (
+        <View
+          testID={testID ? `${testID}-overlay` : undefined}
+          pointerEvents="none"
+          style={[
+            styles.badge,
+            badgePosition,
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.canvas },
+          ]}
+        >
+          <BadgeIcon
+            testID={testID ? `${testID}-overlay-icon` : undefined}
+            size={Space.md}
+            color={theme.colors.inkSecondary}
+            strokeWidth={BorderWidth.strong}
+          />
+        </View>
+      ) : null}
       {status === 'attention' ? (
         <StatusDot
           testID={testID ? `${testID}-attention` : undefined}
           color={statusDotColor}
           ringColor={theme.colors.canvas}
+          circle={metrics.size}
         />
       ) : null}
       {status === 'done' ? (
@@ -222,6 +260,7 @@ export function AgentAvatar({
             testID={testID ? `${testID}-done` : undefined}
             color={theme.colors.good}
             ringColor={theme.colors.canvas}
+            circle={metrics.size}
           />
         </Animated.View>
       ) : null}
@@ -231,6 +270,7 @@ export function AgentAvatar({
             testID={testID ? `${testID}-live` : undefined}
             color={theme.colors.good}
             ringColor={theme.colors.canvas}
+            circle={metrics.size}
           />
         </Animated.View>
       ) : null}
@@ -240,6 +280,7 @@ export function AgentAvatar({
           pointerEvents="none"
           style={[
             styles.lockBadge,
+            lockPosition,
             {
               backgroundColor: theme.colors.surfaceFloating,
               borderColor: theme.colors.canvas,
@@ -279,10 +320,17 @@ const styles = StyleSheet.create({
     left: 0,
     overflow: 'visible',
   },
+  badge: {
+    position: 'absolute',
+    width: IconSize.md,
+    height: IconSize.md,
+    borderRadius: Radius.full,
+    borderWidth: BorderWidth.strong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   lockBadge: {
     position: 'absolute',
-    right: -Space.xs,
-    bottom: -Space.xs,
     width: Space.lg,
     height: Space.lg,
     borderRadius: Radius.full,

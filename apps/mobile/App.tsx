@@ -7,11 +7,11 @@ import { IncomingShareCoordinator } from './src/features/sharing/IncomingShareCo
 import 'react-native-get-random-values';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   AppState,
   type AppStateStatus,
   I18nManager,
+  Image,
   Linking,
   Platform,
   Share,
@@ -43,6 +43,7 @@ import { GatewayScannerProvider } from './src/contexts/GatewayScannerContext';
 import { NodeCameraCaptureProvider } from './src/contexts/NodeCameraCaptureContext';
 import { ProPaywallProvider, useProPaywall } from './src/contexts/ProPaywallContext';
 import { GlobalLoadingOverlay } from './src/components/ui';
+import { Companion } from './src/components/ui/Companion';
 import { DeepLinkConfirmationModal } from './src/components/DeepLinkConfirmationModal';
 import { ProPaywallOverlay } from './src/components/pro/ProPaywallOverlay';
 import { loadAgentAvatars } from './src/services/agent-avatar';
@@ -150,7 +151,8 @@ import {
 } from './src/services/app-update-announcement';
 import { ThreadScreen } from './src/screens/Thread';
 import {
-  SessionPanel,
+  SessionPanelHost,
+  type SessionPanelHandle,
   type SessionPanelAction,
   type SessionPanelRow,
 } from './src/screens/SessionPanel';
@@ -215,10 +217,17 @@ type AnnouncementPresentation = Readonly<{
   openedAtMs: number;
 }>;
 
+const LAUNCH_MARK = require('./assets/splash-icon.png');
+// The native splash draws splash-icon.png 200 points wide (app.json, expo-splash-screen `imageWidth`),
+// and the Companion fills 94 × 3.2 of its 1024-pixel canvas (scripts/generate-companion-icons.cjs).
+const SPLASH_IMAGE_WIDTH = 200;
+const SPLASH_COMPANION_WIDTH = (94 * 3.2 / 1024) * SPLASH_IMAGE_WIDTH;
+
+/** Continues the native splash with the same artwork, size and centring instead of a spinner. */
 function LaunchLoading(): React.JSX.Element {
   return (
     <View style={[loadingStyles.loading, { backgroundColor: LOADING_THEME.colors.canvas }]}>
-      <ActivityIndicator size="large" color={LOADING_THEME.colors.accent} />
+      <Image source={LAUNCH_MARK} style={loadingStyles.launchMark} resizeMode="contain" accessibilityIgnoresInvertColors />
       <StatusBar style="auto" />
     </View>
   );
@@ -430,12 +439,12 @@ function AppContent({
   const [pendingChatInput, setPendingChatInput] = useState<string | null>(null);
   const [pendingMainSessionSwitch, setPendingMainSessionSwitch] = useState(false);
   const [pendingAddGateway, setPendingAddGateway] = useState(false);
-  const [sessionPanelVisible, setSessionPanelVisible] = useState(false);
+  const sessionPanelRef = useRef<SessionPanelHandle>(null);
   const [exportTarget, setExportTarget] = useState<SessionPanelRow | null>(null);
   const pendingExport = useRef<SessionPanelRow | null>(null);
   useEffect(() => { pendingExport.current = null; }, [connections.activeAdapter]);
   const manualSessions = useManualSessions();
-  useEffect(() => { setExportTarget(null); }, [connections.activeAdapter, sessionPanelVisible]);
+  useEffect(() => { setExportTarget(null); }, [connections.activeAdapter]);
   const [threadContext, setThreadContext] = useState<RootStackParamList['Thread'] | null>(null);
   const [pinnedSessionKeys, setPinnedSessionKeys] = useState<Readonly<
     Record<string, ReadonlyArray<string>>
@@ -562,14 +571,12 @@ function AppContent({
     rootNavigationRef,
     activeBackend: activeConnection?.backendKind,
   });
-  const manualScreenVisibilityRef = useRef({ sessionPanel: false, paywall: false });
+  const manualScreenVisibilityRef = useRef({ paywall: false });
 
-  useEffect(() => {
-    if (sessionPanelVisible && !manualScreenVisibilityRef.current.sessionPanel) {
-      trackManualScreen('SessionPanel');
-    }
-    manualScreenVisibilityRef.current.sessionPanel = sessionPanelVisible;
-  }, [sessionPanelVisible, trackManualScreen]);
+  const handleSessionPanelVisibilityChange = useCallback((visible: boolean) => {
+    setExportTarget(null);
+    if (visible) trackManualScreen('SessionPanel');
+  }, [trackManualScreen]);
 
   useEffect(() => {
     if (paywallVisible && !manualScreenVisibilityRef.current.paywall) {
@@ -1332,7 +1339,7 @@ function AppContent({
         return;
       }
       pendingExport.current = row;
-      setSessionPanelVisible(false);
+      sessionPanelRef.current?.close();
       return;
     }
     if (action === 'pin') {
@@ -1362,7 +1369,7 @@ function AppContent({
       const agent = getConnectionRuntime().getSnapshot().roster.find(group => group.connection.id === row.connectionId)
         ?.agents.find(item => item.agent.agentId === row.agentId)?.agent;
       if (agent?.entryMode === 'sessions' && params?.connectionId === row.connectionId && params.sessionKey === row.key) {
-        setSessionPanelVisible(false);
+        sessionPanelRef.current?.close();
         rootNavigationRef.dispatch(StackActions.replace('Thread', { ...params, sessionKey: '' }));
       }
     }
@@ -1502,7 +1509,7 @@ function AppContent({
   if (!connections.initialized) {
     return (
       <View style={[loadingStyles.loading, { backgroundColor: theme.colors.canvas }]}>
-        <ActivityIndicator size="large" color={theme.colors.accent} />
+        <Companion size={SPLASH_COMPANION_WIDTH} />
         <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
       </View>
     );
@@ -1753,14 +1760,12 @@ function AppContent({
                               ? 'agents'
                               : 'gatewayConnections',
                             () => {
-                              setThreadContext(props.route.params);
-                              setSessionPanelVisible(true);
+                              sessionPanelRef.current?.open(props.route.params);
                             },
                           );
                           return;
                         }
-                        setThreadContext(props.route.params);
-                        setSessionPanelVisible(true);
+                        sessionPanelRef.current?.open(props.route.params);
                       }}
                       onOpenRunSession={(sessionKey, agentId) => {
                         const targetAgentId = agentId ?? props.route.params.agentId;
@@ -2059,15 +2064,15 @@ function AppContent({
                 onContinue={() => closeAnnouncement('continue')}
                 onEntryPress={handleAnnouncementEntryPress}
               />
-              <SessionPanel
-                visible={sessionPanelVisible}
+              <SessionPanelHost
+                ref={sessionPanelRef}
+                onVisibilityChange={handleSessionPanelVisibilityChange}
                 pinnedSessionKeys={pinnedSessionKeys}
                 currentAgentId={threadContext?.agentId ?? currentAgentId}
                 currentSessionKey={threadContext?.sessionKey ?? mainSessionKey}
                 permissionDenied={threadContext
                   ? !canAccessRosterAgent(threadContext.connectionId, threadContext.agentId)
                   : false}
-                onClose={() => setSessionPanelVisible(false)}
                 onSelectSession={(row) => {
                   if (!canAccessRosterAgent(row.connectionId, row.agentId)) {
                     presentPaywall(
@@ -2104,7 +2109,7 @@ function AppContent({
                     if (getConnectionRuntime().getSnapshot().activeAdapter !== adapter || !rootNavigationRef.isReady()) return;
                     const params: RootStackParamList['Thread'] = { connectionId: agent.connectionId, agentId: agent.agentId, sessionKey: session.key, from: 'panel' };
                     setThreadContext(params); setCurrentAgentId(agent.agentId);
-                    setSessionPanelVisible(false); rootNavigationRef.navigate('Thread', params);
+                    sessionPanelRef.current?.close(); rootNavigationRef.navigate('Thread', params);
                   };
                   if (!canAccessRosterAgent(agent.connectionId, agent.agentId)) {
                     presentPaywall(canAccessConnection(agent.connectionId) ? 'agents' : 'gatewayConnections', create);
@@ -2250,5 +2255,9 @@ const loadingStyles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
     justifyContent: 'center',
+  },
+  launchMark: {
+    width: SPLASH_IMAGE_WIDTH,
+    height: SPLASH_IMAGE_WIDTH,
   },
 });

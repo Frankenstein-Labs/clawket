@@ -300,7 +300,9 @@ export function buildAgentModelGroups(bundle: ModelsBundle | null, query = ''): 
       provider,
       explicit: false,
       rows: rows.sort((left, right) => (
-        Number(right.current) - Number(left.current) || left.name.localeCompare(right.name)
+        Number(right.current) - Number(left.current)
+        || (left.model.sortOrder ?? Number.MAX_SAFE_INTEGER) - (right.model.sortOrder ?? Number.MAX_SAFE_INTEGER)
+        || left.name.localeCompare(right.name)
       )),
     }));
 }
@@ -327,6 +329,7 @@ export function buildModelSelectionWrite(
       sessionKey: null,
     };
   }
+  if (!agent.mainSessionKey) throw new Error('Choose a conversation before changing its model');
   return {
     model: row.id,
     ...(row.provider ? { provider: row.provider } : {}),

@@ -27,3 +27,11 @@ it('uses only a matching backend identity to replace uncertainty', () => {
   const unrelated = { ...echo, idempotencyKey: 'other' };
   expect(recoverUncertainSends([unrelated], [message])).toHaveLength(2);
 });
+
+it('does not accept a reprojected uncertain cache row as a backend acknowledgement', () => {
+  const cached = { ...message, id: 'h_user_cached', sendUncertain: true };
+  const recovered = recoverUncertainSends([cached], [message]);
+  expect(recovered).toEqual([{ ...message, sendUncertain: true }]);
+  const confirmed = { ...message, id: 'canonical-native' };
+  expect(recoverUncertainSends([cached, confirmed], [message])).toEqual([confirmed]);
+});

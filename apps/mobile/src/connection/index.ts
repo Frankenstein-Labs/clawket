@@ -169,6 +169,7 @@ type ActiveAdapterEntry = {
   attempt: number;
   connectStartedAt: number;
   lastState: ConnectionState;
+  stateRevision: number;
   rosterRefreshTimer: ReturnType<typeof setInterval> | null;
   hermesProbeTimer: ReturnType<typeof setInterval> | null;
   rosterRefreshInFlight: Promise<void> | null;
@@ -635,8 +636,15 @@ export class ConnectionCoordinator {
     timeoutMs?: number,
     reconnectReason: Extract<ReconnectReason, 'probe_failed' | 'foreground'> = 'probe_failed',
   ): Promise<boolean> {
+    const stateRevision = entry.stateRevision;
+    const phaseChanged = () => this.active !== entry || entry.stateRevision !== stateRevision;
+    let probeCompleted = false;
     try {
       const healthy = await entry.adapter.probe(timeoutMs);
+      // Adapter-owned recovery may finish before an older probe settles. Its
+      // result cannot tear down the successor or mark its handshake healthy.
+      if (phaseChanged()) return this.active === entry && entry.adapter.state === 'ready';
+      probeCompleted = true;
       if (!healthy && this.active === entry) {
         this.telemetry.reconnect(entry.adapter.connection, reconnectReason);
         this.recovery.begin();
@@ -656,6 +664,12 @@ export class ConnectionCoordinator {
       }
       return healthy;
     } catch (error) {
+      // Our own disconnect/reconnect necessarily changes phase. Keep its real
+      // failure, but still discard a retired probe or an error after recovery.
+      if (this.active !== entry || (!probeCompleted && phaseChanged())
+        || (probeCompleted && entry.adapter.state === 'ready')) {
+        return this.active === entry && entry.adapter.state === 'ready';
+      }
       if (this.active === entry) {
         this.recovery.begin();
         if (requiresConnectionAction(String(error))) this.recovery.fail();
@@ -776,6 +790,7 @@ export class ConnectionCoordinator {
       rosterRefreshInFlight: null,
       readyRefresh: null,
       readyRevision: 0,
+      stateRevision: 0,
       hasReportedReady: false,
       probeInFlight: null,
       probeReconnectReason: null,
@@ -788,6 +803,7 @@ export class ConnectionCoordinator {
     entry.unsubscribers.push(
       adapter.on('state', (state, reason) => {
         if (this.active !== entry) return;
+        if (state !== entry.lastState) entry.stateRevision += 1;
         if (state === 'reconnecting' && entry.lastState !== 'reconnecting') {
           const stateReason = reconnectReasonFromAdapterState(reason);
           this.telemetry.reconnect(
@@ -817,6 +833,9 @@ export class ConnectionCoordinator {
       }),
       adapter.on('update', (update) => {
         if (this.active !== entry) return;
+        if (update.type === 'session_info_update') {
+          this.acceptSessionPatch(entry, update.session);
+        }
         const next = updateRunActivities(this.runActivities, entry.connectionId, update);
         if (next === this.runActivities) return;
         this.runActivities = next;
@@ -846,7 +865,9 @@ export class ConnectionCoordinator {
         connectionFailureStage(entry.lastState),
         entry.attempt,
       );
-      if (requiresConnectionAction(String(error))) this.recovery.fail();
+      // A rejected connect attempt is a known failure. Socket retries are not
+      // evidence of recovery; keep the failure visible until authenticated ready.
+      this.recovery.fail();
       this.error = failure('connect', error, connectionId);
       this.publish({ switching: false });
     }
@@ -937,8 +958,9 @@ export class ConnectionCoordinator {
   }
 
   private async performActiveRosterRefresh(entry: ActiveAdapterEntry): Promise<void> {
+    if (this.active !== entry || entry.adapter.state !== 'ready') return;
+    const readyRevision = entry.readyRevision;
     try {
-      const readyRevision = entry.readyRevision;
       const sessionSnapshotRevision = entry.sessionSnapshotRevision;
       const [agents, sessions, watermarks] = await Promise.all([
         entry.adapter.listAgents(),
@@ -989,10 +1011,38 @@ export class ConnectionCoordinator {
       });
       this.publish();
     } catch (error) {
-      if (this.active !== entry) return;
-      this.error = failure('roster', error, entry.connectionId);
-      this.publish();
+      if (this.active !== entry || entry.adapter.state !== 'ready'
+        || entry.readyRevision !== readyRevision) return;
+      // A timed-out list is often the first sign of a half-open socket. Use
+      // the coalesced health path before surfacing a list error or waiting for
+      // the much longer heartbeat watchdog. Queue it after this maintenance
+      // operation: awaiting probeEntry here would wait on our own tail.
+      void this.probeEntry(entry, 5_000, 'probe_failed', readyRevision).then((healthy) => {
+        if (!healthy || this.active !== entry || entry.adapter.state !== 'ready'
+          || entry.readyRevision !== readyRevision) return;
+        this.error = failure('roster', error, entry.connectionId);
+        this.publish();
+      });
     }
+  }
+
+  private acceptSessionPatch(
+    entry: ActiveAdapterEntry,
+    patch: Partial<SessionDescriptor> & Pick<SessionDescriptor, 'key'>,
+  ): void {
+    if (patch.connectionId && patch.connectionId !== entry.connectionId) return;
+    const sessions = this.rosterInputs.get(entry.connectionId)?.sessions ?? [];
+    const previous = sessions.find(session => session.key === patch.key);
+    const merged = { ...previous, ...patch, connectionId: entry.connectionId };
+    if (patch.canContinue === true) delete merged.continuationBlockedReason;
+    // Partial updates cannot invent a conversation or its permitted actions.
+    if (!merged.agentId || !merged.kind || typeof merged.title !== 'string'
+      || merged.updatedAt === undefined || typeof merged.hasActiveRun !== 'boolean'
+      || !merged.allowedActions) return;
+    const session = merged as SessionDescriptor;
+    this.acceptSessionSnapshot(entry, previous
+      ? sessions.map(candidate => candidate.key === session.key ? session : candidate)
+      : [...sessions, session]);
   }
 
   private acceptSessionSnapshot(
@@ -1075,10 +1125,13 @@ export class ConnectionCoordinator {
     entry: ActiveAdapterEntry,
     timeoutMs?: number,
     reconnectReason: Extract<ReconnectReason, 'probe_failed' | 'foreground'> = 'probe_failed',
+    onlyIfReadyRevision?: number,
   ): Promise<boolean> {
     if (entry.probeInFlight) return entry.probeInFlight;
     const operation = entry.maintenanceTail.then(async () => {
       if (!this.started || this.active !== entry) return false;
+      if (onlyIfReadyRevision !== undefined && (entry.adapter.state !== 'ready'
+        || entry.readyRevision !== onlyIfReadyRevision)) return false;
       entry.probeReconnectReason = reconnectReason;
       try {
         return await this.performActiveProbe(entry, timeoutMs, reconnectReason);

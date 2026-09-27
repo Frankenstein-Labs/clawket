@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 const mock = vi.hoisted(() => ({ instances: [] as any[], request: vi.fn(), respond: vi.fn(), refuse: vi.fn() }));
 vi.mock('./rpc.js', async () => {
@@ -14,6 +14,7 @@ vi.mock('./rpc.js', async () => {
 });
 import { CodexService } from './service.js';
 import { codexMessages } from './history.js';
+import { DesktopIpcError } from './desktop-ipc.js';
 let root: string, project: string, service: CodexService, key: string, threadId: string;
 let updates: any[];
 const request = (method: string, params: Record<string, unknown> = {}) => service.request({ type: 'req', id: randomUUID(), method, params }) as Promise<any>;
@@ -121,9 +122,11 @@ describe('native approvals', () => {
   }
   it('retains consent over disconnection, rejects broad consent and sends one native answer', async () => {
     const a = await approval(); expect(a).toMatchObject({ expiresAtMs: null, decisions: ['allow-once', 'deny'] });
+    expect((await request('sessions.list')).find((row: any) => row.key === key).attention).toBe('approval');
     await expect(request('approvals.resolve', { id: a.id, decision: 'allow-always' })).rejects.toThrow();
     await request('approvals.resolve', { id: a.id, decision: 'allow-once' });
     expect(mock.respond).toHaveBeenCalledWith(51, { decision: 'accept' });
+    expect((await request('sessions.list')).find((row: any) => row.key === key).attention).toBeNull();
     await expect(request('approvals.resolve', { id: a.id, decision: 'allow-once' })).rejects.toThrow('no longer');
   });
   it('retains an approval when dispatch fails', async () => {
@@ -295,7 +298,7 @@ describe('device project discovery and desktop routing', () => {
       if (method === 'turn/start') return { turn: { id: 'new-turn' } }; return {};
     });
     const projects = await request('projects.list'); expect(projects).toHaveLength(2);
-    const p = projects.find((p: any) => p.path.endsWith('/second'));
+    const p = projects.find((p: any) => basename(p.path) === 'second');
     const created = await request('sessions.create', { projectId: p.id });
     await request('chat.send', { sessionKey: created.key, text: 'hello', idempotencyKey: 'project-send' });
     expect(mock.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ cwd: p.path }));
@@ -338,6 +341,48 @@ describe('device project discovery and desktop routing', () => {
     await request('chat.send', { sessionKey: `native:${threadId}`, text: 'Continue', idempotencyKey: 'native-send' });
     expect(desktop.request).toHaveBeenCalledTimes(1);
   });
+  it('keeps a released native thread locally owned for subsequent mobile and follower turns', async () => {
+    const desktop = await device();
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list' ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); key = `native:${threadId}`;
+    desktop.request.mockRejectedValueOnce(new DesktopIpcError('no-owner', 'No owner'));
+    await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'resume-once' });
+    await new Promise(r => setTimeout(r, 0));
+    expect(mock.request.mock.calls.filter(c => c[0] === 'thread/resume')).toHaveLength(1);
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    await request('models.thinking', { sessionKey: key, level: 'ultra' });
+    expect(mock.request).toHaveBeenCalledWith('thread/settings/update', { threadId, effort: 'ultra' });
+    await request('chat.send', { sessionKey: key, text: 'Again', idempotencyKey: 'local-next', thinkingLevel: 'ultra' });
+    await new Promise(r => setTimeout(r, 0));
+    expect((desktop as any).handler.accepts('thread-owner-discovery', { conversationId: threadId })).toBe(true);
+    expect(desktop.request).toHaveBeenCalledTimes(1);
+    expect(mock.request).toHaveBeenLastCalledWith('turn/start', expect.objectContaining({ model: 'native-model', effort: 'ultra' }));
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    await (desktop as any).handler.request('thread-follower-start-turn', { conversationId: threadId, turnStart: { request: { threadId, input: [{ type: 'text', text: 'Follower' }], clientUserMessageId: 'follower-next' } } });
+    expect(desktop.request).toHaveBeenCalledTimes(1);
+    expect(mock.request.mock.calls.filter(c => c[0] === 'turn/start')).toHaveLength(3);
+    expect((await request('sessions.list'))[0]).toMatchObject({ source: 'native', allowedActions: { rename: false, delete: false } });
+  });
+  it.each(['released', 'active', 'unknown'])('changes native settings only after proven released ownership: %s', async (state) => {
+    const desktop = await device();
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/list') return Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1, model: 'native-model', modelProvider: 'custom' }] });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: [{ status: state === 'active' ? 'inProgress' : 'completed', items: [] }] });
+      return original(method, params);
+    });
+    await request('sessions.list');
+    desktop.request.mockRejectedValueOnce(new DesktopIpcError(state === 'unknown' ? 'uncertain' : 'no-owner', 'Not delivered'));
+    const change = request('models.select', { sessionKey: `native:${threadId}`, scope: 'session', provider: 'custom', model: 'native-model' });
+    if (state === 'released') {
+      await change;
+      expect(mock.request).toHaveBeenCalledWith('thread/settings/update', expect.objectContaining({ threadId, model: 'native-model' }));
+    } else {
+      await expect(change).rejects.toThrow();
+      expect(mock.request.mock.calls.filter(c => ['thread/resume', 'thread/settings/update'].includes(c[0]))).toEqual([]);
+    }
+  });
 });
 
 it('does not create a default chat on connect, catalog reads, deletion or restart', async () => {
@@ -364,4 +409,29 @@ it('keeps a former first conversation and its history as an ordinary deletable c
   await request('sessions.delete', { sessionKey: key });
   expect(mock.request).toHaveBeenCalledWith('thread/archive', { threadId });
   expect(await request('sessions.list')).toEqual([]);
+});
+
+
+it('reads skills from the selected conversation project and rejects unknown scopes', async () => {
+  const otherPath = join(root, 'other-project'); mkdirSync(otherPath); const other = realpathSync(otherPath);
+  await service.stop();
+  service = new CodexService({ project, directory: join(root, 'device-skills'), device: true });
+  const nativeId = randomUUID();
+  const original = mock.request.getMockImplementation()!;
+  mock.request.mockImplementation(async (method: string, params: any) => {
+    if (method === 'thread/list') return { data: [{ id: nativeId, cwd: other, createdAt: 1, updatedAt: 1 }] };
+    if (method === 'skills/list') return { data: [
+      { cwd: other, skills: [{ name: 'project-only', enabled: true }] },
+      { cwd: project, skills: [{ name: 'wrong-project', enabled: true }] },
+    ] };
+    return original(method, params);
+  });
+  await request('sessions.list');
+  const report = await request('skills.list', { sessionKey: `native:${nativeId}` });
+  expect(mock.request).toHaveBeenCalledWith('skills/list', { cwds: [other] });
+  expect(report.skills.map((skill: any) => skill.name)).toEqual(['project-only']);
+  expect(report.workspaceDir).toBe('other-project');
+  await expect(request('skills.list', { sessionKey: 'unknown' })).rejects.toThrow('Session unavailable');
+  await request('skills.list');
+  expect(mock.request).toHaveBeenLastCalledWith('skills/list', { cwds: [project] });
 });

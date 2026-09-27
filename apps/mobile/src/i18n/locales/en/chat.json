@@ -386,5 +386,12 @@
   "Allow this action?": "Allow this action?",
   "Stop task": "Stop task",
   "Your answer": "Your answer",
-  "Question {{current}} of {{total}}": "Question {{current}} of {{total}}"
+  "Question {{current}} of {{total}}": "Question {{current}} of {{total}}",
+  "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.": "Imported conversations are read-only. Continue with their context in a new session; the original stays unchanged.",
+  "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.": "This conversation is open on your computer. Close that conversation, then check again, or continue in a new session.",
+  "Could not verify whether this conversation is in use. Check again, or continue in a new session.": "Could not verify whether this conversation is in use. Check again, or continue in a new session.",
+  "This conversation’s project folder is unavailable on your computer.": "This conversation’s project folder is unavailable on your computer.",
+  "Check again": "Check again",
+  "Not sent · tap to review": "Not sent · tap to review",
+  "This model does not accept images. Choose another model or remove the photo.": "This model does not accept images. Choose another model or remove the photo."
 }

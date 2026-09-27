@@ -1,9 +1,11 @@
-import React, { useEffect, useRef } from 'react';
-import { ActivityIndicator, Animated, Modal, Platform, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Modal, Platform, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { FullWindowOverlay } from 'react-native-screens';
 import { useAppTheme } from '../../theme';
 import { FontSize, FontWeight, Radius, Space, createSurfaceStyle } from '../../theme/tokens';
+import { CompanionScene } from './companion/CompanionScene';
+import { drawLoadingScene } from './LoadingState';
 
 type Props = {
   visible: boolean;
@@ -12,10 +14,15 @@ type Props = {
 
 export function GlobalLoadingOverlay({ visible, message }: Props): React.JSX.Element | null {
   const { t } = useTranslation('common');
-  const displayMessage = message ?? t('Switching Gateway...');
+  const displayMessage = message ?? t('Connecting');
 
   const { theme } = useAppTheme();
   const opacity = useRef(new Animated.Value(0)).current;
+  // Each appearance draws a fresh compact scene.
+  const [scene, setScene] = useState(() => drawLoadingScene('compact'));
+  useEffect(() => {
+    if (visible) setScene(drawLoadingScene('compact'));
+  }, [visible]);
 
   useEffect(() => {
     Animated.timing(opacity, {
@@ -29,8 +36,14 @@ export function GlobalLoadingOverlay({ visible, message }: Props): React.JSX.Ele
 
   const content = (
     <Animated.View style={[styles.overlay, { opacity, backgroundColor: theme.colors.scrim }]} pointerEvents="auto">
-      <View style={[styles.card, createSurfaceStyle(theme.colors, theme.scheme, 'overlay')]}>
-        <ActivityIndicator size="small" color={theme.colors.accent} />
+      <View
+        style={[styles.card, createSurfaceStyle(theme.colors, theme.scheme, 'overlay')]}
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel={displayMessage}
+        accessibilityState={{ busy: true }}
+      >
+        <CompanionScene scene={scene} phase="wait" compact />
         <Text style={[styles.label, { color: theme.colors.ink }]}>{displayMessage}</Text>
       </View>
     </Animated.View>
@@ -56,11 +69,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
     paddingHorizontal: Space.xl,
-    paddingVertical: Space.lg,
+    paddingVertical: Space.xl,
     borderRadius: Radius.card,
   },
   label: {

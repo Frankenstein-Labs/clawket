@@ -34,6 +34,11 @@ export type ModelProviderSheetProps = Readonly<{
 export function formatProviderTitle(slug: string, fallback: string): string {
   const trimmed = slug.trim();
   if (!trimmed) return fallback;
+  const known: Readonly<Record<string, string>> = {
+    openai: 'OpenAI', deepseek: 'DeepSeek', xai: 'xAI', openrouter: 'OpenRouter',
+    minimax: 'MiniMax', zai: 'Z.ai', 'z-ai': 'Z.ai', anthropic: 'Anthropic',
+  };
+  if (known[trimmed.toLowerCase()]) return known[trimmed.toLowerCase()];
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 

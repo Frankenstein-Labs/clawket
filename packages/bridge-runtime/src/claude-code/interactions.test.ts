@@ -45,6 +45,21 @@ describe('Claude pending interactions', () => {
     expect(await pending).toEqual({ behavior: 'allow', updatedInput: { plan: 'Review a file.' }, toolUseID: 'native-call' });
   });
 
+  it('shows the actual file target and contents without changing native approval input', async () => {
+    const { interactions, options } = setup();
+    const input = { file_path: '/project/nested/note.txt', content: 'hello\nworld' };
+    const pending = interactions.canUseTool('Write', input, options);
+    const approval = interactions.approvals()[0];
+    expect(approval).toMatchObject({ category: 'file', command: 'note.txt\n/project/nested/note.txt\n\nhello\nworld' });
+    interactions.approve(approval.id, 'allow-once');
+    expect(await pending).toMatchObject({ behavior: 'allow', updatedInput: input });
+    const edit = { file_path: input.file_path, old_string: 'hello', new_string: 'goodbye', replace_all: true };
+    const edited = interactions.canUseTool('Edit', edit, options);
+    expect(interactions.approvals()[0]).toMatchObject({ command: 'note.txt\n/project/nested/note.txt\n\n- hello\n+ goodbye\n(replace all matches)' });
+    interactions.approve(interactions.approvals()[0].id, 'allow-once');
+    expect(await edited).toMatchObject({ updatedInput: edit });
+  });
+
   it('refuses malformed/ambiguous questions and closes outstanding permissions', async () => {
     const { interactions, options } = setup();
     const ambiguous = { questions: [input.questions[0], input.questions[0]] };

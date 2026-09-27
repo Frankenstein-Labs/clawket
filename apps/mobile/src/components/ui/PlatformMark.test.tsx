@@ -47,6 +47,25 @@ describe('PlatformMark', () => {
     }
   });
 
+  it('keeps the default image boxes and balances the brands for the 44-point chooser slot', () => {
+    const widthOf = (element: React.ReactElement) => {
+      const view = render(element);
+      const style = Object.assign({}, ...(view.UNSAFE_getByType('Image' as never).props.style as object[]).filter(Boolean)) as { width: number };
+      view.unmount();
+      return style.width;
+    };
+    // Default boxes (Connection page symbol): app artwork 52, bare marks 40.
+    for (const platform of ['hermes', 'codex'] as const) expect(widthOf(<PlatformMark platform={platform} />)).toBe(ControlSize.settingsRow);
+    for (const platform of ['openclaw', 'claude-code', 'pi'] as const) expect(widthOf(<PlatformMark platform={platform} />)).toBe(ControlSize.pill);
+    // Balanced (owner request 2026-09-27): tiles drawn below bare glyphs, Pi's wide safe area compensated.
+    const balanced = { openclaw: 36, 'claude-code': 39, hermes: 46, codex: 45, pi: 50, youmind: 36 } as const;
+    for (const [platform, width] of Object.entries(balanced)) {
+      expect(widthOf(<PlatformMark platform={platform as keyof typeof balanced} balanced />)).toBe(width);
+    }
+    const local = render(<PlatformMark platform="local-model" balanced />);
+    expect(local.getByTestId('platform-mark-local-model').props).toMatchObject({ width: 41, height: 41 });
+  });
+
   it('uses the bare Claude spark, not the circular-backed model-picker artwork', () => {
     const view = render(<PlatformMark platform="claude-code" />);
     // jest.setup maps assets/brands/claude-code.png to 309 and the model-picker Claude PNG to 402.

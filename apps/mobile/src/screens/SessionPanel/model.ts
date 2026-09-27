@@ -278,11 +278,17 @@ export function resolveSessionPanelPageState(input: Readonly<{
   rowCount: number;
   activeState: string;
   hasError: boolean;
+  /** The connection has not delivered a live session list yet (first connect without a cache). */
+  awaitingSessions?: boolean;
 }>): SessionPanelPageState {
   if (!input.initialized) return 'loading';
   if (!input.hasPermission) return 'permission';
   if (input.activeState === 'offline' || input.activeState === 'reconnecting') return 'offline';
   if (input.hasError) return 'error';
-  if (input.rowCount === 0) return 'empty';
+  if (input.rowCount === 0) {
+    // Never claim "no sessions" while the first list is still on its way.
+    const opening = input.activeState === 'connecting' || input.activeState === 'handshaking' || input.activeState === 'ready';
+    return input.awaitingSessions && opening ? 'loading' : 'empty';
+  }
   return 'ready';
 }

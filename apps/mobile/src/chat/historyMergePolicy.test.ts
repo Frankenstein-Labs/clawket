@@ -55,6 +55,27 @@ describe('prependOlderCachedMessages', () => {
 });
 
 describe('preserveOptimisticAssistantMessage', () => {
+  it('does not move the previous final reply past a newer user while recovering timestamp-free history', () => {
+    const old: UiMessage = { id: 'final_old', role: 'assistant', text: 'Old answer', timestampMs: 1000, historyMessageId: 'old-native' };
+    const user: UiMessage = { id: 'usr_2000', role: 'user', text: 'New question', timestampMs: 2000, idempotencyKey: 'send-2' };
+    const next: UiMessage[] = [
+      { ...old, id: 'h_old', timestampMs: undefined },
+      { ...user, id: 'h_user' },
+      { id: 'h_new', role: 'assistant', text: 'New answer', historyMessageId: 'new-native' },
+    ];
+    expect(preserveOptimisticAssistantMessage([old, user], next)).toEqual(next);
+  });
+
+  it('does not duplicate a confirmed prior native reply when history contains a remotely started next turn', () => {
+    const old: UiMessage = { id: 'final_old', role: 'assistant', text: 'Old answer', timestampMs: 1000, historyMessageId: 'old-native' };
+    const next: UiMessage[] = [
+      { ...old, id: 'h_old', timestampMs: undefined },
+      { id: 'h_user', role: 'user', text: 'Another device asks' },
+      { id: 'h_new', role: 'assistant', text: 'New answer', historyMessageId: 'new-native' },
+    ];
+    expect(preserveOptimisticAssistantMessage([old], next)).toEqual(next);
+  });
+
   it('preserves a local optimistic user message when refreshed history is still stale', () => {
     const previousMessages: UiMessage[] = [
       { id: 'u1', role: 'user', text: 'Older question', timestampMs: 1_000 },
@@ -447,4 +468,17 @@ describe('confirmed tool aliases', () => {
     expect(retireAliasedTools([stale], [{ ...canonical, toolName: 'terminal' }], { native: 'live' })).toEqual([stale]);
     expect(retireAliasedTools([{ ...stale, role: 'user' }], [canonical], { native: 'live' })).toHaveLength(1);
   });
+});
+
+
+it('keeps a local extension command before its newer canonical result notices', () => {
+  const command: UiMessage = { id: 'usr_123', role: 'user', text: '/choose', timestampMs: 120_000 };
+  const before: UiMessage = { id: 'ast-before', role: 'assistant', text: 'Earlier', timestampMs: 110_000 };
+  const notice: UiMessage = { id: 'notice', historyMessageId: 'native-notice', role: 'system', text: 'Selected Blue', timestampMs: 130_000 };
+  expect(preserveOptimisticAssistantMessage([before, command], [before, notice]).map(row => row.id))
+    .toEqual(['ast-before', 'usr_123', 'notice']);
+  for (const unknown of [{ ...notice, timestampMs: undefined }, { ...notice, timestampMs: 100_000 }, { ...notice, historyMessageId: undefined }]) {
+    expect(preserveOptimisticAssistantMessage([before, command], [before, unknown]).map(row => row.id))
+      .toEqual(['ast-before', 'notice', 'usr_123']);
+  }
 });

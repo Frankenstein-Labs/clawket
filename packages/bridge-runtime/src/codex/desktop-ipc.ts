@@ -11,6 +11,9 @@ const versions: Record<string, number> = {
   'thread-follower-interrupt-turn': 4, 'thread-archived': 2,
 };
 const LIMIT = 8 * 1024 * 1024;
+// Native routing can spend 10s discovering an owner, then 10s awaiting its
+// response. Expiring at the discovery boundary loses explicit no-owner proof.
+const REQUEST_TIMEOUT_MS = 25_000;
 export class DesktopIpcError extends Error {
   constructor(readonly outcome: 'no-owner' | 'uncertain' | 'rejected', message: string) { super(message); }
 }
@@ -114,7 +117,7 @@ export class DesktopIpc extends EventEmitter {
     if (this.pending.size >= 32) return Promise.reject(new Error('Too many desktop requests'));
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(requestId); reject(new DesktopIpcError('uncertain', 'Desktop has not confirmed this operation. Do not send it again automatically.')); }, 10000);
+      const timer = setTimeout(() => { this.pending.delete(requestId); reject(new DesktopIpcError('uncertain', 'Desktop has not confirmed this operation. Do not send it again automatically.')); }, REQUEST_TIMEOUT_MS);
       this.pending.set(requestId, { resolve, reject, timer });
       try { this.write({ type: 'request', requestId, sourceClientId: initializing ? 'initializing-client' : this.clientId, version: versions[method] ?? 1, method, params }); }
       catch (error) { clearTimeout(timer); this.pending.delete(requestId); reject(error); }
@@ -137,7 +140,14 @@ export class DesktopIpc extends EventEmitter {
     if (frame.type === 'response') {
       const p = this.pending.get(frame.requestId); if (!p) return;
       this.pending.delete(frame.requestId); clearTimeout(p.timer);
-      if (frame.resultType === 'error') p.reject(new DesktopIpcError(/^no-client-found(?:\b|:)/.test(String(frame.error)) ? 'no-owner' : 'rejected', 'Codex Desktop could not handle this operation.'));
+      if (frame.resultType === 'error') {
+        const error = String(frame.error);
+        const outcome = /^no-client-found(?:\b|:)/.test(error) ? 'no-owner'
+          : ['request-version-mismatch', 'no-handler-for-request'].includes(error) ? 'rejected' : 'uncertain';
+        p.reject(new DesktopIpcError(outcome, outcome === 'uncertain'
+          ? 'Codex has not confirmed this operation. Check the conversation before trying again.'
+          : 'Codex Desktop could not handle this operation.'));
+      }
       else if (frame.resultType === 'success') p.resolve(frame.result);
       else p.reject(new DesktopIpcError('uncertain', 'Unsupported desktop response'));
       return;

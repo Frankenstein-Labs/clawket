@@ -410,6 +410,14 @@ export function AgentSettingsView({
       status="reconnecting"
       message={t('Reconnecting…', { ns: 'common' })}
     />
+  ) : state === 'offline' && (connectionState === 'connecting' || connectionState === 'handshaking') ? (
+    // Opening is a wait, not an outage: quiet and actionless, like the recovery window.
+    <ConnectionStatusPill
+      testID="agent-settings-connecting"
+      placement="inline"
+      status="reconnecting"
+      message={t('Connecting', { ns: 'common' })}
+    />
   ) : state === 'offline' ? (
     <ConnectionStatusPill
       testID="agent-settings-offline"

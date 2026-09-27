@@ -102,6 +102,8 @@ export interface SessionDescriptor {
   project?: ProjectDescriptor;
   /** Exact native continuation is available; absent preserves legacy read-only semantics. */
   canContinue?: boolean;
+  /** Why original-session input is unavailable; not permission to fork or take over. */
+  continuationBlockedReason?: 'in_use' | 'ownership_unknown' | 'project_unavailable';
   connectionId: string;
   agentId: string;
   key: string;
@@ -123,7 +125,7 @@ export interface SessionDescriptor {
   modelProvider?: string;
   sessionId?: string;
   hasActiveRun: boolean;
-  attention?: 'approval' | 'error' | 'cron_failed' | null;
+  attention?: 'input' | 'approval' | 'error' | 'cron_failed' | null;
   parentSessionKey?: string;
   source?: 'bridge' | 'native';
   allowedActions: SessionActions;

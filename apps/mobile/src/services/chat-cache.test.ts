@@ -1120,7 +1120,7 @@ it('round-trips participant identity and local-send evidence in connection-scope
   const scope = { gatewayConfigId: 'participants-a', agentId: 'main', sessionKey: 'agent:main:slack:channel:room' };
   const incoming = makeMsg({ id: 'incoming', attribution: { channel: 'slack', accountId: 'workspace',
     sender: { id: 'user-a', name: 'Alice', avatarUrl: 'https://cdn.example.com/alice.png' } } });
-  const own = makeMsg({ id: 'own', sentLocally: true, idempotencyKey: 'local-send' });
+  const own = makeMsg({ id: 'usr_100', sentLocally: true, sendUncertain: true, idempotencyKey: 'local-send' });
   await ChatCacheService.saveMessages(scope, [incoming, own]);
   const restored = await ChatCacheService.getMessages(scope.gatewayConfigId, scope.agentId, scope.sessionKey);
   expect(restored[0].attribution).toMatchObject(incoming.attribution!);
@@ -1128,5 +1128,6 @@ it('round-trips participant identity and local-send evidence in connection-scope
   const mapped = await DEFAULT_GATEWAY_HISTORY_CACHE.load(scope.gatewayConfigId, scope.agentId, scope.sessionKey, 50);
   expect(mapped[0].attribution).toMatchObject(incoming.attribution!);
   expect(mapped[1].sentLocally).toBe(true);
+  expect(mapped[1]).toMatchObject({ cacheRowId: 'usr_100', sendUncertain: true });
   expect(await ChatCacheService.getMessages('participants-b', scope.agentId, scope.sessionKey)).toEqual([]);
 });

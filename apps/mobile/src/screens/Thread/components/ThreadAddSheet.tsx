@@ -363,6 +363,8 @@ export function ThreadAddSheet({
     onOpenTools ? menuRow('tools', 'tools', t('Tools'), SlidersHorizontal, onOpenTools) : null,
   ].filter(Boolean);
 
+  const compactMenu = mediaMode === 'tiles' && composeRows.length + agentRows.length <= 2;
+
   // Sheet pins this to the visible bottom edge at both detents; an inline
   // footer would sit below the fold at 62% because the body is laid out for 92%.
   const footer = hasSelection ? (
@@ -393,10 +395,16 @@ export function ThreadAddSheet({
           onPress={() => run('photo-library', onPickImage)}
         />
       ) : undefined}
-      snapPoints={THREAD_ADD_SHEET_SNAP_POINTS}
+      snapPoints={compactMenu ? undefined : THREAD_ADD_SHEET_SNAP_POINTS}
       testID="thread-add-sheet"
     >
-      <BottomSheetScrollView
+      {compactMenu ? <View style={styles.content}>
+        {mediaSection}
+        {mediaSection && composeRows.length > 0 ? <SettingsDivider inset="none" /> : null}
+        {composeRows.length > 0 ? <View>{composeRows}</View> : null}
+        {(mediaSection || composeRows.length > 0) && agentRows.length > 0 ? <SettingsDivider inset="none" /> : null}
+        {agentRows.length > 0 ? <View>{agentRows}</View> : null}
+      </View> : <BottomSheetScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
@@ -405,7 +413,7 @@ export function ThreadAddSheet({
         {composeRows.length > 0 ? <View>{composeRows}</View> : null}
         {(mediaSection || composeRows.length > 0) && agentRows.length > 0 ? <SettingsDivider inset="none" /> : null}
         {agentRows.length > 0 ? <View>{agentRows}</View> : null}
-      </BottomSheetScrollView>
+      </BottomSheetScrollView>}
     </Sheet>
   );
 }

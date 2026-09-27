@@ -1,4 +1,5 @@
 import React, {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -18,9 +19,8 @@ import {
   Folder,
   Check,
   ChevronDown,
-  Pin,
+  House,
   SquarePen,
-  Terminal,
 } from 'lucide-react-native';
 import { ChevronRight } from '../../components/ui/DirectionalIcon';
 import { BottomSheetFlatList, TouchableOpacity as SheetTouchableOpacity } from '@gorhom/bottom-sheet';
@@ -36,8 +36,8 @@ import { Button } from '../../components/ui/Button';
 import { FormTextInput } from '../../components/ui/FormTextInput';
 import { SearchInput } from '../../components/ui/SearchInput';
 import {
-  resolveSessionChannelIcon,
   resolveSessionKindIcon,
+  resolveSessionTileIcon,
 } from '../../components/ui/sessionKindIcon';
 import { Sheet } from '../../components/ui/Sheet';
 import { SheetHeaderButton } from '../../components/ui/SheetHeaderButton';
@@ -176,11 +176,7 @@ function SessionTile({
       />
     );
   }
-  const Icon = row.project && (row.kind === 'direct' || row.kind === 'other')
-    ? Terminal
-    : row.kind === 'channel'
-    ? resolveSessionChannelIcon(row.channel)
-    : resolveSessionKindIcon(row.kind);
+  const Icon = resolveSessionTileIcon(row);
   return (
     <View style={styles.tileSlot}>
       <View
@@ -197,13 +193,13 @@ function SessionTile({
   );
 }
 
-function SessionRow({
+const SessionRow = memo(function SessionRow({
   row,
   agent,
   selected,
   showProject,
   capabilities,
-  onPress,
+  onSelect,
   onOpenActions,
 }: Readonly<{
   row: SessionPanelRow;
@@ -211,7 +207,7 @@ function SessionRow({
   selected: boolean;
   showProject: boolean;
   capabilities: SessionPanelViewProps['capabilities'];
-  onPress: () => void;
+  onSelect: (row: SessionPanelRow) => void;
   onOpenActions: (row: SessionPanelRow) => void;
 }>): React.JSX.Element {
   const { theme } = useAppTheme();
@@ -226,6 +222,8 @@ function SessionRow({
     onOpenActions(row);
   };
   const projectName = showProject ? row.project?.name : undefined;
+  const preview = row.attention === 'input' ? t('Agent needs your input', { ns: 'chat' })
+    : row.preview;
   const showUnread = row.unread && !selected && row.attention === null;
   // One quiet 6-point signal on the preview line: attention wins over unread.
   const signal = row.attention !== null
@@ -253,7 +251,7 @@ function SessionRow({
       accessibilityHint={row.project?.path}
       accessibilityState={{ selected }}
       onPressIn={() => { longPressHandled.current = false; }}
-      onPress={() => { if (!longPressHandled.current) onPress(); }}
+      onPress={() => { if (!longPressHandled.current) onSelect(row); }}
       onLongPress={actions.length ? openActions : undefined}
       accessibilityActions={actions.length ? [{ name: 'longpress', label: t('Session actions') }] : undefined}
       onAccessibilityAction={(event) => {
@@ -264,8 +262,9 @@ function SessionRow({
       <SessionTile row={row} agent={agent} />
       <View style={styles.copy}>
         <View style={styles.titleRow}>
+          {/* Shown on the home roster (owner decision 2026-09-27: pinning is only for Agents). */}
           {row.pinned ? (
-            <Pin
+            <House
               testID={`session-panel-row-${row.id}-pinned`}
               size={IconSize.sm}
               color={theme.colors.inkTertiary}
@@ -278,15 +277,15 @@ function SessionRow({
             {relativeTime(row.updatedAt, translateRelativeTime)}
           </Text>
         </View>
-        {projectName || row.preview || signal ? (
+        {projectName || preview || signal ? (
           <View style={styles.previewRow}>
             {projectName ? <Text
               testID={`session-panel-row-${row.id}-project`}
-              style={[styles.rowProject, row.preview ? styles.projectWithPreview : styles.previewSpacer, { color: theme.colors.inkSecondary }]}
+              style={[styles.rowProject, preview ? styles.projectWithPreview : styles.previewSpacer, { color: theme.colors.inkSecondary }]}
               numberOfLines={1}
             >{projectName}</Text> : null}
-            {projectName && row.preview ? <Text style={[styles.projectSeparator, { color: theme.colors.inkTertiary }]} accessibilityElementsHidden importantForAccessibility="no">·</Text> : null}
-            {row.preview ? (
+            {projectName && preview ? <Text style={[styles.projectSeparator, { color: theme.colors.inkTertiary }]} accessibilityElementsHidden importantForAccessibility="no">·</Text> : null}
+            {preview ? (
               <Text
                 testID={`session-panel-row-${row.id}-preview`}
                 style={[
@@ -295,7 +294,7 @@ function SessionRow({
                 ]}
                 numberOfLines={1}
               >
-                {row.preview}
+                {preview}
               </Text>
             ) : !projectName ? (
               <View style={styles.previewSpacer} />
@@ -306,7 +305,7 @@ function SessionRow({
       </View>
     </SheetTouchableOpacity>
   );
-}
+});
 
 function SubagentsRow({
   count,
@@ -542,7 +541,7 @@ function actionLabel(
   t: Translate,
 ): string {
   if (action === 'export') return t('Export conversation', { ns: 'chat' });
-  if (action === 'pin') return pinned ? t('Unpin from roster') : t('Pin to roster');
+  if (action === 'pin') return pinned ? t('Hide from home') : t('Show on home');
   if (action === 'rename') return t('Rename');
   if (action === 'reset') return t('Reset');
   return t('Delete');
@@ -881,6 +880,7 @@ export function SessionPanelView({
     return onSessionAction(row, 'rename', { title });
   }, [onSessionAction]);
 
+  const showProject = !projects || !projectId;
   const renderItem = useCallback(({ item }: { item: SessionPanelListItem }) => {
     if (item.type === 'subagents') {
       return <SubagentsRow count={item.count} onPress={() => chooseFilter('subagent')} />;
@@ -890,13 +890,13 @@ export function SessionPanelView({
         row={item.row}
         agent={viewAgent}
         selected={item.row.key === currentSessionKey}
-        showProject={!projects || !projectId}
+        showProject={showProject}
         capabilities={capabilities}
-        onPress={() => select(item.row)}
+        onSelect={select}
         onOpenActions={setActionRow}
       />
     );
-  }, [capabilities, chooseFilter, currentSessionKey, select, viewAgent, projects, projectId]);
+  }, [capabilities, chooseFilter, currentSessionKey, select, viewAgent, showProject]);
   const keyExtractor = useCallback((item: SessionPanelListItem) => (
     item.type === 'row' ? item.row.id : 'subagents'
   ), []);
@@ -923,7 +923,7 @@ export function SessionPanelView({
         onClose={onClose}
         onAfterClose={onAfterClose}
         contentStyle={styles.sheetContent}
-        headerRight={onCreateSession && viewAgent && (state === 'ready' || state === 'empty') ? (
+        headerRight={onCreateSession && viewAgent && (state === 'ready' || state === 'empty' || state === 'error') ? (
           <SheetHeaderButton
             testID="session-panel-create"
             icon={SquarePen}
@@ -1015,7 +1015,7 @@ export function SessionPanelView({
                       testID="session-panel-error"
                       placement="inline"
                       status="error"
-                      message={t('Sessions unavailable')}
+                      message={t(rows.length ? 'Could not refresh sessions' : 'Sessions unavailable')}
                       actionLabel={onRetry ? t('Retry') : undefined}
                       onAction={onRetry ? () => { void onRetry(); } : undefined}
                       style={styles.statusPill}
@@ -1112,10 +1112,25 @@ export function SessionPanel({
   );
   const adapter = !connectionId || connections.activeAdapter?.connection.id === connectionId
     ? connections.activeAdapter : null;
-  const [projects, setProjects] = useState<readonly ProjectDescriptor[] | undefined>(undefined);
+  const [projectSnapshot, setProjectSnapshot] = useState<{
+    adapter: typeof adapter;
+    projects: readonly ProjectDescriptor[];
+  }>();
+  const cachedProjects = useMemo(() => rows.flatMap(r => r.project ? [r.project] : [])
+    .filter((p, i, all) => all.findIndex(v => v.id === p.id) === i), [rows]);
+  const projects = projectSnapshot?.adapter === adapter ? projectSnapshot.projects : cachedProjects;
   useEffect(() => {
-    let current = true; setProjects(undefined);
-    if (adapter?.capabilities.projects && adapter.projects) void adapter.projects.list().then(value => { if (current) setProjects(value); }).catch(() => { if (current) setProjects(rows.flatMap(r => r.project ? [r.project] : []).filter((p, i, all) => all.findIndex(v => v.id === p.id) === i)); });
+    // Closing a sheet must not scan the host again or empty its cached picker.
+    if (!visible || !adapter?.capabilities.projects || !adapter.projects) return;
+    let current = true;
+    void adapter.projects.list().then(value => {
+      if (current) setProjectSnapshot({ adapter, projects: value });
+    }).catch(() => {
+      if (current) setProjectSnapshot(previous => previous?.adapter === adapter ? previous : {
+        adapter,
+        projects: cachedProjects,
+      });
+    });
     return () => { current = false; };
   }, [adapter, visible]);
   const capabilities = adapter?.capabilities ?? {
@@ -1127,6 +1142,7 @@ export function SessionPanel({
     rowCount: rows.length,
     activeState: connectionId && connections.activeConnectionId !== connectionId ? 'offline' : connections.activeState,
     hasError: connections.error !== null,
+    awaitingSessions: group?.source !== 'live',
   });
 
   return (
@@ -1144,7 +1160,7 @@ export function SessionPanel({
       onClose={onClose}
       onAfterClose={onAfterClose}
       onSelectSession={onSelectSession}
-      onCreateSession={adapter?.capabilities.sessionCreate && adapter.createSession && (!adapter.capabilities.projects || projects?.some(p => p.available)) ? onCreateSession : undefined}
+      onCreateSession={connections.activeState === 'ready' && adapter?.capabilities.sessionCreate && adapter.createSession && (!adapter.capabilities.projects || projects.some(p => p.available)) ? onCreateSession : undefined}
       onSessionAction={onSessionAction}
       onRetry={async () => {
         const runtime = getConnectionRuntime();

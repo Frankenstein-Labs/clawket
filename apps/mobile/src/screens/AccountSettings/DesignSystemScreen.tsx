@@ -1,4 +1,4 @@
-import React, { Fragment, useMemo, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ArrowUp, Bell, Check, MoreHorizontal, Search, Trash2, WifiOff } from 'lucide-react-native';
 import { ChevronLeft } from '../../components/ui/DirectionalIcon';
@@ -7,8 +7,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FlowHeader, PageIntro, FormStep } from '../../components/ui/SetupPrimitives';
 import { OnboardingScreen } from '../Onboarding/OnboardingScreen';
-import { Companion, type CompanionPose } from '../../components/ui/Companion';
+import { Companion } from '../../components/ui/Companion';
 import { LoadingState } from '../../components/ui/LoadingState';
+import type { CompanionSceneKey } from '../../brand/companion-scenes';
+
+const GALLERY_SCENES: ReadonlyArray<CompanionSceneKey> = ['peek', 'fetch', 'yarn', 'pounce', 'listen'];
 import { Bubble } from '../../components/ui/Bubble';
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
 import { RosterRow } from '../../components/ui/RosterRow';
@@ -102,7 +105,17 @@ export function DesignSystemScreen({
   const [pagePreview, setPagePreview] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [search, setSearch] = useState('');
-  const [brandPose, setBrandPose] = useState<CompanionPose>('connecting');
+  const [brandScene, setBrandScene] = useState<CompanionSceneKey>('peek');
+  const [brandPhase, setBrandPhase] = useState<'wait' | 'ready'>('wait');
+  const [brandRun, setBrandRun] = useState(0);
+  const brandReset = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (brandReset.current) clearTimeout(brandReset.current); }, []);
+  const replayBrandScene = (scene: CompanionSceneKey) => {
+    if (brandReset.current) clearTimeout(brandReset.current);
+    setBrandScene(scene);
+    setBrandPhase('wait');
+    setBrandRun((run) => run + 1);
+  };
   const [field, setField] = useState('Clawket');
   const [enabled, setEnabled] = useState(true);
   const [replyFailureVisible, setReplyFailureVisible] = useState(false);
@@ -153,13 +166,20 @@ export function DesignSystemScreen({
 
         {galleryTab === 'brand' ? (
           <View style={styles.stack}>
-            <SegmentedTabs testID="design-companion-poses" tabs={[
-              { key: 'connecting', label: t('Connecting', { ns: 'common' }) },
-              { key: 'loading', label: t('Loading...', { ns: 'common' }) },
-              { key: 'error', label: t('Offline', { ns: 'common' }) },
-            ]} active={brandPose} onSwitch={key => setBrandPose(key as CompanionPose)} />
+            {/* Every loading scene on demand (the app draws them at random); tap or long-press the cat to play. */}
+            <SegmentedTabs testID="design-companion-scenes" tabs={GALLERY_SCENES.map((scene, index) => ({ key: scene, label: String(index + 1) }))}
+              active={brandScene} onSwitch={key => replayBrandScene(key as CompanionSceneKey)} />
             <View style={{ height: 280, justifyContent: 'center', alignItems: 'center' }}>
-              {brandPose === 'error' ? <Companion pose="error" /> : <LoadingState pose={brandPose} message={brandPose === 'connecting' ? t('Connecting', { ns: 'common' }) : t('Loading history', { ns: 'chat' })} />}
+              <LoadingState key={`${brandScene}-${brandRun}`} scene={brandScene} phase={brandPhase} message={t('Connecting', { ns: 'common' })} />
+            </View>
+            <Button testID="design-companion-ready" label={t('Ready', { ns: 'config' })} variant="neutral" disabled={brandPhase === 'ready'} onPress={() => {
+              setBrandPhase('ready');
+              brandReset.current = setTimeout(() => replayBrandScene(brandScene), 1_600);
+            }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }}>
+              <LoadingState size="compact" scene="peek" />
+              <LoadingState size="compact" scene="listen" />
+              <Companion pose="error" size={48} />
             </View>
           </View>
         ) : galleryTab === 'theme' ? (

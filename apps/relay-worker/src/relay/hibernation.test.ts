@@ -26,6 +26,23 @@ const attachment = (clientId: string, extra: Partial<SocketAttachment> = {}): So
   role: 'client', clientId, connectedAt: 1, ...extra,
 });
 
+describe.each(['claude-code', 'codex', 'pi', 'hermes', 'local-model'])('%s pending response after hibernation', backend => {
+  it('delivers to the original requester after a different client becomes active and memory is discarded', async () => {
+    const phone = new Socket(attachment('phone'));
+    const tablet = new Socket(attachment('tablet'));
+    const gateway = new Socket(attachment('bridge', { role: 'gateway' }));
+    const sockets = [phone, tablet, gateway];
+    const before = runtime(backend, sockets); rehydrateSockets(before);
+    prepareClientMessage(before, phone.deserializeAttachment(), JSON.stringify({ type: 'req', id: 'phone-request', method: 'models.list' }));
+    prepareClientMessage(before, tablet.deserializeAttachment(), JSON.stringify({ type: 'req', id: 'tablet-request', method: 'sessions.list' }));
+    const restored = runtime(backend, sockets); rehydrateSockets(restored);
+    const response = JSON.stringify({ type: 'res', id: 'phone-request', ok: true, payload: { models: [] } });
+    await handleGatewayMessage(restored, gateway.deserializeAttachment(), response, async () => {});
+    expect(phone.sent).toEqual([response]);
+    expect(tablet.sent).toEqual([]);
+  });
+});
+
 describe.each(['openclaw', 'hermes'])('%s hibernation routing', (backend) => {
   it('keeps capable clients alive through a delayed first tick and still expires missing pongs', () => {
     const client = new Socket(attachment('phone', { capabilities: ['relay.client-pong.v1'], lastPongAt: 1 }));

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   type SectionListData,
   StyleSheet,
@@ -16,6 +15,7 @@ import {
   Sheet,
   SheetHeaderButton,
 } from '../ui';
+import { ListSkeleton } from '../ui/ListSkeleton';
 import { useAppTheme } from '../../theme';
 import {
   ControlSize,
@@ -254,10 +254,8 @@ export function ModelPickerModal({
   }, [searchQuery, styles, t]);
 
   const content = loading ? (
-    <View style={styles.stateWrap}>
-      <ActivityIndicator size="small" color={theme.colors.accent} />
-      <Text style={styles.stateText}>{t('Loading models...')}</Text>
-    </View>
+    // Rows of the catalog about to appear, not a spinner in an empty sheet.
+    <ListSkeleton testID="model-picker-loading" accessibilityLabel={t('Loading models...')} icon rows={6} style={styles.skeleton} />
   ) : error ? (
     <View style={styles.stateWrap}>
       <Text style={styles.stateText}>{error}</Text>
@@ -291,7 +289,10 @@ export function ModelPickerModal({
       initialNumToRender={18}
       maxToRenderPerBatch={24}
       windowSize={10}
-      removeClippedSubviews
+      // Filtering replaces whole sections while the sheet/keyboard resizes. Native
+      // clipping can detach Fabric children before that same commit removes them.
+      // Keep virtualization, but let React own the mounted children's lifecycle.
+      removeClippedSubviews={false}
       showsVerticalScrollIndicator
     />
   );
@@ -435,6 +436,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
       width: 20,
       alignItems: 'flex-end',
       justifyContent: 'center',
+    },
+    skeleton: {
+      paddingHorizontal: Space.lg,
+      paddingTop: Space.sm,
     },
     stateWrap: {
       minHeight: 220,

@@ -4,6 +4,7 @@ import {
   type ConnectionState, type SessionDescriptor, type SessionHistory, type SessionUpdate,
   type PromptInput, type ManagementOperations, type ModelSelectionState, type ModelSelectionWriteResult,
 } from '@clawket/agent-protocol';
+import { generateId } from '../../services/gateway-auth';
 import { RelayWsTransport } from '../transports/relay-ws';
 import type { WebSocketFactory } from '../transports/types';
 
@@ -22,7 +23,6 @@ export class LocalModelAdapter implements AgentAdapter {
   private currentState: ConnectionState = 'idle';
   private model = '';
   private active = false;
-  private sequence = 0;
   private epoch = 0;
   private handshakeError: AdapterError | null = null;
   private unavailableAttempts = 0;
@@ -116,10 +116,10 @@ export class LocalModelAdapter implements AgentAdapter {
     this.handshakeError = null; this.unavailableAttempts = 0;
   }
 
-  async probe(): Promise<boolean> {
+  async probe(timeoutMs = 5_000): Promise<boolean> {
     const epoch = this.epoch;
     try {
-      const health = await this.rpc<{ backend: string; vision: boolean; model: string }>('health');
+      const health = await this.rpc<{ backend: string; vision: boolean; model: string }>('health', {}, timeoutMs);
       if (epoch !== this.epoch || health.backend !== 'local-model') return false;
       this.capabilities.attachments = health.vision === true; this.model = health.model;
       return true;
@@ -155,10 +155,12 @@ export class LocalModelAdapter implements AgentAdapter {
 
   private assertMain(key: string): void { if (key !== 'main') throw new AdapterError('unsupported', 'Unknown local conversation'); }
 
-  private rpc<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    const id = `${this.record.id}-${this.epoch}-${++this.sequence}`;
+  private rpc<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = method === 'models.select' ? 190_000 : 20_000): Promise<T> {
+    // Fresh identity across adapter replacement and process restarts; late replies
+    // must never resolve a different request on the same saved connection.
+    const id = generateId();
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new AdapterError('timeout', 'Local model request timed out')); }, method === 'models.select' ? 190_000 : 20_000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new AdapterError('timeout', 'Local model request timed out')); }, timeoutMs);
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer });
       try { this.transport.send(JSON.stringify({ type: 'req', id, method, params })); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }

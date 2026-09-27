@@ -3,6 +3,7 @@ import { fireEvent, render } from '@testing-library/react-native';
 import { ThinkingLevelPickerModal } from './ThinkingLevelPickerModal';
 
 jest.mock('react-native', () => ({
+    Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
   Pressable: 'Pressable', Text: 'Text', View: 'View',
   StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style, hairlineWidth: 1 },
 }));

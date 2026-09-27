@@ -98,6 +98,53 @@ describe('useChatHistoryState', () => {
     expect(new Set(result.current.messages.map(m => m.id)).size).toBe(2);
   });
 
+  it.each(['openclaw', 'hermes'])('preserves %s cache-only send identity and uncertainty through history refresh', async backendKind => {
+    const key = 'agent:main:main';
+    const cached = { id: 'native-looking-cache-id', cacheRowId: 'usr_100_qa', role: 'user',
+      text: 'Not acknowledged', timestampMs: 100000, idempotencyKey: 'send-qa', sendUncertain: true };
+    const adapter = { connection: { backendKind }, state: 'ready',
+      listSessions: jest.fn().mockResolvedValue([createSession(key)]),
+      loadSession: jest.fn().mockResolvedValue({ messages: [cached], hasActiveRun: false }),
+    };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    await act(async () => { await result.current.loadSessionsAndHistory(); });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({ id: 'usr_100_qa', sendUncertain: true, idempotencyKey: 'send-qa' });
+    adapter.loadSession.mockResolvedValue({ messages: [{ ...cached, cacheRowId: undefined, sendUncertain: undefined, id: 'backend-confirmed' }], hasActiveRun: false });
+    await act(async () => { await result.current.loadSessionsAndHistory(); });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].sendUncertain).toBeUndefined();
+    expect(result.current.messages[0].historyMessageId).toBe('backend-confirmed');
+  });
+
+  it.each(['pi', 'openclaw', 'hermes'])('shows explicit %s transcript notices without exposing raw model system prompts', async (backendKind) => {
+    const key = 'agent:main:main';
+    const adapter = {
+      connection: { backendKind }, state: 'ready',
+      listSessions: jest.fn().mockResolvedValue([createSession(key)]),
+      loadSession: jest.fn().mockResolvedValue({ messages: [
+        { id: 'internal', role: 'system', content: 'Private model instructions', timestamp: 100_000 },
+        { id: 'before', role: 'assistant', text: 'Before extension', timestampMs: 110_000 },
+        { id: 'notice', role: 'system', text: 'Selected Blue', timestampMs: 120_000 },
+        { id: 'after', role: 'assistant', text: 'After extension', timestampMs: 130_000 },
+      ], hasActiveRun: false }),
+    };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    await act(async () => { await result.current.loadSessionsAndHistory(); });
+    expect(result.current.messages.map(row => row.text)).toEqual(['Before extension', 'Selected Blue', 'After extension']);
+    expect(result.current.messages[1]).toMatchObject({ role: 'system', historyMessageId: 'notice' });
+    await act(async () => { await result.current.loadSessionsAndHistory(); });
+    expect(result.current.messages.filter(row => row.text === 'Selected Blue')).toHaveLength(1);
+  });
+
   it.each(['openclaw', 'hermes'])('keeps the visible %s conversation in place when a reconnect refreshes it', async (backendKind) => {
     const key = 'agent:main:main';
     const canonical = [
@@ -616,6 +663,110 @@ describe('useChatHistoryState', () => {
         modelLabel: 'openai/gpt-5',
       }),
     ]);
+  });
+
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'])('%s recovery never overwrites a prior turn after canonical history already contains the new reply', async backendKind => {
+    const key = 'agent:main:main';
+    const adapter = { connection: { backendKind }, state: 'ready', loadSession: jest.fn().mockResolvedValue({ messages: [
+      { id: 'new-user', role: 'user', text: 'Second prompt' },
+      { id: 'new-answer', role: 'assistant', text: 'Second answer' },
+    ] }) };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate, sessionKeyRef,
+        routeSessionKey: key, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    act(() => result.current.setMessages([
+      { id: 'final_previous', role: 'assistant', text: 'First answer', timestampMs: 1000, historyMessageId: 'old-answer' },
+      { id: 'new-user', role: 'user', text: 'Second prompt', idempotencyKey: 'send-2' },
+      { id: 'history_new', role: 'assistant', text: 'Second answer', historyMessageId: 'new-answer' },
+    ]));
+    const before = result.current.messages;
+    await act(async () => { await result.current.reconcileLatestAssistantFromHistory(key, { appendIfMissing: true }); });
+    expect(result.current.messages).toBe(before);
+    expect(result.current.messages.map(message => message.text)).toEqual(['First answer', 'Second prompt', 'Second answer']);
+  });
+
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'])('%s reconciliation cannot cross a newer user turn while its history request is pending', async backendKind => {
+    const key = 'agent:main:main';
+    const pending = deferred<any>();
+    const adapter = { connection: { backendKind }, state: 'ready', loadSession: jest.fn().mockReturnValue(pending.promise) };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate, sessionKeyRef,
+        routeSessionKey: key, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    act(() => result.current.setMessages([
+      { id: 'user-old', role: 'user', text: 'First prompt', idempotencyKey: 'send-old' },
+      { id: 'final_old', role: 'assistant', text: 'First partial' },
+    ]));
+    let request!: Promise<void>;
+    act(() => { request = result.current.reconcileLatestAssistantFromHistory(key, { appendIfMissing: true }); });
+    act(() => result.current.setMessages(prev => [...prev,
+      { id: 'user-new', role: 'user', text: 'Second prompt', idempotencyKey: 'send-new' },
+      { id: 'final_new', role: 'assistant', text: 'Second answer' },
+    ]));
+    const before = result.current.messages;
+    await act(async () => {
+      pending.resolve({ messages: [{ role: 'assistant', text: 'First complete' }] });
+      await request;
+    });
+    expect(result.current.messages).toBe(before);
+  });
+
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'])('%s recovery does not borrow an older answer when the current prompt has no reply yet', async backendKind => {
+    const key = 'agent:main:main';
+    const adapter = { connection: { backendKind }, state: 'ready', loadSession: jest.fn().mockResolvedValue({ messages: [
+      { id: 'old-answer', role: 'assistant', text: 'First answer' },
+      { id: 'new-user', role: 'user', text: 'Second prompt' },
+    ] }) };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate, sessionKeyRef,
+        routeSessionKey: key, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    act(() => result.current.setMessages([{ id: 'new-user', role: 'user', text: 'Second prompt' }]));
+    const before = result.current.messages;
+    await act(async () => { await result.current.reconcileLatestAssistantFromHistory(key, { appendIfMissing: true }); });
+    expect(result.current.messages).toBe(before);
+  });
+
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'])('%s ignores a stale native answer already known to belong to an earlier prompt', async backendKind => {
+    const key = 'agent:main:main';
+    const adapter = { connection: { backendKind }, state: 'ready', loadSession: jest.fn().mockResolvedValue({ messages: [
+      { id: 'old-user', role: 'user', text: 'First prompt' },
+      { id: 'old-answer', role: 'assistant', text: 'First answer' },
+    ] }) };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate, sessionKeyRef,
+        routeSessionKey: key, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    act(() => result.current.setMessages([
+      { id: 'final_old', role: 'assistant', text: 'First answer', historyMessageId: 'old-answer' },
+      { id: 'new-user', role: 'user', text: 'Second prompt' },
+      { id: 'final_new', role: 'assistant', text: 'Second partial' },
+    ]));
+    const before = result.current.messages;
+    await act(async () => { await result.current.reconcileLatestAssistantFromHistory(key, { appendIfMissing: true }); });
+    expect(result.current.messages).toBe(before);
+  });
+
+  it('retains assistant recovery across a native user tool-result envelope', async () => {
+    const key = 'agent:main:main';
+    const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValue({ messages: [
+      { role: 'user', content: 'Inspect the fixture' },
+      { role: 'assistant', content: 'I will inspect the fixture.' },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', content: 'fixture contents' }] },
+    ] }) };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate, sessionKeyRef,
+        routeSessionKey: key, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    act(() => result.current.setMessages([{ id: 'prompt', role: 'user', text: 'Inspect the fixture' }]));
+    await act(async () => { await result.current.reconcileLatestAssistantFromHistory(key, { appendIfMissing: true }); });
+    expect(result.current.messages.map(message => message.text)).toEqual(['Inspect the fixture', 'I will inspect the fixture.']);
   });
 
   it('deduplicates concurrent reconcileLatestAssistantFromHistory calls for the same session', async () => {

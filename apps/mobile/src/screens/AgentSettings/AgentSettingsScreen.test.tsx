@@ -438,6 +438,22 @@ describe('AgentSettingsView deep rendering', () => {
     expect(recovering.getByTestId('agent-settings-identity')).toBeTruthy();
   });
 
+  it('says connecting, without an offline action, while the connection first opens', () => {
+    const onRetry = jest.fn();
+    const view = render(
+      <AgentSettingsView
+        {...props({ state: 'offline', connectionState: 'handshaking', onRetry })}
+      />,
+    );
+    expect(view.getByTestId('agent-settings-connecting')).toBeTruthy();
+    // The header capsule now agrees with the Connection row instead of calling it offline.
+    expect(view.getAllByText('Connecting').length).toBeGreaterThanOrEqual(2);
+    expect(view.queryByText('Offline · reconnecting')).toBeNull();
+    expect(view.queryByTestId('agent-settings-offline')).toBeNull();
+    expect(view.queryByTestId('agent-settings-offline-action')).toBeNull();
+    expect(view.getByTestId('agent-settings-identity')).toBeTruthy();
+  });
+
   it('renders actionable error and permission states', () => {
     const onRetry = jest.fn();
     const error = render(
