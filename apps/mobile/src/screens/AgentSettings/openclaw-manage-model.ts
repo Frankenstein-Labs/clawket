@@ -209,4 +209,3 @@ export function diagnosticCheckDetail(check: Readonly<{ name: string; message?: 
   const message = check.message?.trim() ?? '';
   return message ? `${message}\n\n${check.name}` : check.name;
 }
-

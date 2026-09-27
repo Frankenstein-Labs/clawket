@@ -201,4 +201,3 @@ describe('diagnostic check titles', () => {
     expect(diagnosticCheckDetail({ name: 'Gateway' })).toBe('Gateway');
   });
 });
-

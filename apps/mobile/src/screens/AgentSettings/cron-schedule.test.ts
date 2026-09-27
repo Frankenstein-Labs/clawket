@@ -82,4 +82,3 @@ describe('formatCronDate', () => {
     expect(formatCronDate(Number.NaN, 'en-US')).toBe('—');
   });
 });
-
