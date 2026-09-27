@@ -54,7 +54,7 @@ When expanding `start`, `install`, `restart`, `stop`, or `uninstall`:
 
 ## Secure Pairing Invitation Rule
 
-1. `pair` and `refresh-code` should create a best-effort encrypted pairing invitation and may open its page for interactive users.
+1. `pair` and `refresh-code` should create a best-effort encrypted pairing invitation. Print its code and QR without opening a browser; only an explicit `--open` may open its page.
 2. Invitation failure or an older Registry must fall back silently to the existing QR output; never make the QR path depend on the invitation endpoint.
 3. Keep decryption keys and human codes out of Registry plaintext and persistent Bridge config. Do not log decoded connection payloads.
 4. A six-digit code must use `pairing.secure-short-code.v2`; never derive the payload encryption key directly from six digits.
@@ -99,4 +99,4 @@ Claude first-time detached pairing must carry the resolved device scope into the
 
 ## 3.1 release
 
-The authorized Bridge release is `3.1.0`. Keep the publish guard and bundled workspace versions aligned. New Pi/Codex/Claude Code production endpoints must pass pairing and message verification before npm publication; preserve the existing OpenClaw/Hermes endpoints and pairing state. Client distribution is a separate release stage.
+The authorized Bridge patch release is `3.1.1`. Keep the publish guard and bundled workspace versions aligned. Preserve the existing OpenClaw/Hermes pair behavior for old clients. `pair choose` is interactive and read-only until selection; explicit `--backend` is required for agent/script prompts. Client distribution is a separate release stage.

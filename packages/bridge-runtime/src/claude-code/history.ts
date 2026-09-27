@@ -11,6 +11,18 @@ function blocks(value: unknown): Block[] {
   return Array.isArray(value) ? value.filter(record) : [];
 }
 
+/**
+ * Native transcripts record each entry's ISO `timestamp`; the SDK passes it through although its
+ * `SessionMessage` type omits it. Without it every recovered message lost its clock (device review
+ * 2026-09-27). Invalid or missing values stay absent rather than inventing a time.
+ */
+function entryTimestampMs(entry: SessionMessage): number | undefined {
+  const value = (entry as SessionMessage & { timestamp?: unknown }).timestamp;
+  if (typeof value !== 'string') return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function outputText(content: unknown): string {
   if (typeof content === 'string') return content.slice(0, 32_000);
   return blocks(content).filter(block => block.type === 'text' && typeof block.text === 'string')
@@ -29,6 +41,8 @@ export function claudeHistory(messages: readonly SessionMessage[]): ChatMessage[
     seen.add(entry.uuid);
     if (entry.type !== 'user' && entry.type !== 'assistant') continue;
     const content = entry.message.content;
+    const timestampMs = entryTimestampMs(entry);
+    const time = timestampMs ? { timestampMs } : {};
     const parts: Block[] = typeof content === 'string' ? [{ type: 'text', text: content }] : blocks(content);
     const localText = parts.length === 1 && parts[0].type === 'text' && typeof parts[0].text === 'string' ? parts[0].text : undefined;
     // setModel writes native local-command records into the transcript, not human turns.
@@ -44,11 +58,11 @@ export function claudeHistory(messages: readonly SessionMessage[]): ChatMessage[
       const block = parts[index];
       if (block.type === 'text' && typeof block.text === 'string' && block.text.length) {
         if (entry.type === 'user') { userText.push(block.text); continue; }
-        result.push({ id: `${entry.uuid}:text:${index}`, role: entry.type, text: block.text,
+        result.push({ id: `${entry.uuid}:text:${index}`, role: entry.type, text: block.text, ...time,
           ...(entry.type === 'assistant' && typeof entry.message.model === 'string' ? { model: entry.message.model } : {}) });
       } else if (block.type === 'tool_use' && entry.type === 'assistant'
         && typeof block.id === 'string' && typeof block.name === 'string' && !tools.has(block.id)) {
-        const row: ChatMessage = { id: `toolcall_${block.id}`, role: 'tool', text: '',
+        const row: ChatMessage = { id: `toolcall_${block.id}`, role: 'tool', text: '', ...time,
           tool: { name: block.name, callId: block.id, status: 'unknown', input: block.input } };
         tools.set(block.id, row);
         result.push(row);
@@ -69,7 +83,7 @@ export function claudeHistory(messages: readonly SessionMessage[]): ChatMessage[
       }
     }
     if (entry.type === 'user' && (userText.length || attachments.length)) {
-      result.push({ id: entry.uuid, role: 'user', text: userText.join('\n'),
+      result.push({ id: entry.uuid, role: 'user', text: userText.join('\n'), ...time,
         ...(attachments.length ? { attachments } : {}) });
     }
   }

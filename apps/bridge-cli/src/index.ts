@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { createInterface } from 'node:readline/promises';
 import { resolveHermesSourcePath } from '@clawket/bridge-runtime';
 import { setTimeout as delay } from 'node:timers/promises';
 import qrcodeTerminal from 'qrcode-terminal';
@@ -22,6 +23,7 @@ import {
 import { parseLookbackToMs } from './log-parse.js';
 import { buildGatewayControlUiOrigin, buildLocalPairingInfo, detectLanIp, resolveLocalPairGatewayUrl } from './local-pair.js';
 import { readCliVersion } from './metadata.js';
+import { discoverPairChoices, promptPairChoice } from './pair-choose.js';
 import { buildLocalPairingJson, buildPairingJson } from './pairing-output.js';
 import { writePairingQrPng, writeRawQrPng } from './qr-file.js';
 import { decidePairServiceAction } from './service-decision.js';
@@ -97,6 +99,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === 'pair' && args[0] === 'choose') {
+    await handlePairChoose(args.slice(1));
+    return;
+  }
+
   if (command === 'claude-code') { await handleClaudeCommand(args); return; }
   if (readFlag(args, '--backend') === 'claude-code') { await handleClaudeCommand([command, ...args]); return; }
   if (command === 'codex') { await handleCodexCommand(args); return; }
@@ -138,7 +145,7 @@ async function main(): Promise<void> {
       stopRuntimeProcesses();
       restartService();
     }
-    if (paired.pairingSession && !hasFlag(args, '--no-open') && !jsonOutput) {
+    if (paired.pairingSession && hasFlag(args, '--open') && !hasFlag(args, '--no-open') && !jsonOutput) {
       openPairingPage(paired.pairingSession.pairingUrl);
     }
     const qrImagePath = await writePairingQrPng(paired, qrFile);
@@ -429,11 +436,41 @@ type LifecycleSummary = {
   hermesMessages: string[];
 };
 
+async function handlePairChoose(args: string[]): Promise<void> {
+  if (args.length) throw new Error('Use clawket pair choose without flags. For scripts, use clawket pair --backend <name>.');
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error('clawket pair choose needs an interactive terminal. Agents and scripts should use clawket pair --backend <name>.');
+  }
+  const choices = await discoverPairChoices({
+    openclaw: { available: canPairOpenClaw(), configured: Boolean(readPairingConfig()) },
+    hermes: { available: canPairHermes(), configured: Boolean(readHermesRelayConfig() || readHermesBridgeCliConfig()) },
+  });
+  const line = createInterface({ input: process.stdin, output: process.stdout });
+  let selection: Awaited<ReturnType<typeof promptPairChoice>>;
+  try {
+    selection = await promptPairChoice(choices, { ask: question => line.question(question), write: text => console.log(text) });
+  } finally { line.close(); }
+  if (!selection) return;
+  switch (selection.backend) {
+    case 'openclaw': case 'hermes':
+      await handlePairCommand(['--backend', selection.backend], false);
+      return;
+    case 'codex': await handleCodexCommand(['pair']); return;
+    case 'claude-code': await handleClaudeCommand(['pair']); return;
+    case 'pi': await handlePiCommand(['pair', '--project', selection.project!]); return;
+  }
+}
+
+function printPairChooseHint(): void {
+  console.log('\nTo find and choose Codex, Claude Code, Pi or another Agent, run: clawket pair choose');
+}
+
 async function handlePairCommand(args: string[], jsonOutput: boolean): Promise<void> {
   const pairSubcommand = readPairSubcommand(args);
   const localPair = pairSubcommand === 'local' || hasFlag(args, '--local');
   const requestedBackend = resolveRequestedPairBackend(args);
   const previewPair = hasFlag(args, '--preview');
+  const legacyDefault = !requestedBackend && !jsonOutput && !previewPair;
   if (previewPair && localPair) {
     throw new Error('Preview is a Relay environment and cannot be combined with local pairing.');
   }
@@ -460,13 +497,16 @@ async function handlePairCommand(args: string[], jsonOutput: boolean): Promise<v
       } else {
         await handleOpenClawLocalPairCommand(args, jsonOutput);
       }
+      if (legacyDefault) printPairChooseHint();
       return;
     }
     if (only === 'hermes') {
       await handleHermesRelayPairCommand(args, jsonOutput);
+      if (legacyDefault) printPairChooseHint();
       return;
     }
     await handleOpenClawRelayPairCommand(args, jsonOutput);
+    if (legacyDefault) printPairChooseHint();
     return;
   }
 
@@ -518,6 +558,7 @@ async function handlePairCommand(args: string[], jsonOutput: boolean): Promise<v
       successes,
       failures,
     });
+    if (legacyDefault) printPairChooseHint();
   }
 }
 
@@ -905,7 +946,7 @@ async function performOpenClawRelayPairing(args: string[]): Promise<PairSuccessR
     gatewayPassword: gatewayAuth.password,
     environment,
   });
-  if (paired.pairingSession && !hasFlag(args, '--no-open') && !hasFlag(args, '--json')) {
+  if (paired.pairingSession && hasFlag(args, '--open') && !hasFlag(args, '--no-open') && !hasFlag(args, '--json')) {
     openPairingPage(paired.pairingSession.pairingUrl);
   }
   const qrImagePath = await writePairingQrPng(paired, qrFile);
@@ -2246,10 +2287,12 @@ function printHelp(): void {
     'clawket local-model pair [--preview] [--base-url <http://127.0.0.1:8080>] [--engine <llamacpp|ollama|openai-compatible>] [--endpoints <file.json>] [--config <file.json>] [--qr-file <file.png>]',
     'clawket local-model pair --llama-server <executable> --models-preset <file.ini> [--base-url <loopback-url>]',
     'clawket local-model run [--config <file.json>]',
-    'clawket pair [--preview] [--backend <openclaw|hermes>] [--server <url>] [--name <displayName>] [--public-host <192.168.x.x>] [--port <4319>] [--qr-file <path>] [--no-open] [--json] [--force]',
+    'clawket pair choose   Discover and select one installed Agent (interactive terminal)',
+    'clawket pair [--backend <openclaw|hermes|codex|claude-code|pi>] [--preview] [--open] [backend-specific options]',
+    'clawket pair          Without --backend, keep the legacy OpenClaw/Hermes automatic pairing flow',
     'clawket pair local [--backend <openclaw|hermes>] [--url <ws://host:port>] [--public-host <192.168.x.x>] [--port <4319>] [--qr-file <path>] [--json]',
     'clawket pair --local [--backend <openclaw|hermes>] [--url <ws://host:port>] [--public-host <192.168.x.x>] [--port <4319>] [--qr-file <path>] [--json]',
-    'clawket refresh-code [--preview] [--qr-file <path>] [--no-open] [--json]',
+    'clawket refresh-code [--preview] [--qr-file <path>] [--open] [--json]',
     'clawket start',
     'clawket install',
     'clawket restart',

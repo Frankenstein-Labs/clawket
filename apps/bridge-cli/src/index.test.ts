@@ -361,6 +361,30 @@ describe('cli pairing output', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
+  it('keeps pairing pages optional during code refresh', async () => {
+    const pairingSession = { pairingUrl: 'https://pair.example.com/invite#secret' };
+    refreshAccessCodeMock.mockResolvedValueOnce({
+      config: { serverUrl: 'https://registry.example.com', gatewayId: 'gw_test_123' },
+      accessCode: 'AB7K9Q', qrPayload: '{}', action: 'refreshed', pairingSession,
+    });
+    await import('./index.js');
+    await vi.waitFor(() => expect(refreshAccessCodeMock).toHaveBeenCalledTimes(1));
+    expect(spawnMock.mock.calls.some(call => (call as unknown as [string])[0] === 'xdg-open')).toBe(false);
+  });
+
+  it('does not turn pair choose into an implicit noninteractive pairing run', async () => {
+    process.argv = ['node', 'clawket', 'pair', 'choose'];
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined as never));
+    await import('./index.js');
+    await vi.waitFor(() => expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'clawket pair choose needs an interactive terminal. Agents and scripts should use clawket pair --backend <name>.',
+    ));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(pairGatewayMock).not.toHaveBeenCalled();
+    expect(pairHermesRelayMock).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+  });
+
   it('prints OpenClaw and Hermes Bridge capabilities in status output', async () => {
     process.argv = ['node', 'clawket', 'status'];
     buildDoctorReportMock.mockResolvedValue({
@@ -436,6 +460,7 @@ describe('cli pairing output', () => {
       accessCodeExpiresAt: '2026-09-04T01:00:00.000Z',
       qrPayload: '{"v":2,"k":"cp","g":"gw_preview_123","a":"PV8W2K"}',
       action: 'registered',
+      pairingSession: { pairingUrl: 'https://pair.example.com/invite#secret' },
     });
 
     await import('./index.js');
@@ -447,6 +472,8 @@ describe('cli pairing output', () => {
       }));
     });
     expect(pairHermesRelayMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(writePairingQrPngMock).toHaveBeenCalledTimes(1));
+    expect(spawnMock.mock.calls.some(call => (call as unknown as [string])[0] === 'xdg-open')).toBe(false);
   });
 
   it('replaces an existing Hermes local bridge process before starting a new one', async () => {

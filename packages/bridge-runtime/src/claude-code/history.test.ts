@@ -38,6 +38,25 @@ describe('Claude native history', () => {
     expect(rows[0].tool?.status).toBe('unknown');
   });
 
+  it('keeps each native entry clock and never invents one', () => {
+    const at = (entry: SessionMessage, timestamp: unknown) => ({ ...entry, timestamp }) as SessionMessage;
+    const rows = claudeHistory([
+      at(message('user', 'question', 'hello'), '2026-09-27T07:32:38.608Z'),
+      at(message('assistant', 'call', [{ type: 'tool_use', id: 'c', name: 'Bash', input: {} }]), '2026-09-27T07:32:40.000Z'),
+      at(message('assistant', 'answer', [{ type: 'text', text: 'hi' }]), '2026-09-27T07:32:41.500Z'),
+      at(message('assistant', 'broken', [{ type: 'text', text: 'no clock' }]), 'not a date'),
+      message('assistant', 'missing', [{ type: 'text', text: 'no field' }]),
+    ]);
+    expect(rows.map(row => row.timestampMs)).toEqual([
+      Date.parse('2026-09-27T07:32:38.608Z'),
+      Date.parse('2026-09-27T07:32:40.000Z'),
+      Date.parse('2026-09-27T07:32:41.500Z'),
+      undefined,
+      undefined,
+    ]);
+    expect(rows[3]).not.toHaveProperty('timestampMs');
+  });
+
   it('marks denied or failed tool results as errors and bounds their display output', () => {
     const rows = claudeHistory([
       message('assistant', 'call', [{ type: 'tool_use', id: 'x', name: 'Write', input: {} }]),
