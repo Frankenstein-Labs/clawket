@@ -2,6 +2,7 @@ import React from 'react';
 import { act, render } from '@testing-library/react-native';
 import { CompanionScene } from './CompanionScene';
 import { LoadingState, useLoadingHandoff } from '../LoadingState';
+import { Motion } from '../../../theme/tokens';
 
 jest.mock('react-native', () => {
   const R = require('react');
@@ -102,12 +103,25 @@ it('purrs while petted and settles when released', () => {
   expect(haptics.triggerSelectionHaptic).toHaveBeenCalledTimes(3);
 });
 
-it('ignores taps during the success payoff', () => {
+it('ignores taps during the success exit', () => {
   const view = render(<CompanionScene scene="pounce" phase="ready" testID="scene" />);
   expect(pressable(view).props.disabled).toBe(true);
   act(() => { pressable(view).props.onPress(); });
   expect(view.queryByTestId('companion-mark-heart1')).toBeNull();
   expect(haptics.triggerLightImpact).not.toHaveBeenCalled();
+});
+
+it('drops an angry cat\'s marks and claw the moment the wait succeeds', () => {
+  jest.spyOn(Math, 'random').mockReturnValue(0.99);
+  const view = render(<CompanionScene scene="yarn" phase="wait" testID="scene" />);
+  for (let index = 0; index < 7; index += 1) act(() => { pressable(view).props.onPress(); });
+  expect(view.getByTestId('companion-claw')).toBeTruthy();
+  view.rerender(<CompanionScene scene="yarn" phase="ready" testID="scene" />);
+  expect(view.queryByTestId('companion-claw')).toBeNull();
+  expect(view.queryByTestId('companion-mark-vein')).toBeNull();
+  // The sulk scheduled by the swipe never arrives: the cat is smiling on its way out.
+  act(() => { jest.advanceTimersByTime(2_500); });
+  expect(view.queryByTestId('companion-mark-dots')).toBeNull();
 });
 
 it('shows a pinned scene inside the loading state and a still cat under reduced motion', () => {
@@ -122,13 +136,51 @@ it('shows a pinned scene inside the loading state and a still cat under reduced 
   spy.mockRestore();
 });
 
+it('hides its label and stops being busy the moment the wait succeeds', () => {
+  const view = render(<LoadingState testID="loading" scene="fetch" message="Loading history" />);
+  expect(view.getByTestId('loading-message').props.style).not.toContainEqual({ opacity: 0 });
+  expect(view.getByTestId('loading').props.accessibilityState).toEqual({ busy: true });
+  view.rerender(<LoadingState testID="loading" scene="fetch" message="Loading history" phase="ready" />);
+  expect(view.queryByTestId('loading-message')).toBeNull();
+  const message = view.UNSAFE_getAllByType('Text' as unknown as React.ComponentType).find(node => node.props.testID === 'loading-message');
+  const group = view.UNSAFE_getAllByType('View' as unknown as React.ComponentType).find(node => node.props.testID === 'loading');
+  expect(message?.props.style).toContainEqual({ opacity: 0 });
+  expect(group?.props.accessibilityState).toEqual({ busy: false });
+  expect(group?.props.accessibilityLabel).toBeUndefined();
+  expect(group?.props.importantForAccessibility).toBe('no-hide-descendants');
+});
+
+it('starts the slow-wait hint from zero when a new wait follows success', () => {
+  const slowAction = { label: 'Retry', onPress: jest.fn() };
+  const view = render(<LoadingState testID="loading" scene="fetch" message="Connecting" slowAction={slowAction} />);
+  act(() => { jest.advanceTimersByTime(Motion.loadingSlowHint); });
+  expect(view.getByTestId('loading-slow')).toBeTruthy();
+  view.rerender(<LoadingState testID="loading" scene="fetch" message="Connecting" slowAction={slowAction} phase="ready" />);
+  expect(view.queryByTestId('loading-slow')).toBeNull();
+  view.rerender(<LoadingState testID="loading" scene="fetch" message="Connecting" slowAction={slowAction} phase="wait" />);
+  expect(view.queryByTestId('loading-slow')).toBeNull();
+  act(() => { jest.advanceTimersByTime(Motion.loadingSlowHint - 1); });
+  expect(view.queryByTestId('loading-slow')).toBeNull();
+  act(() => { jest.advanceTimersByTime(1); });
+  expect(view.getByTestId('loading-slow')).toBeTruthy();
+});
+
+it('plays a fresh scene when a new wait follows a success exit', () => {
+  const view = render(<LoadingState testID="loading" message="Connecting" />);
+  const first = view.UNSAFE_getByType(CompanionScene).props.scene;
+  view.rerender(<LoadingState testID="loading" message="Connecting" phase="ready" />);
+  view.rerender(<LoadingState testID="loading" message="Connecting" phase="wait" />);
+  expect(view.UNSAFE_getByType(CompanionScene).props.scene).not.toBe(first);
+  expect(view.getByTestId('loading-message').props.style).not.toContainEqual({ opacity: 0 });
+});
+
 function Handoff({ loading, succeeded, onPhase }: Readonly<{ loading: boolean; succeeded: boolean; onPhase: (phase: string | null) => void }>) {
   onPhase(useLoadingHandoff(loading, succeeded));
   return null;
 }
 
 describe('useLoadingHandoff', () => {
-  it('plays the payoff only after a visible wait that ended in success', () => {
+  it('exits only after a visible wait that ended in success, and only for the fade', () => {
     const phases: Array<string | null> = [];
     const view = render(<Handoff loading succeeded={false} onPhase={(phase) => phases.push(phase)} />);
     expect(phases.at(-1)).toBe('wait');
@@ -137,8 +189,12 @@ describe('useLoadingHandoff', () => {
     expect(phases.at(-1)).toBe('ready');
     // No null render between wait and ready: that would unmount the scene and redraw it.
     expect(phases).not.toContain(null);
-    act(() => { jest.advanceTimersByTime(700); });
+    act(() => { jest.advanceTimersByTime(Motion.loadingExit - 1); });
+    expect(phases.at(-1)).toBe('ready');
+    act(() => { jest.advanceTimersByTime(1); });
     expect(phases.at(-1)).toBeNull();
+    // The loader never outstays its own fade by more than a few frames.
+    expect(Motion.loadingExit - Motion.duration.normal).toBeLessThanOrEqual(80);
   });
 
   it('hands over at once when the wait was too short to show the cat, or failed', () => {

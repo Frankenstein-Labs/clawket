@@ -36,7 +36,7 @@ export function ConversationEntry({ navigation, route, locked, lockedReason = 'a
   const rosterGroup = connections.roster.find(group => group.connection.id === connectionId);
   const rosterAgent = rosterGroup?.agents.find(row => row.agent.agentId === agentId)?.agent;
   const title = rosterAgent?.name ?? t('Sessions');
-  // The picker rising over the page is the success moment; a failed connect hands over without a payoff.
+  // The picker rising over the page is the success moment; a failed connect hands over at once, without the exit.
   const loaderPhase = useLoadingHandoff(loading, connections.activeConnectionId === connectionId && connections.activeState === 'ready');
 
   useEffect(() => {

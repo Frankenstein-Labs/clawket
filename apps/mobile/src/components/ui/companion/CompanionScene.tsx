@@ -6,18 +6,17 @@ import { sampleTimed } from '../../../brand/companion-keyframes';
 import { STAGE, type CompanionSceneKey } from '../../../brand/companion-scenes';
 import { CLAW, TEMPER_TIMING } from '../../../brand/companion-temper';
 import { useAppTheme } from '../../../theme';
-import { affine, REST, startTimer, stopTimer, timedLayer, useLoopClock, type PlayValues, type SceneClock } from './motion';
+import { affine, REST, timedLayer, useLoopClock, type PlayValues, type SceneClock } from './motion';
 import { SCENES, type SceneColors } from './scenes';
 import { useCompanionPlay } from './useCompanionPlay';
 
 const AnimatedG = Animated.createAnimatedComponent(G<{ matrix?: number[]; opacity?: number }>);
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
+/** `ready`: the wait succeeded; taps stop and the cat smiles while its loader fades out. */
 export type CompanionScenePhase = 'wait' | 'ready';
 /** Sheets show the scene at 60 %, which puts the Companion near the old 48-point compact size. */
 export const COMPACT_SCENE_SCALE = 0.6;
-/** Longest payoff part; the payoff clock rests past it. */
-const PAYOFF_MS = 1_000;
 
 function useAppActive(): boolean {
   const [active, setActive] = useState(AppState?.currentState !== 'background' && AppState?.currentState !== 'inactive');
@@ -29,7 +28,7 @@ function useAppActive(): boolean {
 }
 
 /**
- * One loading scene: the stage, its Companion, the success payoff and the cat's temper. Decorative:
+ * One loading scene: the stage, its Companion and the cat's temper. Decorative:
  * hidden from assistive technology; the owning `LoadingState` carries the accessible busy label.
  */
 export function CompanionScene({ scene, phase, compact = false, testID }: Readonly<{
@@ -44,20 +43,14 @@ export function CompanionScene({ scene, phase, compact = false, testID }: Readon
   const definition = SCENES[scene];
   const waiting = phase === 'wait';
   const [restart, setRestart] = useState(0);
-  const loop = useLoopClock(definition.loop, active && waiting, restart);
-  const payoff = useSharedValue(-1);
+  // The scene keeps moving through the brief success exit (a woken cat stays out), so it dissolves
+  // rather than freezing; unmounting right after stops every clock.
+  const loop = useLoopClock(definition.loop, active, restart);
   const wake = useSharedValue(-1);
-  const clock = useMemo<SceneClock>(() => ({ loop, payoff, wake }), [loop, payoff, wake]);
-  useEffect(() => {
-    if (phase === 'ready') {
-      stopTimer(wake);
-      startTimer(payoff, PAYOFF_MS);
-    } else {
-      stopTimer(payoff);
-    }
-  }, [payoff, phase, wake]);
+  const clock = useMemo<SceneClock>(() => ({ loop, wake }), [loop, wake]);
   const play = useCompanionPlay({
     enabled: waiting && active,
+    celebrating: phase === 'ready',
     running: active,
     canHide: definition.canHide,
     clock,

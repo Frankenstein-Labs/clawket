@@ -284,7 +284,7 @@ function RosterHeader({
 
 function RosterLoading({ connecting = false, phase = 'wait' }: { connecting?: boolean; phase?: 'wait' | 'ready' }): React.JSX.Element {
   const { t } = useTranslation('common');
-  // The payoff keeps the last stage label rather than switching copy as the rows arrive.
+  // The exit keeps the last stage label's line rather than switching copy, so the cat does not jump as the rows arrive.
   const message = useRef('');
   if (phase === 'wait') message.current = connecting ? t('Connecting') : t('Loading agents');
   return <LoadingState testID="roster-loading" message={message.current} pose="connecting" phase={phase} />;
@@ -534,7 +534,7 @@ export function RosterView({
     translateRelativeTime,
   ]);
 
-  // The first roster waits under one mounted loader that plays its payoff as the rows arrive.
+  // The first roster waits under one mounted loader that fades away at once as the rows arrive.
   const rosterLoading = !(connectionFailure && rows.length === 0) && (state === 'loading' || (rows.length === 0 && recovering === true));
   const loaderPhase = useLoadingHandoff(rosterLoading, rows.length > 0);
 

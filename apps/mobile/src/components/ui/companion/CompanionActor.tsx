@@ -3,7 +3,7 @@ import { Circle, G, Path, Rect } from 'react-native-svg';
 import Animated, { useAnimatedProps } from 'react-native-reanimated';
 import geometry from '../../../brand/companion.json';
 import { sampleLoop, sampleTimed, type TimedFrames } from '../../../brand/companion-keyframes';
-import type { ActorFrames, ActorTimed } from '../../../brand/companion-scenes';
+import type { ActorFrames } from '../../../brand/companion-scenes';
 import { MOOD_LOOPS, PRESS, REACTION_TABLE, SULK_DOTS, type CompanionFlavour, type CompanionMood, type ReactionLayer } from '../../../brand/companion-temper';
 import { affine, loopLayer, REST, timedLayer, type PlayValues, type SceneClock } from './motion';
 
@@ -33,12 +33,10 @@ function reactionPart(play: PlayValues, layer: ReactionLayer): TimedFrames | und
   return reaction ? reaction[layer] : undefined;
 }
 
-/** A loop/payoff layer of the Companion: the loop, or its payoff part once the payoff started. */
-function motionLayer(clock: SceneClock, frames: ActorFrames | undefined, payoff: ActorTimed | undefined, key: keyof ActorFrames) {
+/** The scene's own motion for one Companion layer. */
+function motionLayer(clock: SceneClock, frames: ActorFrames | undefined, key: keyof ActorFrames) {
   'worklet';
-  return clock.payoff.value >= 0
-    ? timedLayer(payoff?.[key], clock.payoff.value, REST)
-    : loopLayer(frames?.[key], clock.loop.value, REST);
+  return loopLayer(frames?.[key], clock.loop.value, REST);
 }
 
 export type ActorMarks = Readonly<{ reaction: CompanionFlavour | null; mood: CompanionMood }>;
@@ -51,7 +49,6 @@ type ActorProps = Readonly<{
   clock: SceneClock;
   play: PlayValues;
   frames?: ActorFrames;
-  payoff?: ActorTimed;
   marks: ActorMarks;
   ink: string;
   canvas: string;
@@ -61,7 +58,7 @@ type ActorProps = Readonly<{
  * The Companion drawn inside a scene SVG, in its own 94 × 88 geometry. Layers nest like the
  * prototype: press › reaction and mood › scene loop, so a tap never fights the running scene.
  */
-export function CompanionActor({ x, y, width, clock, play, frames, payoff, marks, ink, canvas }: ActorProps): React.JSX.Element {
+export function CompanionActor({ x, y, width, clock, play, frames, marks, ink, canvas }: ActorProps): React.JSX.Element {
   const scale = width / geometry.width;
 
   const pressProps = useAnimatedProps(() => {
@@ -86,21 +83,21 @@ export function CompanionActor({ x, y, width, clock, play, frames, payoff, marks
     };
   });
   const bodyProps = useAnimatedProps(() => {
-    const layer = motionLayer(clock, frames, payoff, 'body');
+    const layer = motionLayer(clock, frames, 'body');
     return { matrix: affine(layer.x, layer.y, layer.sx, layer.sy, layer.r, NECK[0], NECK[1]) };
   });
   const earLProps = useAnimatedProps(() => {
-    const own = motionLayer(clock, frames, payoff, 'earL');
+    const own = motionLayer(clock, frames, 'earL');
     const turn = own.r + sampleTimed(reactionPart(play, 'earL'), 'r', play.reactionAt.value, 0) + play.pose.earL.value;
     return { matrix: affine(0, 0, 1, 1, turn, EAR_L.pivot!.x, EAR_L.pivot!.y) };
   });
   const earRProps = useAnimatedProps(() => {
-    const own = motionLayer(clock, frames, payoff, 'earR');
+    const own = motionLayer(clock, frames, 'earR');
     const turn = own.r + sampleTimed(reactionPart(play, 'earR'), 'r', play.reactionAt.value, 0) + play.pose.earR.value;
     return { matrix: affine(0, 0, 1, 1, turn, EAR_R.pivot!.x, EAR_R.pivot!.y) };
   });
   const gazeProps = useAnimatedProps(() => {
-    const own = motionLayer(clock, frames, payoff, 'gaze');
+    const own = motionLayer(clock, frames, 'gaze');
     const part = reactionPart(play, 'gaze');
     const at = play.reactionAt.value;
     return {
@@ -112,7 +109,7 @@ export function CompanionActor({ x, y, width, clock, play, frames, payoff, marks
     };
   });
   const blinkProps = useAnimatedProps(() => {
-    const own = motionLayer(clock, frames, payoff, 'blink');
+    const own = motionLayer(clock, frames, 'blink');
     const height = own.sy * sampleTimed(reactionPart(play, 'blink'), 'sy', play.reactionAt.value, 1) * play.pose.blink.value;
     return { matrix: affine(0, 0, 1, height, 0, 47, EYE_LINE) };
   });

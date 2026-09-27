@@ -7,7 +7,8 @@ import { parseKeyframes as kf, timed, type TimedFrames } from './companion-keyfr
  * is petting. Keyframes are the prototype's own.
  */
 export type CompanionFlavour = 'hop' | 'wink' | 'ears' | 'tilt' | 'wow' | 'nuzzle' | 'hmph' | 'rage';
-export type CompanionMood = 'calm' | 'annoyed' | 'angry' | 'sulk' | 'pet';
+/** `glad` is the success exit: the cat smiles while its loader fades away. */
+export type CompanionMood = 'calm' | 'annoyed' | 'angry' | 'sulk' | 'pet' | 'glad';
 /** Companion layers, the right eye, the ^ ^ eyes and the manga marks (漫符) a reaction can drive. */
 export type ReactionLayer = 'body' | 'earL' | 'earR' | 'gaze' | 'blink' | 'eyeR' | 'happy'
   | 'heart1' | 'heart2' | 'spark' | 'note' | 'question' | 'bang';
@@ -83,8 +84,9 @@ export const MOOD_POSES: Readonly<Record<CompanionMood, MoodPose>> = {
   angry: { ...REST, earL: -36, earR: 36, blink: 0.36, eyeL: 28, eyeR: -28 },
   sulk: { ...REST, body: -12, gazeX: -6, gazeY: 1, blink: 0.42, earL: -18, earR: 18 },
   pet: { ...REST, earL: -9, earR: 9, blink: 0, body: 6, happy: 1 },
+  glad: { ...REST, earL: -6, earR: 6, blink: 0, happy: 1 },
 };
-export const MOOD_ORDER: ReadonlyArray<CompanionMood> = ['calm', 'annoyed', 'angry', 'sulk', 'pet'];
+export const MOOD_ORDER: ReadonlyArray<CompanionMood> = ['calm', 'annoyed', 'angry', 'sulk', 'pet', 'glad'];
 
 /** Loops that play while a mood holds (alternate ones ping-pong like CSS `alternate`). */
 export const MOOD_LOOPS = {
@@ -166,6 +168,11 @@ export function sulkTemper(temper: Temper): Temper {
 
 export function calmTemper(temper: Temper): Temper {
   return temper.mood === 'calm' ? temper : { ...temper, irritation: 0, mood: 'calm' };
+}
+
+/** The wait succeeded: whatever the mood, the cat smiles on its way out. */
+export function gladTemper(temper: Temper): Temper {
+  return temper.mood === 'glad' ? temper : { ...temper, irritation: 0, mood: 'glad' };
 }
 
 /** Petting forgives everything; a cat that is still angry or sulking will not be petted yet. */

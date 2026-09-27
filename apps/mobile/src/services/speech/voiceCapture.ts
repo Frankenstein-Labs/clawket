@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule } from 'expo';
+import { Platform } from 'react-native';
 
 /** Mono float32 PCM at 16 kHz, or the hardware rate when the device could not convert. */
 type VoiceCaptureBuffer = { captureId: string; data: ArrayBuffer; sampleRate: number; channels: number };
@@ -42,13 +43,14 @@ export const voiceCapture = {
     return native ? native.addListener('onVoiceCaptureStatus', listener) : inert;
   },
   /**
-   * Keeps the category and engine warm while any focused chat holds it, without opening the
-   * microphone. The last holder releases the audio session; an active capture finishes first.
+   * Tracks focused chats for cleanup. Only Android prepares a recorder here: touching an iOS
+   * audio session/input node can interrupt music even before recording starts.
+   * The last holder releases native resources; an active capture finishes first.
    */
   hold(): () => void {
     if (!native) return () => {};
     holders += 1;
-    void native.prepare().catch(() => {});
+    if (Platform.OS === 'android') void native.prepare().catch(() => {});
     let held = true;
     return () => {
       if (!held) return;

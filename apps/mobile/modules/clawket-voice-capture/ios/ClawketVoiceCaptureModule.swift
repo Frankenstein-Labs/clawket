@@ -24,7 +24,7 @@ public final class ClawketVoiceCaptureModule: Module {
     }
 
     AsyncFunction("prepare") {
-      try VoiceCaptureController.shared.prepare()
+      VoiceCaptureController.shared.prepare()
     }.runOnQueue(voiceCaptureQueue)
 
     AsyncFunction("start") { (captureId: String, requestedAt: Double) -> [String: Any] in
@@ -42,10 +42,9 @@ public final class ClawketVoiceCaptureModule: Module {
 }
 
 /**
- One process-wide microphone. The session category is configured once, the engine and its tap
- stay allocated between recordings, and the session stays active while idle unless activating it
- interrupted another app's audio. Nothing is captured until `start`; the engine is paused, not
- running, between recordings. All mutable state is confined to `voiceCaptureQueue`, except the
+ One process-wide microphone. Only an explicit `start` touches the audio session/input node.
+ Recording mixes with other audio; every stop deactivates the session immediately. The stopped
+ engine can be reused on the next press. All mutable state is confined to `voiceCaptureQueue`, except the
  emit target that the tap thread reads under `emitLock`.
  */
 final class VoiceCaptureController {
@@ -53,7 +52,6 @@ final class VoiceCaptureController {
   static let bufferEvent = "onVoiceCaptureBuffer"
   static let statusEvent = "onVoiceCaptureStatus"
   private static let targetSampleRate: Double = 16000
-  private static let idleDeactivationSeconds: TimeInterval = 30
 
   private weak var module: ClawketVoiceCaptureModule?
   private var engine: AVAudioEngine?
@@ -61,10 +59,8 @@ final class VoiceCaptureController {
   private var tapFormat: AVAudioFormat?
   private var tapConverter: AVAudioConverter?
   private var sessionActive = false
-  private var interruptedOthers = false
   private var captureId: String?
   private var releasePending = false
-  private var idleDeactivation: DispatchWorkItem?
 
   private let emitLock = NSLock()
   private var emitTarget: (id: String, module: ClawketVoiceCaptureModule)?
@@ -109,21 +105,10 @@ final class VoiceCaptureController {
 
   // MARK: - Commands (voiceCaptureQueue)
 
-  /// Warms everything that does not open the microphone or interrupt other audio.
-  func prepare() throws {
+  /// Compatibility for older JS callers. Even inputNode access can claim audio hardware;
+  /// navigation must not configure the session or construct an engine.
+  func prepare() {
     releasePending = false
-    guard captureId == nil, recordPermissionGranted() else {
-      return
-    }
-    try configureCategory()
-    let engine = ensureEngine()
-    let format = engine.inputNode.outputFormat(forBus: 0)
-    if sessionActive, isUsable(format) {
-      if tapFormat != format {
-        installTap(on: engine, format: format)
-      }
-      engine.prepare()
-    }
   }
 
   func start(captureId id: String, requestedAt: Double) throws -> [String: Any] {
@@ -135,7 +120,6 @@ final class VoiceCaptureController {
       finishCapture(current)
     }
     releasePending = false
-    cancelIdleDeactivation()
 
     let session = AVAudioSession.sharedInstance()
     let warm = sessionActive && engine != nil && tapFormat != nil
@@ -150,7 +134,6 @@ final class VoiceCaptureController {
         try session.setActive(true)
         activateMs = milliseconds(since: activation)
         sessionActive = true
-        interruptedOthers = otherAudio
       }
 
       let preparation = Date()
@@ -212,7 +195,6 @@ final class VoiceCaptureController {
   }
 
   func release() {
-    cancelIdleDeactivation()
     if captureId != nil {
       // The owning attempt's stop completes the release; another screen never stops it.
       releasePending = true
@@ -225,7 +207,9 @@ final class VoiceCaptureController {
 
   private func configureCategory() throws {
     let session = AVAudioSession.sharedInstance()
-    let options: AVAudioSession.CategoryOptions = [.defaultToSpeaker]
+    // Keep music/podcasts audible, including stereo Bluetooth output. Do not opt into
+    // HFP input (which changes the headset route) or duck/interrupt other sessions.
+    let options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers, .allowBluetoothA2DP]
     if session.category != .playAndRecord || session.mode != .measurement || session.categoryOptions != options {
       try session.setCategory(.playAndRecord, mode: .measurement, options: options)
     }
@@ -240,7 +224,7 @@ final class VoiceCaptureController {
       return engine
     }
     let engine = AVAudioEngine()
-    // Instantiates the input unit now instead of on the press.
+    // Instantiates the input unit only after an explicit recording request.
     _ = engine.inputNode
     configurationObserver = NotificationCenter.default.addObserver(
       forName: .AVAudioEngineConfigurationChange,
@@ -293,11 +277,8 @@ final class VoiceCaptureController {
   private func settleIdleSession() {
     if releasePending {
       teardown()
-    } else if interruptedOthers {
-      // Let the interrupted app resume now, exactly as a released recorder would.
-      deactivate()
     } else {
-      scheduleIdleDeactivation()
+      deactivate()
     }
   }
 
@@ -324,39 +305,18 @@ final class VoiceCaptureController {
   }
 
   private func deactivate() {
-    cancelIdleDeactivation()
     guard sessionActive else {
       return
     }
     engine?.stop()
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     sessionActive = false
-    interruptedOthers = false
-  }
-
-  private func scheduleIdleDeactivation() {
-    cancelIdleDeactivation()
-    let work = DispatchWorkItem {
-      let controller = VoiceCaptureController.shared
-      if controller.captureId == nil {
-        controller.deactivate()
-      }
-    }
-    idleDeactivation = work
-    voiceCaptureQueue.asyncAfter(deadline: .now() + Self.idleDeactivationSeconds, execute: work)
-  }
-
-  private func cancelIdleDeactivation() {
-    idleDeactivation?.cancel()
-    idleDeactivation = nil
   }
 
   // MARK: - System notifications (voiceCaptureQueue)
 
   private func handleInterruption() {
-    cancelIdleDeactivation()
     sessionActive = false
-    interruptedOthers = false
     guard let id = captureId else {
       return
     }
@@ -370,7 +330,6 @@ final class VoiceCaptureController {
       return
     }
     // The engine stopped itself because the route or hardware format changed.
-    let format = engine.inputNode.outputFormat(forBus: 0)
     guard let id = captureId else {
       if tapFormat != nil {
         engine.inputNode.removeTap(onBus: 0)
@@ -379,6 +338,7 @@ final class VoiceCaptureController {
       tapConverter = nil
       return
     }
+    let format = engine.inputNode.outputFormat(forBus: 0)
     if isUsable(format) {
       if tapFormat != format {
         installTap(on: engine, format: format)
@@ -389,6 +349,7 @@ final class VoiceCaptureController {
     }
     let module = self.module
     finishCapture(id)
+    settleIdleSession()
     module?.emit(event: Self.statusEvent, payload: ["captureId": id, "reason": "route"])
   }
 
@@ -406,8 +367,6 @@ final class VoiceCaptureController {
     tapFormat = nil
     tapConverter = nil
     sessionActive = false
-    interruptedOthers = false
-    cancelIdleDeactivation()
     if let id {
       module?.emit(event: Self.statusEvent, payload: ["captureId": id, "reason": "reset"])
     }

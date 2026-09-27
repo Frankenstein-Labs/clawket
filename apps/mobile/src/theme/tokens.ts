@@ -249,8 +249,8 @@ export const Motion = {
   loadingSlowHint: 6_000,
   /** A long wait switches to another Companion scene this often. */
   loadingSceneRotate: 9_000,
-  /** A loader stays this long after a successful wait to play its payoff over the arriving content. */
-  loadingPayoff: 700,
+  /** A loader stays mounted this long after a successful wait: its `duration.normal` fade plus a frame margin. */
+  loadingExit: 260,
   avatarDoneFade: 3_000,
   /** Dictation waveform: one soft listening pulse leaves the centre per period while the room is quiet. */
   voiceRipple: 2_600,

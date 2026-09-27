@@ -559,7 +559,7 @@ export function ThreadView({
     && !connectionFailure?.message && (state.kind === 'offline' || connectionOutage);
   const showConnectionFailure = Boolean(connectionFailure && savedScope !== connectionFailure.scope
     && offline && !retainReadableConversation);
-  // The Companion covers the timeline while it waits, then plays its success payoff over the arriving content.
+  // The Companion covers the timeline while it waits, then fades away at once over the arriving content.
   const loaderActive = !(showConnectionFailure && connectionFailure)
     && (state.kind === 'loading' || (state.kind === 'reconnecting' && messages.length === 0));
   const loaderPhase = useLoadingHandoff(loaderActive, state.kind === 'ready' || state.kind === 'empty');
@@ -1185,7 +1185,7 @@ export function ThreadView({
               ) : null}
             </>
           )}
-          {/* One mounted loader for the wait and its payoff, so the scene that waited is the one that celebrates. */}
+          {/* One mounted loader for the wait and its exit, so the scene that waited is the one that fades away. */}
           {loaderPhase ? (
             <View
               pointerEvents={loaderPhase === 'ready' ? 'none' : 'box-none'}

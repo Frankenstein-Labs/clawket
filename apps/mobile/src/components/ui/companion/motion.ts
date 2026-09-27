@@ -3,10 +3,9 @@ import { cancelAnimation, Easing, useAnimatedProps, useSharedValue, withRepeat, 
 import { sampleTimed, sampleTrack, type Keyframes, type TimedFrames } from '../../../brand/companion-keyframes';
 import type { MoodPose } from '../../../brand/companion-temper';
 
-/** Scene clocks: loop progress (0–1), and milliseconds since the payoff / a wake-up began (−1 when not). */
+/** Scene clocks: loop progress (0–1), and milliseconds since a tap woke a hidden cat (−1 when not). */
 export type SceneClock = Readonly<{
   loop: SharedValue<number>;
-  payoff: SharedValue<number>;
   wake: SharedValue<number>;
 }>;
 
@@ -62,13 +61,9 @@ export function timedLayer(part: TimedFrames | undefined, elapsed: number, base:
   };
 }
 
-/**
- * One stage layer. As in the prototype's CSS, the payoff replaces the loop (layers without a payoff
- * part fall back to their static base), and a wake-up replaces the loop until it ends.
- */
+/** One stage layer. As in the prototype's CSS, a wake-up replaces the loop until it ends. */
 export type StageLayer = Readonly<{
   loop?: Keyframes;
-  payoff?: TimedFrames;
   /** `hide` rests at `base` while a tapped cat is out; a part plays the wake-up instead. */
   wake?: TimedFrames | 'hide';
   base?: Readonly<Partial<Layer>>;
@@ -78,7 +73,6 @@ export type StageLayer = Readonly<{
 export function stageLayer(clock: SceneClock, spec: StageLayer): Layer {
   'worklet';
   const base = { ...REST, ...spec.base };
-  if (clock.payoff.value >= 0) return spec.payoff ? timedLayer(spec.payoff, clock.payoff.value, base) : base;
   if (clock.wake.value >= 0 && spec.wake) return spec.wake === 'hide' ? base : timedLayer(spec.wake, clock.wake.value, base);
   return loopLayer(spec.loop, clock.loop.value, base);
 }

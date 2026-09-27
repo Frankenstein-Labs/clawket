@@ -1,4 +1,4 @@
-import { parseKeyframes as kf, timed, type Keyframes, type TimedFrames } from './companion-keyframes';
+import { parseKeyframes as kf, timed, type Keyframes } from './companion-keyframes';
 
 /**
  * The owner-approved loading scenes (2026-09-27 design canvas, "Clawket 等待动效方案").
@@ -9,7 +9,6 @@ export type CompanionSceneKey = 'peek' | 'fetch' | 'yarn' | 'pounce' | 'listen';
 
 /** Companion layers a scene or reaction may drive. */
 export type ActorFrames = Readonly<Partial<Record<'body' | 'earL' | 'earR' | 'gaze' | 'blink', Keyframes>>>;
-export type ActorTimed = Readonly<Partial<Record<'body' | 'earL' | 'earR' | 'gaze' | 'blink', TimedFrames>>>;
 
 /** Page scenes and their share of entries (owner decision 2026-09-27: Pounce is the rare one). */
 export const SCENE_POOL: ReadonlyArray<readonly [CompanionSceneKey, number]> = [
@@ -39,20 +38,11 @@ export const STAGE = { width: 280, height: 170 } as const;
 /** Pounce jumps higher, so its stage is ten points taller. */
 export const POUNCE_STAGE_HEIGHT = 180;
 
-const SQUINT = kf(`0%,30%{transform:scaleY(1)}45%{transform:scaleY(1.15)}62%,100%{transform:scaleY(.3)}`);
-const PERK_L = kf(`0%{transform:rotate(0)}45%{transform:rotate(-14deg)}100%{transform:rotate(0)}`);
-const PERK_R = kf(`0%{transform:rotate(0)}45%{transform:rotate(14deg)}100%{transform:rotate(0)}`);
-
 export const PEEK = {
   loop: 7_200,
   rig: kf(`0%,6%{transform:translate(0,80px);animation-timing-function:cubic-bezier(.2,.9,.3,1.25)} 10%{transform:translate(0,44px)} 12.5%,15%{transform:translate(0,48px);animation-timing-function:cubic-bezier(.2,.8,.3,1.15)} 19%{transform:translate(0,16px)} 21.5%,37%{transform:translate(0,19px);animation-timing-function:cubic-bezier(.55,0,.9,.4)} 40%{transform:translate(0,84px)} 40.01%,45%{transform:translate(46px,84px);animation-timing-function:cubic-bezier(.2,1,.3,1.3)} 48%{transform:translate(46px,1px)} 51%,64%{transform:translate(46px,8px);animation-timing-function:cubic-bezier(.55,0,.9,.4)} 67%{transform:translate(46px,84px)} 67.01%,73%{transform:translate(-46px,84px);animation-timing-function:cubic-bezier(.3,.7,.4,1)} 79%{transform:translate(-46px,32px)} 81%,90%{transform:translate(-46px,29px);animation-timing-function:cubic-bezier(.55,0,.9,.4)} 93%{transform:translate(-46px,84px)} 93.01%,100%{transform:translate(0,80px)}`),
   paws: kf(`0%,19.5%{transform:translate(0,4px);opacity:0} 21.5%,37%{transform:translate(0,0);opacity:1} 39%{transform:translate(0,5px);opacity:0} 39.01%,48.5%{transform:translate(46px,5px);opacity:0} 50.5%,64%{transform:translate(46px,0);opacity:1} 66%{transform:translate(46px,5px);opacity:0} 66.01%,100%{transform:translate(-46px,5px);opacity:0}`),
   cat: { gaze: kf(`0%,21%{transform:translate(0,0)} 23%,25.5%{transform:translate(-4px,0)} 27.5%,30%{transform:translate(4px,0)} 31.5%,54%{transform:translate(0,0)} 56.5%,62%{transform:translate(-4px,1px)} 64%,77%{transform:translate(0,0)} 80%,89%{transform:translate(4px,-1px)} 92%,100%{transform:translate(0,0)}`), blink: kf(`0%,31.5%{transform:scaleY(1);animation-timing-function:ease-in-out} 34%,35.5%{transform:scaleY(.1);animation-timing-function:ease-in-out} 38.5%,47%{transform:scaleY(1)} 48.5%{transform:scaleY(1.2)} 52%,84%{transform:scaleY(1)} 85%{transform:scaleY(.1)} 86.5%,100%{transform:scaleY(1)}`), earL: kf(`0%,9%{transform:rotate(0)}10.5%{transform:rotate(-11deg)}12%{transform:rotate(3deg)}13.5%,47%{transform:rotate(0)} 48.5%{transform:rotate(-13deg)}51%,86%{transform:rotate(0)}87%{transform:rotate(-9deg)}88.5%,100%{transform:rotate(0)}`), earR: kf(`0%,10%{transform:rotate(0)}11.5%{transform:rotate(11deg)}13%{transform:rotate(-3deg)}14.5%,47%{transform:rotate(0)} 48.5%{transform:rotate(13deg)}51%,81%{transform:rotate(0)}82%{transform:rotate(9deg)}83.5%,100%{transform:rotate(0)}`), body: kf(`0%,52%{transform:rotate(0)}55%,62%{transform:rotate(-9deg)}65%,79%{transform:rotate(0)}81.5%,90%{transform:rotate(7deg)}92%,100%{transform:rotate(0)}`) } as ActorFrames,
-  ready: {
-    rig: timed(kf(`0%{transform:translate(0,84px)}100%{transform:translate(0,-4px)}`, 'cubic-bezier(.2,1,.3,1.25)'), 460),
-    paws: timed(kf(`0%,40%{opacity:0;transform:translate(0,5px)}70%,100%{opacity:1;transform:translate(0,0)}`), 460),
-    cat: { blink: timed(SQUINT, 700), earL: timed(PERK_L, 500), earR: timed(PERK_R, 500) } as ActorTimed,
-  },
   /** A tap on the hidden cat brings it out to look at you. */
   wake: { rig: timed(kf(`0%{transform:translate(0,84px)}60%{transform:translate(0,1px)}100%{transform:translate(0,6px)}`, 'cubic-bezier(.2,1,.3,1.3)'), 420), paws: timed(kf(`0%,45%{opacity:0;transform:translate(0,5px)}80%,100%{opacity:1;transform:translate(0,0)}`), 420) },
 } as const;
@@ -67,11 +57,6 @@ export const FETCH = {
   dirt: kf(`0%{opacity:0;transform:translate(0,4px)}40%{opacity:1;transform:translate(0,-3px)}100%{opacity:0;transform:translate(0,2px)}`),
   dirtPeriod: 360,
   fish: kf(`0%,76%{opacity:0;transform:translate(0,14px) rotate(0)} 77.5%,83.8%{opacity:1;transform:translate(0,0) rotate(0);animation-timing-function:cubic-bezier(.2,.6,.4,1)} 87.5%{opacity:1;transform:translate(46px,-66px) rotate(-220deg)} 89.5%,100%{opacity:0;transform:translate(58px,-78px) rotate(-300deg)}`),
-  ready: {
-    right: timed(kf(`0%{transform:translate(0,74px)}50%{transform:translate(0,-16px)}72%,100%{transform:translate(0,-9px)}`, 'cubic-bezier(.2,1,.3,1.2)'), 600),
-    rightCat: { blink: timed(SQUINT, 800), earL: timed(PERK_L, 500), earR: timed(PERK_R, 500) } as ActorTimed,
-    gift: timed(kf(`0%,24%{opacity:0;transform:translate(0,30px) scale(.8)}46%,62%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(-78px,-34px) scale(2.4)}`), 850),
-  },
   wake: { right: timed(kf(`0%{transform:translate(0,74px)}60%{transform:translate(0,4px)}100%{transform:translate(0,10px)}`, 'cubic-bezier(.2,1,.3,1.3)'), 420) },
 } as const;
 
@@ -81,14 +66,6 @@ export const YARN = {
   thread: kf(`0%,14.6%{stroke-dashoffset:93;animation-timing-function:cubic-bezier(.12,.75,.3,1)} 36%{stroke-dashoffset:2;animation-timing-function:ease-in-out} 38.5%{stroke-dashoffset:7}41%{stroke-dashoffset:3} 43%,45%{stroke-dashoffset:5;animation-timing-function:cubic-bezier(.45,0,.35,1)} 71%,100%{stroke-dashoffset:93}`),
   paw: kf(`0%,9%{opacity:0;transform:translate(-8px,2px) rotate(0)}11%{opacity:1;transform:translate(-4px,0) rotate(8deg)}14.6%{opacity:1;transform:translate(16px,-2px) rotate(-14deg)}18%{opacity:1;transform:translate(2px,0) rotate(0)}21%,100%{opacity:0;transform:translate(-8px,2px) rotate(0)}`),
   cat: { body: kf(`0%,6%{transform:rotate(0)}12%{transform:rotate(5deg)}15%{transform:rotate(9deg)}22%,36%{transform:rotate(6deg)}40%{transform:rotate(9deg)}48%,64%{transform:rotate(-4deg)}72%,100%{transform:rotate(0)}`), gaze: kf(`0%,4%{transform:translate(0,0)}8%,15%{transform:translate(3px,2px)}24%,44%{transform:translate(4px,1px)}58%{transform:translate(4px,2px)}70%,80%{transform:translate(2px,2px)}86%,100%{transform:translate(0,0)}`), blink: kf(`0%,38%{transform:scaleY(1)}40%{transform:scaleY(1.18)}44%,84%{transform:scaleY(1)}85.5%{transform:scaleY(.1)}87%,100%{transform:scaleY(1)}`), earL: kf(`0%,5%{transform:rotate(0)}9%,15%{transform:rotate(7deg)}20%,40%{transform:rotate(0)}41.5%{transform:rotate(-10deg)}44%,100%{transform:rotate(0)}`), earR: kf(`0%,5%{transform:rotate(0)}9%,15%{transform:rotate(-7deg)}20%,39%{transform:rotate(0)}40.5%{transform:rotate(11deg)}43%,100%{transform:rotate(0)}`) } as ActorFrames,
-  ready: {
-    ball: timed(kf(`0%{transform:translate(0,0) rotate(0);opacity:1}55%{transform:translate(104px,0) rotate(540deg);opacity:1}70%,100%{transform:translate(104px,0) rotate(540deg);opacity:0}`, 'cubic-bezier(.12,.75,.3,1)'), 600),
-    thread: timed(kf(`0%{stroke-dashoffset:93;opacity:1}55%{stroke-dashoffset:0;opacity:1}70%,100%{stroke-dashoffset:0;opacity:0}`), 600),
-    taut: timed(kf(`0%,50%{opacity:0;stroke-dashoffset:140}62%{opacity:1;stroke-dashoffset:0}100%{opacity:1;stroke-dashoffset:0}`), 750),
-    screen: timed(kf(`0%,52%{opacity:0}62%,100%{opacity:1}`), 750),
-    pulse: timed(kf(`0%,62%{opacity:0;transform:translate(226px,113px)}66%{opacity:1}90%{opacity:1;transform:translate(92px,124px)}100%{opacity:0;transform:translate(90px,124px)}`), 800),
-    cat: { blink: timed(SQUINT, 800), earL: timed(PERK_L, 500, 250), earR: timed(PERK_R, 500, 250) } as ActorTimed,
-  },
 } as const;
 
 export const POUNCE = {
@@ -97,13 +74,6 @@ export const POUNCE = {
   rig: kf(`0%,27%{transform:translate(0,0) scale(1,1)} 30%{transform:translate(0,3px) scale(1.05,.92)} 31.5%{transform:translate(-2px,3px) scale(1.05,.92)}33%{transform:translate(2px,3px) scale(1.05,.92)} 34.5%{transform:translate(-2px,3px) scale(1.05,.92)}36%{transform:translate(2px,3px) scale(1.05,.92)} 37.5%{transform:translate(-2px,3px) scale(1.05,.92)}39%{transform:translate(2px,3px) scale(1.05,.92)} 40.5%{transform:translate(-2px,3px) scale(1.05,.92)}42%{transform:translate(0,3px) scale(1.05,.92)} 44%{transform:translate(0,5px) scale(1.09,.85);animation-timing-function:cubic-bezier(.3,0,.6,1)} 46.2%{transform:translate(36px,-42px) scale(.92,1.1) rotate(9deg);animation-timing-function:cubic-bezier(.45,0,.85,.6)} 48.5%{transform:translate(66px,0) scale(1.13,.84) rotate(0)} 51%{transform:translate(66px,0) scale(.97,1.04)} 53%,70%{transform:translate(66px,0) scale(1,1)} 73%{transform:translate(33px,-16px) scale(.97,1.04)} 76%{transform:translate(0,0) scale(1.05,.94)} 78%,100%{transform:translate(0,0) scale(1,1)}`),
   shadow: kf(`0%,42%{transform:translate(0,0) scale(1);opacity:1} 44%{transform:translate(0,0) scale(1.1,1)} 46.2%{transform:translate(36px,0) scale(.55);opacity:.45} 48.5%{transform:translate(66px,0) scale(1.12,1);opacity:1} 53%,70%{transform:translate(66px,0) scale(1)} 73%{transform:translate(33px,0) scale(.8);opacity:.7} 76%,100%{transform:translate(0,0) scale(1);opacity:1}`),
   cat: { body: kf(`0%,2%{transform:rotate(0)}6%,12%{transform:rotate(-5deg)}17%,23%{transform:rotate(5deg)}29%,44%{transform:rotate(3deg)}49%,54%{transform:rotate(0)}56%{transform:rotate(-7deg)}58.5%{transform:rotate(6deg)}61%{transform:rotate(-4deg)}63%,76%{transform:rotate(0)}84%,88%{transform:rotate(-3deg)}96%,100%{transform:rotate(0)}`), gaze: kf(`0%{transform:translate(2px,-2px)}5%,12%{transform:translate(-4px,-2px)}16%,24%{transform:translate(4px,-1px)}28%,46%{transform:translate(4px,2px)}49.5%,72%{transform:translate(-4px,-3px)}83%,90%{transform:translate(0,-3px)}100%{transform:translate(2px,-2px)}`), blink: kf(`0%,10%{transform:scaleY(1)}11%{transform:scaleY(.1)}12.5%,48.5%{transform:scaleY(1)}50%,57%{transform:scaleY(1.22)}60%,90%{transform:scaleY(1)}91%{transform:scaleY(.1)}92.5%,100%{transform:scaleY(1)}`), earL: kf(`0%,3%{transform:rotate(0)}6%,12%{transform:rotate(-10deg)}17%,24%{transform:rotate(4deg)}29%,46%{transform:rotate(8deg)}49.5%,56%{transform:rotate(-15deg)}62%,100%{transform:rotate(0)}`), earR: kf(`0%,3%{transform:rotate(0)}6%,12%{transform:rotate(-3deg)}17%,24%{transform:rotate(10deg)}29%,46%{transform:rotate(-8deg)}49.5%,56%{transform:rotate(15deg)}62%,100%{transform:rotate(0)}`) } as ActorFrames,
-  ready: {
-    cursor: timed(kf(`0%,38%{opacity:1;transform:translate(206px,128px)}44%,100%{opacity:0;transform:translate(206px,130px)}`), 800),
-    rig: timed(kf(`0%{transform:translate(0,0) scale(1,1)}14%{transform:translate(0,5px) scale(1.09,.85);animation-timing-function:cubic-bezier(.3,0,.6,1)}28%{transform:translate(36px,-42px) scale(.92,1.1) rotate(9deg);animation-timing-function:cubic-bezier(.45,0,.85,.6)}42%{transform:translate(66px,0) scale(1.13,.84)}56%{transform:translate(66px,0) scale(.97,1.04)}70%,100%{transform:translate(66px,0) scale(1,1)}`), 800),
-    shadow: timed(kf(`0%{transform:translate(0,0) scale(1)}28%{transform:translate(36px,0) scale(.55);opacity:.45}42%,100%{transform:translate(66px,0) scale(1.1,1);opacity:1}`), 800),
-    ring: timed(kf(`0%,42%{opacity:0;transform:scale(.3)}48%{opacity:1}80%,100%{opacity:0;transform:scale(1.9)}`), 900),
-    cat: { blink: timed(SQUINT, 800), gaze: timed(kf(`0%{transform:translate(4px,2px)}40%{transform:translate(3px,3px)}70%,100%{transform:translate(0,-1px)}`), 800) } as ActorTimed,
-  },
 } as const;
 
 export const LISTEN = {
@@ -112,8 +82,4 @@ export const LISTEN = {
   ringsL: [kf(`0%,8%{opacity:0;transform:scale(.4)}12%{opacity:.85}27%,100%{opacity:0;transform:scale(1.7)}`), kf(`0%,15%{opacity:0;transform:scale(.4)}19%{opacity:.85}34%,100%{opacity:0;transform:scale(1.7)}`)],
   ringsR: [kf(`0%,42%{opacity:0;transform:scale(.4)}46%{opacity:.85}61%,100%{opacity:0;transform:scale(1.7)}`), kf(`0%,49%{opacity:0;transform:scale(.4)}53%{opacity:.85}68%,100%{opacity:0;transform:scale(1.7)}`)],
   pong: kf(`0%,64%{opacity:0;transform:translate(26px,0) scale(1.5)}68%{opacity:.8}74%,100%{opacity:0;transform:translate(-18px,0) scale(.5)}`),
-  ready: {
-    cat: { earL: timed(kf(`0%{transform:rotate(0)}30%{transform:rotate(10deg)}60%,100%{transform:rotate(-4deg)}`), 700), earR: timed(kf(`0%{transform:rotate(0)}30%{transform:rotate(-10deg)}60%,100%{transform:rotate(4deg)}`), 700), blink: timed(SQUINT, 800) } as ActorTimed,
-    ring: timed(kf(`0%,20%{opacity:0;transform:scale(.6)}30%{opacity:.8}80%,100%{opacity:0;transform:scale(2.3)}`), 900),
-  },
 } as const;

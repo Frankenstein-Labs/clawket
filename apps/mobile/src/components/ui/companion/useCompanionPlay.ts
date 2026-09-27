@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cancelAnimation, useSharedValue, withTiming } from 'react-native-reanimated';
 import {
-  calmTemper, CLAW_MS, forgiveTemper, MOOD_ORDER, MOOD_POSES, newTemper, petTemper, pokeTemper, REACTION_MS,
+  calmTemper, CLAW_MS, forgiveTemper, gladTemper, MOOD_ORDER, MOOD_POSES, newTemper, petTemper, pokeTemper, REACTION_MS,
   REACTION_ORDER, sulkTemper, TEMPER_TIMING, type CompanionFlavour, type CompanionMood, type MoodPose, type Temper,
 } from '../../../brand/companion-temper';
 import { triggerHeavyImpact, triggerLightImpact, triggerMediumImpact, triggerSelectionHaptic } from '../../../services/haptics';
@@ -31,9 +31,11 @@ export type CompanionPlay = Readonly<{
  * The cat's temper: taps, rapid taps and petting (owner-approved prototype, 2026-09-27). Pure rules live
  * in `companion-temper`; this hook owns the timers, haptics and the shared values the layers read.
  */
-export function useCompanionPlay({ enabled, running, canHide, clock, onWakeEnd }: Readonly<{
-  /** Taps are accepted (waiting, not the success payoff). */
+export function useCompanionPlay({ enabled, celebrating = false, running, canHide, clock, onWakeEnd }: Readonly<{
+  /** Taps are accepted (waiting, not the success exit). */
   enabled: boolean;
+  /** The wait succeeded: the cat smiles (^ ^) while its loader fades out. */
+  celebrating?: boolean;
   /** Foregrounded with motion allowed. */
   running: boolean;
   /** The scene can hide the cat (behind the box or underground); a tap brings it out. */
@@ -177,19 +179,19 @@ export function useCompanionPlay({ enabled, running, canHide, clock, onWakeEnd }
     return () => clearInterval(ticker);
   }, [enabled, setTemper]);
 
-  // The payoff, the background and unmounting settle everything at once.
+  // Success, the background and unmounting settle everything at once; success leaves the cat smiling.
   useEffect(() => {
     if (enabled) return undefined;
     for (const timer of timers.current.values()) clearTimeout(timer);
     timers.current.clear();
     petting.current = false;
     stopPurr();
-    setTemper(calmTemper(temperRef.current));
+    setTemper(celebrating ? gladTemper(temperRef.current) : calmTemper(temperRef.current));
     react(null);
     setSwipe(0);
     stopTimer(claw);
     return undefined;
-  }, [claw, enabled, react, setTemper, stopPurr]);
+  }, [celebrating, claw, enabled, react, setTemper, stopPurr]);
 
   // Unmount only: timers, the purr and running clocks never outlive the scene.
   const clocks = useRef([press, reactionAt, moodAt, claw]);

@@ -239,7 +239,7 @@ export function useChatVoiceInput(options: Props) {
     });
     return () => { mounted.current = false; permissionGeneration.current++; suspend(); sub.remove(); };
   }, [suspend]);
-  // A focused chat keeps the recorder prepared; nothing is captured until a press.
+  // Focus owns cleanup; only Android preallocates audio resources before a press.
   useEffect(() => {
     if (!captureWarm || options.enabled === false || !supported) return undefined;
     return voiceCapture.hold();

@@ -174,7 +174,7 @@ export function DesignSystemScreen({
             </View>
             <Button testID="design-companion-ready" label={t('Ready', { ns: 'config' })} variant="neutral" disabled={brandPhase === 'ready'} onPress={() => {
               setBrandPhase('ready');
-              brandReset.current = setTimeout(() => replayBrandScene(brandScene), 1_600);
+              brandReset.current = setTimeout(() => replayBrandScene(brandScene), 900);
             }} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }}>
               <LoadingState size="compact" scene="peek" />

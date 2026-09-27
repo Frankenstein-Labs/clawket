@@ -1,5 +1,5 @@
 import {
-  calmTemper, forgiveTemper, MOOD_ORDER, MOOD_POSES, newTemper, petTemper, pokeTemper, REACTION_MS, REACTION_ORDER, REACTION_TABLE,
+  calmTemper, forgiveTemper, gladTemper, MOOD_ORDER, MOOD_POSES, newTemper, petTemper, pokeTemper, REACTION_MS, REACTION_ORDER, REACTION_TABLE,
   REACTIONS, sulkTemper, TEMPER_WARNING, type CompanionFlavour, type Temper,
 } from './companion-temper';
 
@@ -71,6 +71,13 @@ describe('tap reactions', () => {
     expect(petTemper(angry)).toBe(angry);
     expect(forgiveTemper(petTemper(annoyed)).mood).toBe('pet');
   });
+
+  it('smiles on success whatever the mood, even mid-sulk', () => {
+    const sulking: Temper = { irritation: 6, limit: 6, mood: 'sulk', last: 'rage' };
+    expect(gladTemper(sulking)).toMatchObject({ irritation: 0, mood: 'glad' });
+    const glad = gladTemper(newTemper());
+    expect(gladTemper(glad)).toBe(glad);
+  });
 });
 
 describe('reaction data', () => {
@@ -87,6 +94,7 @@ describe('reaction data', () => {
   it('holds a pose for every mood, with petting showing the ^ ^ eyes', () => {
     expect(Object.keys(MOOD_POSES).sort()).toEqual([...MOOD_ORDER].sort());
     expect(MOOD_POSES.pet).toMatchObject({ blink: 0, happy: 1 });
+    expect(MOOD_POSES.glad).toMatchObject({ blink: 0, happy: 1 });
     expect(MOOD_POSES.calm).toMatchObject({ blink: 1, happy: 0, earL: 0, earR: 0 });
     expect(MOOD_POSES.angry.earL).toBeLessThan(MOOD_POSES.annoyed.earL);
   });

@@ -209,7 +209,7 @@ describe('durable voice lifecycle', () => {
     await act(async () => { result.resolve('kept'); await tick(); });
     expect(hook.setInput).toHaveBeenCalledWith('Existing draft kept'); expect(hook.onSubmit).not.toHaveBeenCalled();
   });
-  it('keeps the recorder warm only while the chat is focused and foregrounded', async () => {
+  it('holds cleanup ownership only while the chat is focused and foregrounded without starting capture', async () => {
     const hook = setup(); await act(tick);
     expect(hold).toHaveBeenCalledTimes(1); expect(released).not.toHaveBeenCalled();
     await act(async () => { hook.rerender({ scope: 'openclaw/main', enabled: false }); await tick(); });
@@ -218,5 +218,9 @@ describe('durable voice lifecycle', () => {
     expect(hold).toHaveBeenCalledTimes(2);
     await act(async () => { background('background'); await tick(); });
     expect(released).toHaveBeenCalledTimes(2);
+    await act(async () => { background('active'); await tick(); });
+    await act(async () => { hook.rerender({ scope: 'hermes/main', enabled: true }); await tick(); });
+    expect(start).not.toHaveBeenCalled();
+    expect(Audio.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
   });
 });
