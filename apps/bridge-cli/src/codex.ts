@@ -46,17 +46,28 @@ export async function handleCodexCommand(args: string[]): Promise<void> {
   }
   if (['pair', 'status', 'doctor', 'stop', 'restart', 'reset', 'start'].includes(command)) {
     let health: { model: string; modelReady: boolean } | undefined;
-    try { health = await codexControl(config); } catch { /* An offline runtime may be started or diagnosed below. */ }
+    const explicitStop = ['stop', 'restart', 'reset'].includes(command);
+    let stoppedOwned = false;
+    if (explicitStop) {
+      try { await codexControl(config, 'bridge.stop'); stoppedOwned = true; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ECONNREFUSED') throw error; }
+    } else {
+      try { health = await codexControl(config); } catch { /* An offline runtime may be started or diagnosed below. */ }
+    }
     if (command === 'status') { console.log(`Codex · ${label}: ${health ? 'ready' : 'offline'}`); return; }
-    if (command === 'doctor' && health) { console.log(`Codex RPC: ready\nModel: ${health.modelReady ? 'configured' : 'run codex login in this project'}`); return; }
-    if (['pair', 'stop', 'restart', 'reset'].includes(command) && health) {
-      if (command === 'pair') { const sessions = await codexControl(config, 'sessions.list') as unknown as Array<{ hasActiveRun?: boolean }>; if (sessions.some(s => s.hasActiveRun)) throw new Error('Finish the current Codex task before refreshing pairing. Existing phone connections remain usable.'); }
+    if (command === 'doctor' && health) { console.log(`Codex RPC: ready\nModel: ${health.modelReady ? 'configured' : 'sign in to Codex on this computer'}`); return; }
+    if (command === 'pair' && health) {
+      const sessions = await codexControl(config, 'sessions.list') as unknown as Array<{ hasActiveRun?: boolean }>;
+      if (sessions.some(s => s.hasActiveRun)) throw new Error('Finish the current Codex task before refreshing pairing. Existing phone connections remain usable.');
       await codexControl(config, 'bridge.stop');
+      stoppedOwned = true;
+    }
+    if (stoppedOwned) {
       const deadline = Date.now() + 10000;
       while (existsSync(join(directory, 'sessions', 'owner.lock'))) { if (Date.now() > deadline) throw new Error('Codex is still stopping; retry after it exits.'); await new Promise(r => setTimeout(r, 100)); }
     }
     if (command === 'reset') { if (existsSync(join(directory, 'sessions', 'owner.lock'))) throw new Error('Stop the Codex owner before resetting pairing'); if (existsSync(configPath)) unlinkSync(configPath); console.log('Codex pairing cleared. Session history retained.'); return; }
-    if (command === 'stop') { console.log(health ? 'Codex Bridge stopped.' : 'Codex Bridge is offline.'); return; }
+    if (command === 'stop') { console.log(stoppedOwned ? 'Codex Bridge stopped.' : 'Codex Bridge is offline.'); return; }
     if (command === 'start' && health) { console.log('Codex Bridge is already running.'); return; }
     if (command === 'start' || command === 'restart') { if (!existsSync(configPath)) throw new Error('Pair this Codex connection first'); await startCodexBackground(['run', '--config', configPath], join(directory, 'codex.log')); return; }
   }
@@ -70,7 +81,7 @@ export async function handleCodexCommand(args: string[]): Promise<void> {
   let server: CodexServer | undefined, relay: CodexRelay | undefined;
   try {
     const health = await service.health() as { model: string; modelReady: boolean };
-    if (command === 'doctor') { console.log(`Codex ${installed.version} RPC: ready\nModel: ${health.modelReady ? 'configured' : 'not configured — run codex login in this project'}\nProject: ${basename(config.project)}`); return; }
+    if (command === 'doctor') { console.log(`Codex ${installed.version} RPC: ready\nModel: ${health.modelReady ? 'configured' : 'not configured — sign in to Codex on this computer'}\nProject: ${basename(config.project)}`); return; }
     let qrPayload: string | undefined, code: string | undefined;
     if (command === 'pair') {
       if (args.includes('local') || args.includes('--local')) {

@@ -35,3 +35,21 @@ it('contains malformed JSON without crashing or authenticating the socket', asyn
   const next = await open();
   expect(await call(next, { type: 'req', id: 'good', method: 'connect', params: { token } })).toMatchObject({ ok: true });
 });
+
+it('keeps authenticated lifecycle control available after native health fails', async () => {
+  Object.assign(service, { request: async () => { throw new Error('Codex process is unavailable'); } });
+  const phone = await open();
+  expect(await call(phone, { type: 'req', id: 'phone', method: 'connect', params: { token } })).toMatchObject({ ok: false });
+  const control = await open();
+  expect(await call(control, { type: 'req', id: 'auth', method: 'connect', params: { token, controlOnly: true } }))
+    .toMatchObject({ ok: true, payload: { backend: 'codex', controlReady: true } });
+  const shutdown = once(service, 'shutdown');
+  expect(await call(control, { type: 'req', id: 'stop', method: 'bridge.stop' })).toMatchObject({ id: 'stop', ok: true });
+  await shutdown;
+});
+
+it('never accepts lifecycle control without the existing token', async () => {
+  const s = await open(), closed = once(s, 'close');
+  s.send(JSON.stringify({ type: 'req', id: 'auth', method: 'connect', params: { token: 'wrong', controlOnly: true } }));
+  expect((await closed)[0]).toBe(1008);
+});

@@ -204,7 +204,9 @@ export class CodexService extends EventEmitter {
       const cached = this.nativePreviews.get(key);
       if (cached?.version === version && (!cached.failed || Date.now() - cached.checkedAt < 30_000)) return;
       try {
-        const page = await this.rpc.request('thread/turns/list', { threadId: thread.id, limit: 3, itemsView: 'full', sortDirection: 'desc' });
+        // A preview needs only visible messages. Full turns can contain tens of MiB
+        // of tool output and trip the stdio frame limit, taking health down with it.
+        const page = await this.rpc.request('thread/turns/list', { threadId: thread.id, limit: 3, itemsView: 'summary', sortDirection: 'desc' });
         const turns = Array.isArray(page.data) ? [...page.data].reverse().map((turn: any) => ({ ...turn,
           items: Array.isArray(turn.items) ? turn.items.filter((item: any) => item.type !== 'plan') : [] })) : [];
         const messages = turns.flatMap((turn: any) => codexMessages([turn])

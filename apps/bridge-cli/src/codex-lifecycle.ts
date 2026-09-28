@@ -9,17 +9,31 @@ export function codexControl(config: { port: number; token: string }, method = '
     const timer = setTimeout(() => finish(new Error('Codex Bridge did not answer')), 5000);
     let settled = false;
     const finish = (error?: Error, value?: unknown) => { if (settled) return; settled = true; clearTimeout(timer); socket.terminate(); error ? reject(error) : resolve(value); };
-    socket.on('error', () => finish(new Error('Codex Bridge is not reachable')));
+    socket.on('error', error => finish(Object.assign(new Error('Codex Bridge is not reachable'), { code: (error as NodeJS.ErrnoException).code })));
     socket.on('close', () => finish(new Error('Codex Bridge closed the connection')));
-    socket.on('open', () => socket.send(JSON.stringify({ type: 'req', id: 'auth', method: 'connect', params: { token: config.token } })));
+    socket.on('open', () => socket.send(JSON.stringify({ type: 'req', id: 'auth', method: 'connect', params: { token: config.token, ...(method === 'bridge.stop' ? { controlOnly: true } : {}) } })));
     socket.on('message', raw => {
       let frame: any; try { frame = JSON.parse(raw.toString()); } catch { return; }
       if (frame.type !== 'res') return;
-      if (!frame.ok) { finish(new Error('Codex Bridge rejected the control request')); return; }
+      if (!frame.ok) {
+        // Older Bridges authenticate before checking native health, but do not
+        // support controlOnly. Confirm their authenticated, native-independent
+        // agent identity before stopping a failed child; never infer it from a port.
+        if (method === 'bridge.stop' && frame.id === 'auth' && frame.error?.code === 'codex_error') {
+          socket.send(JSON.stringify({ type: 'req', id: 'identity', method: 'agents.list' }));
+          return;
+        }
+        finish(new Error('Codex Bridge rejected the control request')); return;
+      }
       if (frame.id === 'auth') {
         if (frame.payload?.backend !== 'codex') { finish(new Error('Endpoint is not a Codex Bridge')); return; }
         if (method === 'health') finish(undefined, frame.payload);
         else socket.send(JSON.stringify({ type: 'req', id: 'control', method }));
+      } else if (frame.id === 'identity') {
+        if (!Array.isArray(frame.payload) || frame.payload.length !== 1 || frame.payload[0]?.agentId !== 'codex') {
+          finish(new Error('Endpoint is not a Codex Bridge')); return;
+        }
+        socket.send(JSON.stringify({ type: 'req', id: 'control', method }));
       } else if (frame.id === 'control') finish(undefined, frame.payload);
     });
   });

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { inspectCodexInstallation } from './executable.js';
+import { dirname, join } from 'node:path';
+import { inspectCodexInstallation, resolveCodexExecutable } from './executable.js';
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'codex-version-')); });
@@ -16,4 +16,43 @@ it.each(['0.153.2', '0.152.0-alpha.2', 'unknown', '0.158.0 invalid'])('rejects o
   const command = join(root, 'codex.cjs');
   writeFileSync(command, `console.log(${JSON.stringify('codex-cli ' + version)})`);
   await expect(inspectCodexInstallation(command)).rejects.toThrow('0.153.3 or newer');
+});
+
+function executable(path: string): string {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, '', { mode: 0o755 });
+  return realpathSync(path);
+}
+const bundledPath = (directory: string, app: string) => join(directory, app, 'Contents', 'Resources',
+  ...(app === 'Codex.app' ? ['codex'] : ['codex-cli', 'CodexCLI.app', 'Contents', 'MacOS', 'codex']));
+it.each(['Codex.app', 'ChatGPT.app'])('discovers %s without a PATH CLI', app => {
+  const desktop = executable(bundledPath(root, app));
+  expect(resolveCodexExecutable('codex', 'darwin', '', [root])).toEqual({ command: desktop, prefix: [] });
+});
+it('keeps PATH CLI ahead of desktop and honors explicit commands', () => {
+  executable(bundledPath(root, 'Codex.app'));
+  const cli = executable(join(root, 'bin', 'codex'));
+  expect(resolveCodexExecutable('codex', 'darwin', dirname(cli), [root]).command).toBe(cli);
+  const explicit = join(root, 'missing-codex');
+  expect(resolveCodexExecutable(explicit, 'darwin', '', [root]).command).toBe(explicit);
+  expect(resolveCodexExecutable('custom-codex', 'darwin', '', [root]).command).toBe('custom-codex');
+});
+it('does not treat an app shell, directory or non-executable resource as Codex', () => {
+  const path = bundledPath(root, 'Codex.app');
+  mkdirSync(path, { recursive: true });
+  expect(resolveCodexExecutable('codex', 'darwin', '', [root]).command).toBe('codex');
+  rmSync(path, { recursive: true });
+  executable(path); chmodSync(path, 0o644);
+  if (process.platform !== 'win32') expect(resolveCodexExecutable('codex', 'darwin', '', [root]).command).toBe('codex');
+});
+it('checks user Applications before system Applications and skips missing bundles', () => {
+  const user = join(root, 'user'); const system = join(root, 'system');
+  const systemBinary = executable(bundledPath(system, 'Codex.app'));
+  expect(resolveCodexExecutable('codex', 'darwin', '', [user, system]).command).toBe(systemBinary);
+  const userBinary = executable(bundledPath(user, 'ChatGPT.app'));
+  expect(resolveCodexExecutable('codex', 'darwin', '', [user, system]).command).toBe(userBinary);
+});
+it.each(['linux', 'win32'])('does not use macOS app bundles on %s', platform => {
+  executable(bundledPath(root, 'Codex.app'));
+  expect(resolveCodexExecutable('codex', platform as NodeJS.Platform, '', [root]).command).toBe('codex');
 });

@@ -75,7 +75,11 @@ export class CodexServer {
               socket.close(1008, 'unauthorized'); return;
             }
             clearTimeout(timeout); authenticated = true; this.clients.add(socket); this.ws!.emit('connection', socket);
-            const payload = await this.service.request({ type: 'req', id, method: 'health' });
+            // Authenticated lifecycle control must still work when the native child
+            // is unavailable. Normal phone handshakes continue to require health.
+            const payload = frame.params?.controlOnly === true
+              ? { backend: 'codex', controlReady: true }
+              : await this.service.request({ type: 'req', id, method: 'health' });
             this.send(socket, { type: 'res', id, ok: true, payload });
             return;
           }

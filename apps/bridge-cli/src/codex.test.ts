@@ -89,3 +89,27 @@ it('keeps explicit project scope through a first detached pairing', async () => 
   await handleCodexCommand([...childArgs, '--foreground']);
   expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ device: false, project: realpathSync(project) });
 });
+
+it('restarts an authenticated Bridge without depending on native health', async () => {
+  saved({});
+  mock.control.mockImplementation(async (_config, method) => {
+    if (method === 'bridge.stop') return { ok: true };
+    throw new Error('Codex process is unavailable');
+  });
+  await handleCodexCommand(['restart', '--project', project, '--config', path]);
+  expect(mock.control.mock.calls.map(c => c[1])).toEqual(['bridge.stop']);
+  expect(mock.background).toHaveBeenCalledWith(['run', '--config', path], join(root, 'codex.log'));
+});
+
+it('does not start a replacement when authenticated stop is unconfirmed', async () => {
+  saved({});
+  mock.control.mockRejectedValue(new Error('Codex Bridge did not answer'));
+  await expect(handleCodexCommand(['restart', '--project', project, '--config', path])).rejects.toThrow('did not answer');
+  expect(mock.background).not.toHaveBeenCalled();
+});
+
+it('allows start after an explicitly refused local connection', async () => {
+  saved({}); mock.control.mockRejectedValue(Object.assign(new Error('offline'), { code: 'ECONNREFUSED' }));
+  await handleCodexCommand(['restart', '--project', project, '--config', path]);
+  expect(mock.background).toHaveBeenCalledTimes(1);
+});

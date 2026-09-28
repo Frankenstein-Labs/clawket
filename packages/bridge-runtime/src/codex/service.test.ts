@@ -304,6 +304,7 @@ describe('device project discovery and desktop routing', () => {
     });
     expect((await request('sessions.list')).find((row: any) => row.key === `native:${threadId}`))
       .toMatchObject({ preview: 'Latest reply', lastActivityAt: 250000 });
+    expect(mock.request).toHaveBeenCalledWith('thread/turns/list', expect.objectContaining({ itemsView: 'summary', limit: 3 }));
     await request('chat.history', { sessionKey: `native:${threadId}` });
     expect((await request('sessions.list')).find((row: any) => row.key === `native:${threadId}`))
       .toMatchObject({ preview: 'Latest reply', lastActivityAt: 250000 });
@@ -312,6 +313,23 @@ describe('device project discovery and desktop routing', () => {
     recency = 3;
     await request('sessions.list');
     expect(mock.request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(3);
+  });
+  it('listing a native conversation never fetches its oversized tool transcript', async () => {
+    await device();
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method, params) => {
+      if (method === 'thread/list') return { data: [{ id: threadId, cwd: project, updatedAt: 2 }] };
+      if (method === 'thread/turns/list') {
+        if (params.itemsView !== 'summary') {
+          mock.instances.at(-1).emit('closed');
+          throw new Error('Native tool transcript exceeds frame limit');
+        }
+        return { data: [{ id: 'last', items: [{ id: 'reply', type: 'agentMessage', text: 'Latest reply' }] }] };
+      }
+      return original(method, params);
+    });
+    expect((await request('sessions.list')).find((row: any) => row.key === `native:${threadId}`)?.preview).toBe('Latest reply');
+    await expect(service.health()).resolves.toMatchObject({ backend: 'codex', modelReady: true });
   });
   it('paginates across projects, includes desktop sources and binds new chats to an opaque discovered project', async () => {
     await device(); const other = join(root, 'second'); mkdirSync(other);

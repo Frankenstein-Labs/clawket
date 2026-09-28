@@ -1,10 +1,22 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { delimiter, dirname, join, isAbsolute } from 'node:path';
 
 /** npm's Windows .cmd shim is not an executable for shell:false. Resolve its installed JS entry without invoking a shell. */
-export function resolveCodexExecutable(command = 'codex', platform = process.platform, searchPath = process.env.PATH ?? ''): { command: string; prefix: string[] } {
+export function resolveCodexExecutable(command = 'codex', platform = process.platform, searchPath = process.env.PATH ?? '', applicationDirectories = [join(homedir(), 'Applications'), '/Applications']): { command: string; prefix: string[] } {
   const candidates = isAbsolute(command) || command.includes('/') || command.includes('\\') ? [command] : searchPath.split(platform === 'win32' ? ';' : delimiter).flatMap(dir => platform === 'win32' ? [join(dir, command + '.exe'), join(dir, command + '.cmd'), join(dir, command)] : [join(dir, command)]);
-  const found = candidates.find(path => existsSync(path));
+  // Only the default command may fall back to a desktop installation. An explicit
+  // executable (including a missing one) must never silently select another model/runtime.
+  let found = candidates.find(path => existsSync(path));
+  if (!found && command === 'codex' && platform === 'darwin') {
+    const desktopCandidates = applicationDirectories.flatMap(directory => ['Codex.app', 'ChatGPT.app'].flatMap(app => [
+      join(directory, app, 'Contents', 'Resources', 'codex'),
+      join(directory, app, 'Contents', 'Resources', 'codex-cli', 'CodexCLI.app', 'Contents', 'MacOS', 'codex'),
+    ]));
+    found = desktopCandidates.find(path => {
+      try { accessSync(path, constants.X_OK); return statSync(path).isFile(); } catch { return false; }
+    });
+  }
   if (!found) return { command, prefix: [] };
   const resolved = realpathSync(found);
   if (platform === 'win32' && /\.cmd$/i.test(resolved)) {
@@ -24,7 +36,7 @@ export async function inspectCodexInstallation(command = 'codex'): Promise<{ ver
   const executable = resolveCodexExecutable(command);
   const version = await new Promise<string>((resolve, reject) => {
     execFile(executable.command, [...executable.prefix, '--version'], { timeout: 10000, maxBuffer: 4096, windowsHide: true }, (error, stdout) => {
-      if (error) reject(new Error('Codex could not start. Install @openai/codex and run codex login before pairing.'));
+      if (error) reject(new Error('Codex could not start. Install Codex CLI or a supported macOS Codex desktop app, or select its executable with --codex-command. Sign in to Codex before pairing.'));
       else resolve(stdout.trim());
     });
   });

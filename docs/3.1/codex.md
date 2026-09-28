@@ -18,6 +18,8 @@ Native conversations retain their IDs. Desktop-owned turns are followed through 
 
 ## Architecture and safety
 
+Native roster previews use `thread/turns/list` with `itemsView: summary`; fetching full tool transcripts during routine listing can exceed bounded RPC frames and take down the native process. Explicit history still reads full items. Authenticated local stop/restart remains available after native-health failure, including an identity-checked legacy recovery path; normal phone handshakes still require health. Read-only native verification and remaining device limits are recorded in the [2026-09-28 incident](../3.0/connection-incident-2026-09-28.md).
+
 Use one Clawket-owned `codex app-server --listen stdio://` child per pairing configuration, with explicit cwd and sandbox boundaries on every owned thread. This matches App Server’s native multi-thread architecture and avoids a process for every discovered project. Initialize the supported JSON-RPC protocol; bound frames, pending requests, session indexes and history pages. Resolve remote opaque IDs only through the authenticated project catalog and thread registry. Never expose arbitrary App Server methods or file paths.
 
 Persist owned-thread metadata and prompt fingerprints before acknowledgement. Native transcript storage stays Codex-owned. Reconnect reads native state and pending approvals; phone disconnection leaves work running. Bridge loss never silently reruns work. Stop only owned children. Honor native permission refusals; never add bypass flags. Explicit approvals apply once to one pending native request and retire only after dispatch/terminal resolution.
@@ -63,3 +65,9 @@ The extension is in acceptance testing; the earlier project-only QA report does 
 - Acceptance remains in progress; earlier initial-integration release conclusions do not certify the continuity extension.
 
 已获明确 no-owner 且原生历史无进行中回合后，Bridge 的原生续聊会话由该 App Server 持有；后续发送、模型/推理设置以及其他 IPC follower 均走同一 owner，不能因 `source=native` 再次外派。进程重启后重新发现 owner。仅更改设置的恢复同样需要 no-owner/idle 双重确认。
+
+## Desktop-only macOS installation
+
+The default `codex` command first uses PATH. If absent, Bridge checks `~/Applications` then `/Applications` for known Codex.app and ChatGPT.app bundled Codex executables. Both `pair choose` discovery and actual App Server startup use this resolver. A desktop app without a bundled executable is insufficient; supported version and native initialization checks still apply. Explicit custom commands and saved executable paths retain precedence and never silently fall back if missing or incompatible. Windows/Linux keep their existing CLI resolution; nonstandard macOS app locations can use `--codex-command`.
+
+This launches a Clawket-owned App Server using the installed executable and native Codex authentication. It neither copies credentials nor takes over the desktop process. CLI and desktop installed together continue using the CLI unless the user explicitly selects another executable. Claude Code discovery/authentication is unchanged.

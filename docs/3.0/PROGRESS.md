@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-09-28 负责人授权发布 Bridge 3.1.3：候选包含 Codex 摘要预览防止原生进程失效、认证生命周期恢复与 macOS 桌面端自动发现；仅发布 npm Bridge，客户端与 Worker 不在本次发布范围。正在完成候选 CI 与包验证，公开 npm 状态以发布记录为准。
+
+- 2026-09-28 Bridge 候选改动交叉复核：复查 Codex 摘要预览、认证生命周期恢复与桌面端自动发现，未发现新增发布阻断。独立只读 CodexService 实测 965 条原生会话首次列表 241 ms，12 条摘要预览，重复列表及前后 health 均通过；临时状态已清理，未改已有配对。6 个受影响文件串行 89 项、v1 compat 5 文件 39 项、CLI/Runtime 类型、docs 与 diff 检查通过。建议作为下一 Bridge 补丁候选；本轮未提交、升版、打分发包或发布。正式上传前仍需候选提交 CI 与包验证；不能据此宣称其他手机网络/扫码故障全部修复。
+
+- 2026-09-28 Codex 桌面端自动发现：默认 `codex` 不在 PATH 时，Bridge 从 macOS `~/Applications`、`/Applications` 的 Codex.app / 带 Codex 的 ChatGPT.app 已知位置寻找可执行程序；选择器与 RPC 共用检测。已有 CLI、显式路径优先，版本或协议失败不悄悄换程序。登录提示兼容桌面端用户。Windows/Linux、Claude 和其他后端保持原逻辑。实机以测试进程 PATH 排除独立 CLI，发现 ChatGPT.app 内置 0.158.0-alpha.2，握手、认证状态、7 个模型、原生会话列表通过；ephemeral 临时会话收到真实流式回复 `DESKTOP_FALLBACK_OK`。测试进程和临时项目已清理，未新增配对或修改已有节点。逐文件串行验证 executable 14、RPC 7、Codex CLI 8、pair chooser 3 项，v1 compat 5 文件 39 项通过；Runtime/CLI 类型与文档检查通过。未重新进行手机端配对 UI 测试；非标准安装路径仍需 `--codex-command`。未升版本或发布。
+
 - 2026-09-27 等待动效收尾改为立即淡出（负责人真机反馈：加载完成、消息已出来时，猫和「正在加载历史记录」还叠在内容上约 0.7 秒）：删除五个场景各自的成功彩蛋（递气泡、毛线拉紧、抓住光标、回声圈）。成功时文字立即隐藏并从读屏树移除、busy 结束，猫眯成 ^ ^，加载器在 200 ms 内淡出并缩到 96%，260 ms 后卸载（`Motion.loadingPayoff` 700 → `Motion.loadingExit` 260）；内容照旧立即渲染，不延迟。退出期间场景继续动而不定格，点击反应、生气标记和爪痕立即收起；退出途中又开始加载时换新场景并重新走 0.4 s 宽限、慢等待提示重新计时（顺带修复：原先第二次等待会一直透明）。设计系统页「Ready」预览缩短为 0.9 秒后重播。验证（逐个 `--runInBand`）：CompanionScene 17、companion-temper 9、companion-scenes 46、theme 7、ConversationEntry 7、ThreadView 111、RosterScreen 25、Companion 7；mobile tsc 通过。待负责人真机验收。
 
 - 2026-09-27 iOS 聊天导航打断音乐：负责人报告未触发语音时，每次进入聊天/点 Agent 都暂停外部音乐。源码定位为聚焦权限预检 → `voiceCapture.hold` → 原生 `prepare` 提前设置非混播 `.playAndRecord` 并实例化输入节点；未显式 `start` 不代表未触及系统音频。修复 iOS JS 不再调用预热、原生 `prepare` 对旧调用保持无音频副作用；明确录音才配置混播和 A2DP 输出（不降音量、不启用 HFP 输入），停止/取消/失败立即释放，移除 30 秒空闲激活策略，路由恢复失败也释放。Android 预分配与共享转录/双后端发送路径保留。逐文件 in-band 验证 `voiceCapture.test.ts` 3 项、`useChatVoiceInput.test.ts` 19 项（含 OpenClaw/Hermes、取消、后台、恢复）通过；Mobile 类型与 Swift 单文件语法解析通过。未做原生编译或物理 iPhone 复现，不能把 mock/语法通过当作音乐、蓝牙或首字延迟验收；见 HUMAN TODO `HT-VOICE-MUSIC-0927`。完整原生修复需新开发构建，仅刷新 JS 不会更新已安装的 Swift。未升版本、分发、OTA 或云部署；两组客户端改动本轮一同提交。
