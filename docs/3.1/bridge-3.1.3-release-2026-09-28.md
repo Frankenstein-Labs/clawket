@@ -1,0 +1,13 @@
+# Bridge 3.1.3 release · 2026-09-28
+
+Owner authorized this Bridge-only npm patch release. Candidate source is `4d483b913ab9afafcf6f25c28f85a544644095f4` on `main`; publication uses that exact commit in an isolated checkout. Concurrent mobile and connection-name work is excluded. No App distribution, Worker deployment or existing pairing reset is included.
+
+The patch prevents routine Codex session previews from loading full tool transcripts into the bounded App Server channel, restores authenticated stop/restart after native-health failure (including identity-checked old Bridge recovery), and discovers supported macOS Codex/ChatGPT bundled executables when the default PATH CLI is absent. Explicit executables and existing PATH CLI retain precedence; Claude Code, Pi, OpenClaw and Hermes runtime behavior is unchanged.
+
+Validation: six affected test files / 89 cases, five v1 replay files / 39 cases, Runtime/CLI typechecks, documentation checks and the six publish-guard tests passed. A read-only native smoke listed 965 conversations in 241 ms and retained health across repeated lists. Earlier desktop-only native smoke verified initialization, account readiness, seven models, history listing and an ephemeral real streamed reply. These checks do not claim phone network problems or explicit oversized full-history reads are fixed.
+
+[Exact-commit CI](https://github.com/p697/clawket/actions/runs/36387178587) passed all four jobs: repository checks and audits, macOS/Windows Bridge and Relay compatibility, and secret scanning. The isolated checkout passed the publish workflow, including compatibility replay, build, package verification and npm dry run. Verified package: three files, four required runtime boundaries, 71 runtime modules and 111 provenance inputs. Final upload uses `--ignore-scripts` with that already verified bundle; no build inputs changed after verification.
+
+Candidate tarball SHA-256: `d02c1525ef238825efe2bba02a2b6da641f44f8dce2fff4aeeeda4c23bb4052d`. SHA-1: `6f5f3afe5f181100a0b0ee3f4e3d49d4f90ccf4d`.
+
+Published: [`@p697/clawket@3.1.3`](https://www.npmjs.com/package/@p697/clawket/v/3.1.3). Owner completed login and publish-specific security-key verification. npm accepted the upload and briefly processed it before public availability. Public registry readback confirms `latest=3.1.3`; the downloaded public tarball matches the candidate SHA-256 above, npm SHA-1 and SHA-512 integrity. npm metadata does not expose a `gitHead` for this upload; source provenance is recorded by the fixed checkout and verified bundle inputs. Existing installations/processes were not upgraded or restarted automatically.
