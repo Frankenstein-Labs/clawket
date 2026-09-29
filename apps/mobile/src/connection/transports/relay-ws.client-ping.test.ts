@@ -1,4 +1,4 @@
-import { buildRelayClientWsUrl, RELAY_CLIENT_PING_CAPABILITY, RELAY_CONTROL_PREFIX } from '../protocol/relay-control';
+import { buildRelayClientWsUrl, RELAY_CLIENT_CAPABILITIES, RELAY_CLIENT_PING_CAPABILITY, RELAY_CONTROL_PREFIX } from '../protocol/relay-control';
 import { setTransportAppActive } from './foreground';
 import { RelayWsTransport } from './relay-ws';
 import type { WebSocketCloseEventLike, WebSocketLike } from './types';
@@ -36,12 +36,17 @@ describe('negotiated foreground Relay client round trips', () => {
     return { transport, sockets, socket: sockets[0] };
   };
 
-  it('advertises both backwards-compatible client capabilities for both Gateway backend URL keys', () => {
-    for (const relayIdQueryParam of ['gatewayId', 'bridgeId'] as const) {
-      const url = new URL(buildRelayClientWsUrl({ relayUrl: 'wss://relay.test', gatewayId: 'test', token: 'test', clientId: 'test', relayIdQueryParam }));
-      expect(url.searchParams.get('capabilities')).toBe('relay.client-pong.v1,relay.client-ping.v1,relay.transfer-hint.v1');
-      expect(url.searchParams.get(relayIdQueryParam)).toBe('test');
-    }
+  it.each(['gatewayId', 'bridgeId'] as const)('keeps raw socket capabilities conservative for %s', relayIdQueryParam => {
+    const url = new URL(buildRelayClientWsUrl({ relayUrl: 'wss://relay.test', gatewayId: 'test', token: 'test', clientId: 'test', relayIdQueryParam }));
+    expect(url.searchParams.get('capabilities')).toBe('relay.client-pong.v1');
+    expect(url.searchParams.get(relayIdQueryParam)).toBe('test');
+  });
+
+  it.each(['gatewayId', 'bridgeId'] as const)('explicitly opts a full Gateway transport into all supported capabilities for %s', relayIdQueryParam => {
+    const url = new URL(buildRelayClientWsUrl({ relayUrl: 'wss://relay.test', gatewayId: 'test', token: 'test', clientId: 'test', relayIdQueryParam,
+      capabilities: RELAY_CLIENT_CAPABILITIES }));
+    expect(url.searchParams.get('capabilities')).toBe('relay.client-pong.v1,relay.client-ping.v1,relay.transfer-hint.v1');
+    expect(url.searchParams.get(relayIdQueryParam)).toBe('test');
   });
 
   it('waits for native ready and then sends one bounded nonce after five seconds', () => {
