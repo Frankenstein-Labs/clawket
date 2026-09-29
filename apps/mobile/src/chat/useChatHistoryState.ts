@@ -1,5 +1,5 @@
 import { normalizeMessageAttribution } from './messageAttribution';
-import { RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentAdapter,
   ChatMessage,
@@ -9,6 +9,7 @@ import { CachedSessionMeta, ChatCacheService } from '../services/chat-cache';
 import { cacheMessageImages, findCachedEntry, generateStableKey, getAllCachedForSession } from '../services/image-cache';
 import { LastOpenedSessionSnapshot, StorageService } from '../services/storage';
 import { markHermesConnectTrace } from '../connection/hermes-connect-trace';
+import { SessionCatalogSupersededError } from '../connection/adapters/session-catalog';
 import { SessionInfo } from '../types';
 import { ImageMeta, ToolPresentation, UiFileAttachment, UiMessage } from '../types/chat';
 import { sessionKeysMatch } from '../utils/session-key';
@@ -29,6 +30,7 @@ import {
 } from '../utils/chat-message';
 import { formatToolOneLinerLocalized, stripToolStatusPrefix } from '../utils/tool-display';
 import { HISTORY_PAGE_SIZE } from './constants';
+import { CursorHistoryWindow } from './cursorHistoryWindow';
 import { mapAdapterSession } from './adapterChatMapping';
 import { shouldSuppressHistoryLoadError } from './historyErrorPolicy';
 import { shouldPreserveOptimisticAssistant } from './cacheHydrationPolicy';
@@ -197,8 +199,18 @@ function requireAdapter(adapter: AgentAdapter | null): AgentAdapter {
 async function listAdapterSessions(
   adapter: AgentAdapter | null,
   currentAgentId: string,
+  isCurrent: () => boolean,
 ): Promise<SessionInfo[]> {
-  const sessions = await requireAdapter(adapter).listSessions(currentAgentId);
+  const requestAdapter = requireAdapter(adapter);
+  let sessions;
+  try {
+    sessions = await requestAdapter.listSessions(currentAgentId);
+  } catch (error) {
+    // A completed management action may retire the shared catalog flight.
+    // Retry only that local cancellation, once on the same ready adapter.
+    if (!(error instanceof SessionCatalogSupersededError) || requestAdapter.state !== 'ready' || !isCurrent()) throw error;
+    sessions = await requestAdapter.listSessions(currentAgentId);
+  }
   return sessions.map(mapAdapterSession);
 }
 
@@ -314,6 +326,7 @@ export function useChatHistoryState({
   const [refreshingSessions, setRefreshingSessions] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
+  const [historyLoadMoreError, setHistoryLoadMoreError] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [activitySnapshot, setActivitySnapshot] = useState<(SessionHistory & { requestedAtMs: number }) | null>(null);
   const [thinkingLevel, setThinkingLevel] = useState<string | null>(null);
@@ -325,8 +338,59 @@ export function useChatHistoryState({
   const historyCommitVersionRef = useRef(0);
   const cacheRestoreRequestRef = useRef(0);
   const historyScopeVersionRef = useRef(0);
+  const sessionReadIdsRef = useRef({ bootstrap: 0, refresh: 0, sessions: 0 });
+  const catalogReadIdRef = useRef(0);
+  const refreshIdRef = useRef(0);
+  const sessionRefreshIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  const readScope = useMemo(() => ({ adapter, gatewayConfigId, currentAgentId, mainSessionKey, routeSessionKey }),
+    [adapter, gatewayConfigId, currentAgentId, mainSessionKey, routeSessionKey]);
+  const readScopeRef = useRef(readScope);
+  readScopeRef.current = readScope;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const beginSessionRead = useCallback((kind: 'bootstrap' | 'refresh' | 'sessions') => {
+    const active = mountedRef.current && readScopeRef.current === readScope;
+    const requestId = active ? ++sessionReadIdsRef.current[kind] : -1;
+    const catalogId = active ? ++catalogReadIdRef.current : -1;
+    let selectionVersion = historyScopeVersionRef.current;
+    const isCurrent = () => mountedRef.current && readScopeRef.current === readScope
+      && sessionReadIdsRef.current[kind] === requestId && historyScopeVersionRef.current === selectionVersion;
+    return {
+      isCurrent,
+      isCurrentCatalog: () => isCurrent() && catalogReadIdRef.current === catalogId,
+      // A pure directory refresh must not cancel an unfinished bootstrap's
+      // history. Its newer catalog still supersedes older directory results.
+      didSelect: () => { selectionVersion = historyScopeVersionRef.current; },
+    };
+  }, [readScope]);
+  const cursorWindowRef = useRef<{ scope: typeof readScope; key: string; window: CursorHistoryWindow } | null>(null);
+  const historyTransportVersionRef = useRef(0);
+  useEffect(() => {
+    if (!adapter?.on) return;
+    return adapter.on('state', state => {
+      if (state === 'ready') return;
+      historyTransportVersionRef.current += 1;
+      historyRequestIdRef.current += 1;
+      historyLoadInFlightRef.current.clear();
+      loadMoreLockRef.current = false;
+      setLoadingMoreHistory(false);
+    });
+  }, [adapter]);
   const messageSessionKeyRef = useRef(sessionKey);
   const historyLoadInFlightRef = useRef(new Map<string, Promise<number>>());
+  const historyLoadScopeRef = useRef(readScope);
+  if (historyLoadScopeRef.current !== readScope) {
+    historyLoadScopeRef.current = readScope;
+    historyLoadInFlightRef.current = new Map();
+  }
+  useEffect(() => {
+    loadMoreLockRef.current = false;
+    setLoadingMoreHistory(false);
+    setHistoryLoadMoreError(false);
+  }, [readScope]);
   const historyReconcileInFlightRef = useRef(new Map<string, Promise<void>>());
   const startupPreviewRestoredRef = useRef(false);
   const cacheHydrationSessionKeyRef = useRef<string | null>(null);
@@ -363,6 +427,8 @@ export function useChatHistoryState({
       setHistoryLoaded(false);
       setActivitySnapshot(null);
       setLoadingMoreHistory(false);
+      setHistoryLoadMoreError(false);
+      cursorWindowRef.current = null;
       setHasMoreHistory(true);
     }
     sessionKeyRef.current = key;
@@ -533,10 +599,12 @@ export function useChatHistoryState({
     };
   }, [currentAgentId, dbg, gatewayConfigId, localHistoryPaging, mainSessionKey, restoreCachedMessages, sessionKeyRef, setSessionKey]);
 
-  const loadHistory = useCallback(async (key: string, limit = historyLimitRef.current): Promise<number> => {
-    const requestKey = `${key}::${limit}`;
+  const loadHistory = useCallback(async (key: string, limit = historyLimitRef.current,
+    options?: { older?: boolean; head?: SessionHistory }): Promise<number> => {
+    if (!mountedRef.current || readScopeRef.current !== readScope) return 0;
+    const requestKey = `${key}::${limit}${options?.older ? '::older' : options?.head ? '::event' : ''}`;
     const inFlight = historyLoadInFlightRef.current.get(requestKey);
-    if (inFlight) {
+    if (inFlight && !options?.head) {
       dbg(`history: reuse in-flight load for key=${key} limit=${limit}`);
       return inFlight;
     }
@@ -546,14 +614,58 @@ export function useChatHistoryState({
       limit,
     });
     const requestId = ++historyRequestIdRef.current;
+    const scopeVersion = historyScopeVersionRef.current;
+    const transportVersion = historyTransportVersionRef.current;
     const isStaleRequest = () => (
-      requestId !== historyRequestIdRef.current
+      !mountedRef.current || readScopeRef.current !== readScope
+      || scopeVersion !== historyScopeVersionRef.current
+      || transportVersion !== historyTransportVersionRef.current
+      || requestId !== historyRequestIdRef.current
       || (!!sessionKeyRef.current && !sessionKeysMatch(sessionKeyRef.current, key))
     );
 
+    let cursorAttempt = Boolean(options?.older || options?.head?.nextCursor);
     try {
       const requestedAtMs = Date.now();
-      const historyResult = await requireAdapter(adapter).loadSession(key, { limit });
+      const currentWindow = cursorWindowRef.current;
+      let candidate = currentWindow?.scope === readScope && currentWindow.key === key ? currentWindow.window.clone() : null;
+      let pageLimitReached = false;
+      let historyResult: SessionHistory;
+      if (options?.older) {
+        if (!candidate?.nextCursor) return 0;
+        let progress = 0;
+        for (let pages = 0; pages < 8; pages++) {
+          const cursor = candidate.nextCursor;
+          if (!cursor || isStaleRequest()) return 0;
+          const page = await requireAdapter(adapter).loadSession(key, { limit: HISTORY_PAGE_SIZE, cursor });
+          if (isStaleRequest()) return 0;
+          progress = candidate.append(page, cursor);
+          if (progress > 0 || !candidate.nextCursor) break;
+          if (pages === 7) pageLimitReached = true;
+        }
+        historyResult = candidate.snapshot();
+      } else {
+        const head = options?.head ?? await requireAdapter(adapter).loadSession(key, { limit });
+        if (isStaleRequest()) return 0;
+        if (head.nextCursor !== undefined || candidate) {
+          cursorAttempt = true;
+          if (head.key !== key) throw new Error('History belongs to another conversation');
+          // A reset may keep the route key while replacing its native thread.
+          if (candidate && candidate.snapshot().sessionId !== head.sessionId) candidate = null;
+          candidate ??= new CursorHistoryWindow();
+          candidate.acceptHead(head);
+          // A first native page can contain only hidden items. Reach visible
+          // content within a bounded read, otherwise expose manual continuation.
+          for (let pages = 0; candidate.snapshot().messages.length === 0 && candidate.nextCursor && pages < 8; pages++) {
+            const cursor = candidate.nextCursor;
+            const page = await requireAdapter(adapter).loadSession(key, { limit: HISTORY_PAGE_SIZE, cursor });
+            if (isStaleRequest()) return 0;
+            candidate.append(page, cursor);
+            if (pages === 7 && candidate.nextCursor && candidate.snapshot().messages.length === 0) pageLimitReached = true;
+          }
+          historyResult = candidate.snapshot();
+        } else historyResult = head;
+      }
       markHermesConnectTrace('history_fetch_done', {
         limit,
         messageCount: historyResult.messages.length,
@@ -566,7 +678,7 @@ export function useChatHistoryState({
         return history.length;
       }
 
-      if (currentSessionId) {
+      if (!options?.older && currentSessionId) {
         setSessions((prev) => {
           let matched = false;
           const next = prev.map((session) => {
@@ -581,12 +693,9 @@ export function useChatHistoryState({
         });
       }
 
-      if (historyResult.thinkingLevel) {
+      if (!options?.older && historyResult.thinkingLevel) {
         setThinkingLevel(historyResult.thinkingLevel);
       }
-
-      historyRawCountRef.current = history.length;
-      setHasMoreHistory(history.length >= limit || history.length > 0);
 
       const cachedImages = await getAllCachedForSession(key).catch(() => []);
       if (isStaleRequest()) {
@@ -955,6 +1064,10 @@ export function useChatHistoryState({
         dbg(`history: drop stale parsed result for key=${key}`);
         return history.length;
       }
+      if (candidate) cursorWindowRef.current = { scope: readScope, key, window: candidate };
+      historyRawCountRef.current = history.length;
+      setHasMoreHistory(candidate ? Boolean(candidate.nextCursor) : history.length >= limit || history.length > 0);
+      setHistoryLoadMoreError(pageLimitReached);
       historyCommitVersionRef.current += 1;
       const allowOptimisticPreservation = shouldPreserveOptimisticAssistant({
         pendingHydrationSessionKey: cacheHydrationSessionKeyRef.current,
@@ -983,7 +1096,7 @@ export function useChatHistoryState({
       if (cacheHydrationSessionKeyRef.current === key) {
         cacheHydrationSessionKeyRef.current = null;
       }
-      setActivitySnapshot({ ...historyResult, requestedAtMs });
+      if (!options?.older) setActivitySnapshot({ ...historyResult, requestedAtMs });
       setHistoryLoaded(true);
       markHermesConnectTrace('history_loaded', {
         messageCount: uiMessages.length,
@@ -991,10 +1104,14 @@ export function useChatHistoryState({
       });
       return history.length;
     } catch {
+      if (cursorAttempt && !isStaleRequest()) {
+        setHistoryLoadMoreError(true);
+        setHasMoreHistory(true);
+      }
       if (cacheHydrationSessionKeyRef.current === key) {
         cacheHydrationSessionKeyRef.current = null;
       }
-      if (requestId === historyRequestIdRef.current) {
+      if (!isStaleRequest()) {
         const connState = adapter?.state ?? 'idle';
         if (shouldSuppressHistoryLoadError(connState)) {
           dbg(`history: suppressed load error while connection state=${connState}`);
@@ -1020,15 +1137,19 @@ export function useChatHistoryState({
         historyLoadInFlightRef.current.delete(requestKey);
       }
     }
-  }, [adapter, dbg, sessionKeyRef, t]);
+  }, [adapter, dbg, readScope, sessionKeyRef, t]);
 
   const onRefresh = useCallback(async () => {
+    const request = beginSessionRead('refresh');
+    if (!request.isCurrent()) return;
+    const refreshId = ++refreshIdRef.current;
     setRefreshing(true);
     try {
       const startKey = sessionKeyRef.current;
       const startMessages = messagesRef.current;
       dbg(`refresh:start currentKey=${startKey ?? 'null'} | ${summarizeMessages('visible', startMessages)}`);
-      const list = await listAdapterSessions(adapter, currentAgentId);
+      const list = await listAdapterSessions(adapter, currentAgentId, request.isCurrentCatalog);
+      if (!request.isCurrentCatalog()) return;
       setSessions(list);
 
       const currentKey = sessionKeyRef.current;
@@ -1051,6 +1172,7 @@ export function useChatHistoryState({
       if (!sessionKeyRef.current || sessionKeyRef.current !== fallbackKey) {
         sessionKeyRef.current = fallbackKey;
         setSessionKey(fallbackKey);
+        request.didSelect();
       }
 
       const shouldRestoreCache = shouldRestoreCacheBeforeHistoryRefresh({
@@ -1062,6 +1184,7 @@ export function useChatHistoryState({
       if (shouldRestoreCache) {
         cacheHydrationSessionKeyRef.current = fallbackKey;
         await restoreCachedMessages(fallbackKey, { sessionId: selected?.sessionId });
+        if (!request.isCurrent()) return;
       } else {
         dbg(`cache: skip restore for active session refresh key=${fallbackKey}`);
       }
@@ -1069,7 +1192,7 @@ export function useChatHistoryState({
       await loadHistory(fallbackKey, historyLimitRef.current);
       dbg(`refresh:done key=${fallbackKey}`);
     } catch {
-      if (!sessionKeyRef.current) return;
+      if (!request.isCurrent() || !sessionKeyRef.current) return;
       const currentMessages = messagesRef.current;
       const currentHistoryLoaded = historyLoadedRef.current;
       const shouldRestoreCache = shouldRestoreCacheBeforeHistoryRefresh({
@@ -1081,22 +1204,27 @@ export function useChatHistoryState({
       if (shouldRestoreCache) {
         cacheHydrationSessionKeyRef.current = sessionKeyRef.current;
         await restoreCachedMessages(sessionKeyRef.current);
+        if (!request.isCurrent()) return;
       } else {
         dbg(`cache: skip restore after refresh failure key=${sessionKeyRef.current}`);
       }
       dbg(`refresh:retryLoadHistory key=${sessionKeyRef.current} limit=${historyLimitRef.current}`);
       await loadHistory(sessionKeyRef.current, historyLimitRef.current);
     } finally {
-      setRefreshing(false);
+      if (mountedRef.current && refreshId === refreshIdRef.current) setRefreshing(false);
     }
-  }, [adapter, currentAgentId, dbg, loadHistory, mainSessionKey, routeSessionKey, restoreCachedMessages, sessionKeyRef, setSessionKey]);
+  }, [adapter, beginSessionRead, currentAgentId, dbg, loadHistory, mainSessionKey, routeSessionKey, restoreCachedMessages, sessionKeyRef, setSessionKey]);
 
-  const onLoadMoreHistory = useCallback(async () => {
-    if (!sessionKey || loadingMoreHistory || refreshing || !hasMoreHistory) return;
+  const onLoadMoreHistory = useCallback(async (retry = false) => {
+    if (!sessionKey || loadingMoreHistory || refreshing || !hasMoreHistory || (historyLoadMoreError && !retry)) return;
+    if (readScopeRef.current !== readScope || !mountedRef.current) return;
+    if (retry) setHistoryLoadMoreError(false);
     if (loadMoreLockRef.current) return;
     loadMoreLockRef.current = true;
     const scopeVersion = historyScopeVersionRef.current;
-    const isStalePage = () => scopeVersion !== historyScopeVersionRef.current
+    const transportVersion = historyTransportVersionRef.current;
+    const isStalePage = () => !mountedRef.current || readScopeRef.current !== readScope
+      || transportVersion !== historyTransportVersionRef.current || scopeVersion !== historyScopeVersionRef.current
       || !sessionKeysMatch(sessionKeyRef.current, sessionKey);
 
     const prevCount = historyRawCountRef.current;
@@ -1104,6 +1232,11 @@ export function useChatHistoryState({
     const nextLimit = historyLimitRef.current + HISTORY_PAGE_SIZE;
 
     try {
+      const currentWindow = cursorWindowRef.current;
+      if (currentWindow?.scope === readScope && currentWindow.key === sessionKey) {
+        await loadHistory(sessionKey, historyLimitRef.current, { older: true });
+        return;
+      }
       const historyResult = await requireAdapter(adapter).loadSession(sessionKey, { limit: nextLimit });
       if (isStalePage()) return;
       const history = historyResult.messages;
@@ -1126,10 +1259,6 @@ export function useChatHistoryState({
         } else {
           setHasMoreHistory(false);
         }
-        setLoadingMoreHistory(false);
-        setTimeout(() => {
-          if (!isStalePage()) loadMoreLockRef.current = false;
-        }, 350);
         return;
       }
 
@@ -1138,14 +1267,22 @@ export function useChatHistoryState({
       historyLimitRef.current = nextLimit;
       setHasMoreHistory(history.length >= nextLimit);
     } catch {
+      if (!isStalePage()) setHistoryLoadMoreError(true);
+    } finally {
+      if (!isStalePage()) {
+        setLoadingMoreHistory(false);
+        setTimeout(() => { if (!isStalePage()) loadMoreLockRef.current = false; }, 350);
+      }
     }
+  }, [adapter, hasMoreHistory, historyLoadMoreError, loadHistory, loadingMoreHistory, localHistoryPaging, readScope, refreshing, sessionKey, sessionKeyRef]);
 
-    if (isStalePage()) return;
-    setLoadingMoreHistory(false);
-    setTimeout(() => {
-      if (!isStalePage()) loadMoreLockRef.current = false;
-    }, 350);
-  }, [adapter, hasMoreHistory, loadHistory, loadingMoreHistory, localHistoryPaging, refreshing, sessionKey, sessionKeyRef]);
+  const applyReconciledHistory = useCallback((head: SessionHistory): boolean => {
+    const current = cursorWindowRef.current;
+    if (head.nextCursor === undefined && !(current?.scope === readScope && current.key === head.key)) return false;
+    if (readScopeRef.current !== readScope || !sessionKeysMatch(sessionKeyRef.current, head.key)) return true;
+    void loadHistory(head.key, historyLimitRef.current, { head });
+    return true;
+  }, [loadHistory, readScope, sessionKeyRef]);
 
   const reconcileLatestAssistantFromHistory = useCallback(async (
     key: string,
@@ -1274,6 +1411,8 @@ export function useChatHistoryState({
   }, [adapter, dbg, sessionKeyRef]);
 
   const loadSessionsAndHistory = useCallback(async () => {
+    const request = beginSessionRead('bootstrap');
+    if (!request.isCurrent()) return;
     const currentKey = sessionKeyRef.current;
     markHermesConnectTrace('history_bootstrap_begin', {
       currentKeyPresent: Boolean(currentKey),
@@ -1285,12 +1424,18 @@ export function useChatHistoryState({
         .then((snapshot) => sanitizeSnapshotForAgent(snapshot, currentAgentId, { mainSessionKey }))
         .catch(() => null)
       : Promise.resolve(null);
-    const listPromise = listAdapterSessions(adapter, currentAgentId);
+    // Attach rejection handling immediately while the local snapshot is read.
+    // Preserve the original fallback semantics when consuming the result below.
+    const listPromise = listAdapterSessions(adapter, currentAgentId, request.isCurrentCatalog).then(
+      sessions => ({ ok: true as const, sessions }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
 
     // Optimistic: prefer the currently visible main session; fall back to cached snapshot.
     const snapshot = await snapshotPromise;
+    if (!request.isCurrent()) return;
     const snapshotPreview = buildSnapshotPreviewSession(snapshot);
-    if (snapshotPreview.length > 0) {
+    if (snapshotPreview.length > 0 && request.isCurrentCatalog()) {
       setSessions((prev) => (prev.length > 0 ? prev : snapshotPreview));
     }
     const preferredKey = routeSessionKey ?? (
@@ -1313,6 +1458,7 @@ export function useChatHistoryState({
       });
       sessionKeyRef.current = preferredKey;
       setSessionKey(preferredKey);
+      request.didSelect();
       markHermesConnectTrace('session_key_selected', {
         source: 'preferred',
       });
@@ -1332,7 +1478,10 @@ export function useChatHistoryState({
     }
 
     try {
-      const list = await listPromise;
+      const result = await listPromise;
+      if (!request.isCurrentCatalog()) return;
+      if (!result.ok) throw result.error;
+      const list = result.sessions;
       markHermesConnectTrace('sessions_list_done', {
         count: list.length,
       });
@@ -1353,6 +1502,7 @@ export function useChatHistoryState({
           // (stale optimistic result auto-dropped by historyRequestIdRef guard)
           sessionKeyRef.current = selected.key;
           setSessionKey(selected.key);
+          request.didSelect();
           markHermesConnectTrace('session_key_selected', {
             source: 'selected',
           });
@@ -1365,13 +1515,16 @@ export function useChatHistoryState({
             clearWhenEmpty: true,
             sessionId: selected.sessionId,
           });
+          if (!request.isCurrent()) return;
           await loadHistory(selected.key, HISTORY_PAGE_SIZE);
         }
       }
+      if (!request.isCurrent()) return;
       markHermesConnectTrace('history_bootstrap_done', {
         sessionKeyPresent: Boolean(sessionKeyRef.current),
       });
     } catch {
+      if (!request.isCurrent()) return;
       // If optimistic load is already running, let it finish
       if (optimisticHistoryPromise) {
         await optimisticHistoryPromise.catch(() => {});
@@ -1380,6 +1533,7 @@ export function useChatHistoryState({
       const fallbackKey = preferredKey ?? mainSessionKey;
       sessionKeyRef.current = fallbackKey;
       setSessionKey(fallbackKey);
+      request.didSelect();
       markHermesConnectTrace('session_key_selected', {
         source: 'fallback',
       });
@@ -1391,11 +1545,23 @@ export function useChatHistoryState({
       void restoreCachedMessages(fallbackKey, { clearWhenEmpty: true });
       loadHistory(fallbackKey, HISTORY_PAGE_SIZE);
     }
-  }, [adapter, currentAgentId, dbg, gatewayConfigId, loadHistory, mainSessionKey, routeSessionKey, restoreCachedMessages, setSessionKey]);
+  }, [adapter, beginSessionRead, currentAgentId, dbg, gatewayConfigId, loadHistory, mainSessionKey, routeSessionKey, restoreCachedMessages, setSessionKey]);
 
-  const refreshCurrentSessionHistory = useCallback(async () => {
+  const refreshCurrentSessionHistory = useCallback(async (options?: {
+    afterInFlight?: boolean;
+    isCurrent?: () => boolean;
+  }) => {
     const currentKey = sessionKeyRef.current;
     if (!currentKey) return;
+    const scopeVersion = historyScopeVersionRef.current;
+    if (options?.afterInFlight) {
+      // A read started on the old network cannot establish current history.
+      // Wait once, then read again; newer concurrent reads still coalesce.
+      const pending = historyLoadInFlightRef.current.get(`${currentKey}::${historyLimitRef.current}`);
+      if (pending) await pending.catch(() => 0);
+    }
+    if (scopeVersion !== historyScopeVersionRef.current || sessionKeyRef.current !== currentKey
+      || (options?.isCurrent && !options.isCurrent())) return;
     await loadHistory(currentKey, historyLimitRef.current);
   }, [loadHistory, sessionKeyRef]);
 
@@ -1409,6 +1575,15 @@ export function useChatHistoryState({
     refreshing,
     refreshingSessions,
     hasMoreHistory,
+    historyLoadMoreError,
+    retryLoadMoreHistory: () => {
+      if (!sessionKey || readScopeRef.current !== readScope) return;
+      const current = cursorWindowRef.current;
+      if (current?.scope === readScope && current.key === sessionKey) return onLoadMoreHistory(true);
+      setHistoryLoadMoreError(false);
+      return loadHistory(sessionKey);
+    },
+    applyReconciledHistory,
     loadingMoreHistory,
     historyLoaded,
     activitySnapshot,
@@ -1426,10 +1601,14 @@ export function useChatHistoryState({
     loadSessionsAndHistory,
     restoreCachedMessages,
     refreshSessions: useCallback(async () => {
+      const request = beginSessionRead('sessions');
+      if (!request.isCurrent()) return;
+      const refreshId = ++sessionRefreshIdRef.current;
       setRefreshingSessions(true);
       try {
         const currentKey = sessionKeyRef.current;
-        const list = await listAdapterSessions(adapter, currentAgentId);
+        const list = await listAdapterSessions(adapter, currentAgentId, request.isCurrentCatalog);
+        if (!request.isCurrentCatalog()) return;
         setSessions(list);
 
         const selected = routeSessionKey
@@ -1443,20 +1622,22 @@ export function useChatHistoryState({
         if (selected.key !== currentKey) {
           sessionKeyRef.current = selected.key;
           setSessionKey(selected.key);
+          request.didSelect();
           setHistoryLoaded(false);
           cacheHydrationSessionKeyRef.current = selected.key;
           await restoreCachedMessages(selected.key, {
             clearWhenEmpty: true,
             sessionId: selected.sessionId,
           });
+          if (!request.isCurrent()) return;
           await loadHistory(selected.key, historyLimitRef.current);
         }
       } catch {
         // silent
       } finally {
-        setRefreshingSessions(false);
+        if (mountedRef.current && refreshId === sessionRefreshIdRef.current) setRefreshingSessions(false);
       }
-    }, [adapter, currentAgentId, gatewayConfigId, loadHistory, mainSessionKey, routeSessionKey, restoreCachedMessages, sessionKeyRef, setSessionKey]),
+    }, [adapter, beginSessionRead, currentAgentId, gatewayConfigId, loadHistory, mainSessionKey, routeSessionKey, restoreCachedMessages, sessionKeyRef, setSessionKey]),
     reconcileLatestAssistantFromHistory,
   };
 }

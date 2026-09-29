@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import WebSocket, { WebSocketServer } from 'ws';
 import { WEBSOCKET_FRAME_LIMIT_BYTES, isWebSocketMaxPayloadError } from '../frame-limit.js';
+import { allowsLocalWebSocketOrigin, MAX_LOCAL_BRIDGE_SOCKETS } from '../local-websocket-policy.js';
 import { CodexService, type CodexRequest } from './service.js';
 
 export class CodexServer {
@@ -31,6 +32,8 @@ export class CodexServer {
     this.ws = new WebSocketServer({ noServer: true, maxPayload: WEBSOCKET_FRAME_LIMIT_BYTES });
     this.http.on('upgrade', (request, socket, head) => {
       if (request.url !== '/v1/codex/ws') { socket.destroy(); return; }
+      if (!allowsLocalWebSocketOrigin(request)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
+      if (this.ws!.clients.size >= MAX_LOCAL_BRIDGE_SOCKETS) { socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n'); return; }
       this.ws!.handleUpgrade(request, socket, head, client => this.accept(client));
     });
     this.conversation.on('update', this.update);

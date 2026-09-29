@@ -179,6 +179,7 @@ async function claimOpenClawRelay(
   relay: RelayClaimInput,
 ): Promise<GatewayScanPayload> {
   const claimed = await RelayPairingService.claim({
+    backendKind: resolvePairingPayloadBackend(payload) ?? undefined,
     serverUrl: relay.serverUrl,
     gatewayId: relay.gatewayId,
     accessCode: relay.accessCode,

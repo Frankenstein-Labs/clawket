@@ -86,9 +86,9 @@ export async function handleClaudeCommand(args: string[]): Promise<void> {
         const previousRegistry = previous?.registryUrl ?? (() => { try { return JSON.parse(previous?.invitation?.qrPayload ?? '{}').s; } catch { return undefined; } })();
         const registered = previous && previousRegistry === registryUrl
           ? { ...previous, ...await post<{ accessCode: string }>(registryUrl.replace(/\/$/, '') + '/v1/pair/access-code', { gatewayId: previous.gatewayId, relaySecret: previous.relaySecret }) }
-          : await post<{ gatewayId: string; relaySecret: string; relayUrl: string; accessCode: string }>(registryUrl.replace(/\/$/, '') + '/v1/pair/register', { displayName: `Claude Code · ${config.device ? 'Computer' : basename(config.project)}` });
+          : await post<{ gatewayId: string; relaySecret: string; relayUrl: string; accessCode: string }>(registryUrl.replace(/\/$/, '') + '/v1/pair/register', { displayName: 'Claude Code' });
         if (!registered.gatewayId || !registered.relaySecret || !registered.relayUrl || !registered.accessCode) throw new Error('Invalid Claude registration');
-        qrPayload = JSON.stringify({ v: 2, k: 'cp', b: 'claude-code', s: registryUrl, g: registered.gatewayId, a: registered.accessCode, n: `Claude Code · ${config.device ? 'Computer' : basename(config.project)}` });
+        qrPayload = JSON.stringify({ v: 2, k: 'cp', b: 'claude-code', s: registryUrl, g: registered.gatewayId, a: registered.accessCode, n: 'Claude Code' });
         const draft = buildPairingSessionDraft({ ...registered, qrPayload });
         config.host = '127.0.0.1'; config.relay = { registryUrl, relayUrl: registered.relayUrl, gatewayId: registered.gatewayId, relaySecret: registered.relaySecret };
         try {

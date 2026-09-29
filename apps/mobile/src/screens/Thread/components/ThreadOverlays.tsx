@@ -1,4 +1,5 @@
 import React from 'react';
+import { RuntimeSettingsSheet, type RuntimeSettingsSheetProps } from '../../../components/chat/RuntimeSettingsSheet';
 import type { UiMessage } from '../../../types/chat';
 import type { ThinkingLevel } from '../../../utils/gateway-settings';
 import type { ModelInfo } from '../../../components/chat/ModelPickerModal';
@@ -65,6 +66,7 @@ export type ThreadOverlaysProps = Readonly<{
     onRetry: () => void;
     onSelect: (model: ModelInfo) => void;
   }>;
+  runtimeSettings?: Omit<RuntimeSettingsSheetProps, 'models' | 'onSelectModel' | 'onRetry' | 'currentModel' | 'currentProvider'>;
   commandPicker: Readonly<{
     visible: boolean;
     title: string;
@@ -118,6 +120,7 @@ export function ThreadOverlays({
   onCloseShare,
   preview,
   modelPicker,
+  runtimeSettings,
   commandPicker,
   commandsSheet,
   thinkingPicker,
@@ -166,7 +169,9 @@ export function ThreadOverlays({
         onClose={preview.onClose}
         onIndexChange={preview.onIndexChange}
       />
-      <ModelPickerModal
+      {runtimeSettings ? <RuntimeSettingsSheet {...runtimeSettings} models={modelPicker.models}
+        currentModel={modelPicker.defaultModel} currentProvider={modelPicker.defaultProvider}
+        onSelectModel={modelPicker.onSelect} onRetry={modelPicker.onRetry} /> : <ModelPickerModal
         visible={modelPicker.visible}
         loading={modelPicker.loading}
         error={modelPicker.error}
@@ -179,7 +184,7 @@ export function ThreadOverlays({
         defaultProvider={modelPicker.defaultProvider}
         configuredDefaultModel={modelPicker.configuredDefaultModel}
         onManage={modelPicker.onManage}
-      />
+      />}
       <CommandOptionPickerModal
         visible={commandPicker.visible}
         title={commandPicker.title}

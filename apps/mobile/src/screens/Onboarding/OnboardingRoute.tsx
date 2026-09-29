@@ -9,12 +9,14 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BackendKind } from '@clawket/agent-protocol';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
+import { useTranslation } from 'react-i18next';
 import {
   connectBackendPairingCode,
   connectBackendPairingLink,
   connectBackendPairingPayload,
   createYouMindOnboardingConnection,
   getConnectionRuntime,
+  resolvePairingPayloadBackend,
   type BackendPairingPayload,
   type BackendPairingResult,
   type YouMindOnboardingAuthSession,
@@ -26,6 +28,7 @@ import { useGatewayScanner } from '../../contexts/GatewayScannerContext';
 import { useProPaywall } from '../../contexts/ProPaywallContext';
 import type { RootStackParamList } from '../../navigation/root-stack';
 import type { RelayServiceEnvironment } from '../../types';
+import { showNoticeAlert } from '../../utils/notice-alert';
 import { OnboardingScreen } from './OnboardingScreen';
 import { WelcomeScreen } from './WelcomeScreen';
 import { YouMindOnboardingScreen } from './YouMindOnboardingScreen';
@@ -95,6 +98,7 @@ export function OnboardingRoute({
   onOpenPaywall,
   onClose,
 }: OnboardingRouteProps): React.JSX.Element {
+  const { t } = useTranslation('config');
   const runtime = useConnections();
   const { debugMode } = useAppContext();
   const {
@@ -280,6 +284,27 @@ export function OnboardingRoute({
     perform();
   }, [canBeginPairing, connectScannedPayload, onScanQrTapped, openGatewayScanner, importGatewayQrImage]);
 
+  // The chooser's header scan (owner request 2026-09-28): every pairing QR names its backend, so
+  // the scanned payload selects the step and then runs the same backend-checked claim path.
+  const scanAnyQr = useCallback(() => {
+    const perform = () => {
+      if (pairingRequestInFlightRef.current) return;
+      setOperation((current) => ({ ...current, active: false, errorCode: undefined }));
+      void openGatewayScanner({
+        onScanned: (result) => {
+          const backendKind = resolvePairingPayloadBackend(result);
+          if (!backendKind) {
+            showNoticeAlert(t('Invalid QR Code'), t('This QR code does not contain valid connection info.'));
+            return;
+          }
+          return connectScannedPayload(result, backendKind);
+        },
+      });
+    };
+    if (!canBeginPairing(perform)) return;
+    perform();
+  }, [canBeginPairing, connectScannedPayload, openGatewayScanner, t]);
+
   const connectFromPairingLink = useCallback(async (url: string) => {
     const perform = async () => {
       if (!acquirePairingRequest()) return;
@@ -464,6 +489,7 @@ export function OnboardingRoute({
       }}
       onSubmitPairing={submitPairing}
       onScanQr={scanQr}
+      onScanAnyQr={scanAnyQr}
       onImportQr={(backend) => scanQr(backend, true)}
       onOpenYouMind={openYouMind}
       onOpenWebsite={openWebsite}

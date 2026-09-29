@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import relayWorker, { __testing, RelayRoom, HermesRelayRoom } from './index';
+import relayWorker, { __testing, RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom } from './index';
 import { resolveClientLabelFromToken } from './relay/auth';
 import { authorizeRelayToken } from './relay/auth';
 import { issuePairingRelayTicket } from '@clawket/shared';
 import { isRelayFrameTooLarge } from './relay/frames';
-import { RELAY_FRAME_MAX_BYTES } from './relay/types';
+import { RELAY_FRAME_MAX_BYTES, SOCKET_CLOSE_CODES, type SocketAttachment } from './relay/types';
 
 class MemoryKV {
   private map = new Map<string, string>();
@@ -129,6 +129,7 @@ function createRelayRoomWithSockets(
   } as unknown as DurableObjectState;
   const env = {
     ROUTES_KV: kv as unknown as KVNamespace,
+    HERMES_ROUTES_KV: kv as unknown as KVNamespace,
     MAX_MESSAGES_PER_10S: '120',
     HEARTBEAT_INTERVAL_MS: '30000',
     ...envOverrides,
@@ -143,7 +144,280 @@ function createRelayRoomWithSockets(
 }
 
 describe('relay worker helpers', () => {
-  it.each([RelayRoom, HermesRelayRoom])('ignores late owner close events for the current heartbeat (%s)', async (Room) => {
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('consumes peer-forged Relay controls before client or owner routes (%s)', async Room => {
+    const capability = 'relay.owner-pong.v1';
+    const nonce = 'a'.repeat(32);
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1, capabilities: [capability] } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2, authScope: 'full' } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone], {}, Room);
+    await ready;
+    for (const socket of [phone, owner]) {
+      for (const event of ['relay.ready', 'relay.owner-pong', 'relay.client-pong', 'relay.client-ping', 'relay.transfer-start',
+        'client_count', 'client_connected', 'client_disconnected', 'client.sockets']) {
+        await room.webSocketMessage(socket as unknown as WebSocket, __testing.CONTROL_PREFIX + JSON.stringify({
+          type: 'control', event, payload: { nonce, capabilities: [capability] },
+        }));
+      }
+    }
+    const ping = __testing.CONTROL_PREFIX + JSON.stringify({ type: 'control', event: 'relay.owner-ping', payload: { nonce } });
+    await room.webSocketMessage(phone as unknown as WebSocket, ping);
+    await room.webSocketMessage(owner as unknown as WebSocket, new TextEncoder().encode(ping).buffer);
+    expect(owner.sent).toEqual([]);
+    expect(phone.sent).toEqual([]);
+    await room.webSocketMessage(owner as unknown as WebSocket, ping);
+    expect(owner.sent).toEqual([ping.replace('relay.owner-ping', 'relay.owner-pong')]);
+    expect(phone.sent).toEqual([]);
+  });
+
+  it('never forwards reserved controls through OpenClaw secondary channels or restricted pairing sockets', async () => {
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1,
+      capabilities: ['bridge.client-sockets.v1', 'relay.owner-pong.v1'] } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', diagnosticId: 'phone-socket', connectedAt: 2, authScope: 'full' } });
+    const channel = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', targetConnectionId: 'phone-socket', connectedAt: 3,
+      capabilities: ['relay.owner-pong.v1'] } });
+    const pairing = new FakeWebSocket({ attachment: { role: 'client', clientId: 'pairing', connectedAt: 4, authScope: 'pairing', ticketExpiresAt: Date.now() + 30_000 } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone, channel, pairing]);
+    await ready;
+    for (const socket of [phone, pairing, channel]) {
+      for (const event of ['relay.ready', 'relay.owner-pong', 'relay.client-ping', 'relay.client-pong', 'relay.transfer-start',
+        'client_count', 'client_connected', 'client_disconnected', 'client.sockets']) {
+        await room.webSocketMessage(socket as unknown as WebSocket, __testing.CONTROL_PREFIX + JSON.stringify({
+          type: 'control', event, payload: { nonce: 'b'.repeat(32), capabilities: ['relay.owner-pong.v1'] },
+        }));
+      }
+    }
+    expect([owner.sent, phone.sent, channel.sent, pairing.sent]).toEqual([[], [], [], []]);
+    const command = { type: 'control', event: 'doctor.request', payload: { requestId: 'test-request' } };
+    await room.webSocketMessage(phone as unknown as WebSocket, __testing.CONTROL_PREFIX + JSON.stringify(command));
+    expect(channel.sent).toEqual([__testing.CONTROL_PREFIX + JSON.stringify({ ...command, sourceClientId: 'phone' })]);
+    expect(owner.sent).toEqual([]);
+  });
+
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('preserves client commands and Relay-authored presence (%s)', async Room => {
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1 } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2, authScope: 'full' } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone], {}, Room);
+    await ready;
+    const command = { type: 'control', event: 'bootstrap.request', payload: { requestId: 'test-request' } };
+    await room.webSocketMessage(phone as unknown as WebSocket, __testing.CONTROL_PREFIX + JSON.stringify(command));
+    expect(owner.sent).toEqual([__testing.CONTROL_PREFIX + JSON.stringify({ ...command, sourceClientId: 'phone' })]);
+    await room.webSocketClose(phone as unknown as WebSocket, 1000, 'closed');
+    expect(owner.sent).toContain(__testing.CONTROL_PREFIX + JSON.stringify({ type: 'control', event: 'client_disconnected', count: 0 }));
+  });
+
+  it('reserves presence names independently of claimed control shape or routing identities', async () => {
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1 } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2, authScope: 'full' } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone]); await ready;
+    for (const event of ['client_count', 'client_connected', 'client_disconnected', 'client.sockets']) {
+      const frame = __testing.CONTROL_PREFIX + JSON.stringify({ type: 'req', event, count: 0,
+        sourceClientId: 'owner', targetClientId: 'phone', payload: { clients: [] } });
+      await room.webSocketMessage(phone as unknown as WebSocket, new TextEncoder().encode(frame).buffer);
+      await room.webSocketMessage(owner as unknown as WebSocket, frame);
+    }
+    expect([owner.sent, phone.sent]).toEqual([[], []]);
+  });
+
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('handles negotiated client echo before backend routing (%s)', async Room => {
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1 } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2,
+      authScope: 'full', capabilities: ['relay.client-ping.v1'], lastPongAt: 100 } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone], {}, Room);
+    await ready;
+    const nonce = 'a'.repeat(32);
+    const frame = __testing.CONTROL_PREFIX + JSON.stringify({ type: 'control', event: 'relay.client-ping', payload: { nonce } });
+    await room.webSocketMessage(phone as unknown as WebSocket, frame);
+    expect(phone.sent).toEqual([frame.replace('relay.client-ping', 'relay.client-pong')]);
+    expect(owner.sent).toEqual([]);
+    expect((phone.deserializeAttachment() as SocketAttachment).lastPongAt).toBe(100);
+  });
+
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('persists the advertised full-client capabilities through real upgrade admission (%s)', async Room => {
+    const token = 'full-client-test-token';
+    const { room, ready, kv } = createRelayRoomWithSockets([], {}, Room); await ready;
+    const hermes = Room === HermesRelayRoom;
+    const field = hermes ? 'bridgeId' : 'gatewayId';
+    await kv.put(`${hermes ? 'hermes-pair-bridge:' : 'pair-gateway:'}paired-room`, JSON.stringify({
+      [field]: 'paired-room', relaySecretHash: 'owner-hash', clientTokens: [{ hash: await __testing.sha256Hex(token) }],
+    }));
+    const server = new FakeWebSocket();
+    (room as unknown as { runtime: { state: { acceptWebSocket: unknown } } }).runtime.state.acceptWebSocket = vi.fn();
+    vi.stubGlobal('WebSocketPair', class { 0 = new FakeWebSocket(); 1 = server; });
+    vi.stubGlobal('Response', class { status: number; constructor(_body: unknown, init: { status: number }) { this.status = init.status; } });
+    try {
+      const response = await room.fetch(new Request(`https://relay.example/ws?${field}=paired-room&role=client&clientId=phone&capabilities=relay.client-pong.v1,relay.client-ping.v1,relay.transfer-hint.v1`, {
+        headers: { upgrade: 'websocket', authorization: `Bearer ${token}` },
+      }));
+      expect(response.status).toBe(101);
+      expect(server.deserializeAttachment()).toMatchObject({ role: 'client', authScope: 'full',
+        capabilities: ['relay.client-pong.v1', 'relay.client-ping.v1', 'relay.transfer-hint.v1'], lastPongAt: expect.any(Number) });
+      expect(JSON.parse(server.sent[0].slice(__testing.CONTROL_PREFIX.length))).toMatchObject({
+        event: 'relay.ready', payload: { capabilities: ['relay.frame-limit.v2', 'relay.client-ping.v1', 'relay.transfer-hint.v1'] },
+      });
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('negotiates transfer hints with a real full owner upgrade (%s)', async Room => {
+    const token = 'owner-transfer-test-token';
+    const { room, ready, kv } = createRelayRoomWithSockets([], {}, Room); await ready;
+    const hermes = Room === HermesRelayRoom;
+    const field = hermes ? 'bridgeId' : 'gatewayId';
+    await kv.put(`${hermes ? 'hermes-pair-bridge:' : 'pair-gateway:'}paired-owner`, JSON.stringify({
+      [field]: 'paired-owner', relaySecretHash: await __testing.sha256Hex(token),
+    }));
+    const server = new FakeWebSocket();
+    (room as unknown as { runtime: { state: { acceptWebSocket: unknown } } }).runtime.state.acceptWebSocket = vi.fn();
+    vi.stubGlobal('WebSocketPair', class { 0 = new FakeWebSocket(); 1 = server; });
+    vi.stubGlobal('Response', class { status: number; constructor(_body: unknown, init: { status: number }) { this.status = init.status; } });
+    try {
+      const response = await room.fetch(new Request(`https://relay.example/ws?${field}=paired-owner&role=gateway&clientId=owner&capabilities=relay.owner-pong.v1,relay.transfer-hint.v1`, {
+        headers: { upgrade: 'websocket', authorization: `Bearer ${token}` },
+      }));
+      expect(response.status).toBe(101);
+      expect(server.deserializeAttachment()).toMatchObject({ role: 'gateway', authScope: 'full',
+        capabilities: ['relay.owner-pong.v1', 'relay.transfer-hint.v1'] });
+      expect(JSON.parse(server.sent[0].slice(__testing.CONTROL_PREFIX.length))).toMatchObject({
+        event: 'relay.ready', payload: { capabilities: ['relay.frame-limit.v2', 'relay.owner-pong.v1', 'relay.transfer-hint.v1'] },
+      });
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('adds adjacent hints on the actual large request/response path (%s)', async Room => {
+    const capabilities = ['relay.transfer-hint.v1'];
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1, authScope: 'full', capabilities } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2, authScope: 'full', activeClient: true, capabilities } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone], {}, Room); await ready;
+    const request = JSON.stringify({ type: 'req', id: 'large-request', method: 'chat.send', params: { text: '😀'.repeat(33_000) } });
+    const response = JSON.stringify({ type: 'res', id: 'large-request', ok: true, payload: '😀'.repeat(33_000) });
+    await room.webSocketMessage(phone as unknown as WebSocket, request);
+    expect(owner.sent.slice(-2)).toEqual([__testing.CONTROL_PREFIX + JSON.stringify({ type: 'control', event: 'relay.transfer-start', payload: { bytes: new TextEncoder().encode(request).byteLength } }), request]);
+    await room.webSocketMessage(owner as unknown as WebSocket, response);
+    expect(phone.sent.slice(-2)).toEqual([__testing.CONTROL_PREFIX + JSON.stringify({ type: 'control', event: 'relay.transfer-start', payload: { bytes: new TextEncoder().encode(response).byteLength } }), response]);
+  });
+
+  it('adds adjacent hints on both raw OpenClaw secondary directions', async () => {
+    const capabilities = ['relay.transfer-hint.v1'];
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1,
+      capabilities: ['bridge.client-sockets.v1'] } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', diagnosticId: 'phone-socket', connectedAt: 2, authScope: 'full', capabilities } });
+    const channel = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', targetConnectionId: 'phone-socket', connectedAt: 3, authScope: 'full', capabilities } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone, channel]); await ready;
+    const frame = JSON.stringify({ type: 'req', id: 'large', method: 'chat.send', params: { text: 'x'.repeat(128 * 1024) } });
+    const expected = [__testing.CONTROL_PREFIX + JSON.stringify({ type: 'control', event: 'relay.transfer-start', payload: { bytes: new TextEncoder().encode(frame).byteLength } }), frame];
+    await room.webSocketMessage(phone as unknown as WebSocket, frame);
+    expect(channel.sent).toEqual(expected);
+    await room.webSocketMessage(channel as unknown as WebSocket, frame);
+    expect(phone.sent).toEqual(expected);
+  });
+
+  it.each(['relay.owner-pong', 'relay.client-pong', 'relay.transfer-start',
+    'client_count', 'client_connected', 'client_disconnected', 'client.sockets'])('keeps client flood budgets and pairing expiry on reserved %s controls', async event => {
+    const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1 } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2, authScope: 'full' } });
+    const pairing = new FakeWebSocket({ attachment: { role: 'client', clientId: 'pairing', connectedAt: 3, authScope: 'pairing', ticketExpiresAt: 1 } });
+    const { room, ready } = createRelayRoomWithSockets([owner, phone, pairing]);
+    await ready;
+    const pong = __testing.CONTROL_PREFIX + JSON.stringify({ type: 'control', event, payload: { nonce: 'a'.repeat(32) } });
+    for (let i = 0; i < 301; i++) await room.webSocketMessage(phone as unknown as WebSocket, pong);
+    expect(phone.closeCalls).toContainEqual({ code: SOCKET_CLOSE_CODES.RATE_LIMITED, reason: 'rate_limited' });
+    await room.webSocketMessage(pairing as unknown as WebSocket, pong.replace('-pong', '-ping'));
+    expect(pairing.closeCalls).toContainEqual({ code: SOCKET_CLOSE_CODES.RATE_LIMITED, reason: 'invalid_pairing_message' });
+    expect(owner.sent).toEqual([]);
+  });
+
+  it('rejects a restricted pairing ticket reusing a full client identity', async () => {
+    const secret = 'test-pairing-ticket-secret-that-is-long-enough';
+    const token = await issuePairingRelayTicket({ version: 2, scope: 'pairing', gatewayId: 'gw_scope',
+      sessionId: `ps_${'a'.repeat(64)}`, tokenId: '00000000-0000-4000-8000-000000000000',
+      expiresAt: Date.now() + 60_000 }, secret);
+    const peer = new FakeWebSocket({ attachment: { role: 'client', clientId: 'full-phone', connectedAt: 1, authScope: 'full' } });
+    const { room, ready } = createRelayRoomWithSockets([peer], { PAIRING_TICKET_SECRET: secret });
+    await ready;
+    const response = await room.fetch(new Request('https://relay.example/ws?gatewayId=gw_scope&role=client&clientId=full-phone', {
+      headers: { upgrade: 'websocket', authorization: `Bearer ${token}` },
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.text()).toContain('CLIENT_ID_CONFLICT');
+    expect(peer.closeCalls).toEqual([]);
+  });
+  it('does not promote a real restricted ticket requesting every liveness/transfer capability', async () => {
+    const secret = 'test-pairing-ticket-secret-that-is-long-enough';
+    const token = await issuePairingRelayTicket({ version: 2, scope: 'pairing', gatewayId: 'gw_scope',
+      sessionId: `ps_${'a'.repeat(64)}`, tokenId: '00000000-0000-4000-8000-000000000000',
+      expiresAt: Date.now() + 60_000 }, secret);
+    const { room, ready } = createRelayRoomWithSockets([], { PAIRING_TICKET_SECRET: secret }); await ready;
+    const server = new FakeWebSocket();
+    (room as unknown as { runtime: { state: { acceptWebSocket: unknown } } }).runtime.state.acceptWebSocket = vi.fn();
+    vi.stubGlobal('WebSocketPair', class { 0 = new FakeWebSocket(); 1 = server; });
+    vi.stubGlobal('Response', class { status: number; constructor(_body: unknown, init: { status: number }) { this.status = init.status; } });
+    try {
+      const response = await room.fetch(new Request('https://relay.example/ws?gatewayId=gw_scope&role=client&clientId=pairing-phone&capabilities=relay.client-pong.v1,relay.client-ping.v1,relay.owner-pong.v1,relay.transfer-hint.v1', {
+        headers: { upgrade: 'websocket', authorization: `Bearer ${token}` },
+      }));
+      expect(response.status).toBe(101);
+      expect(server.deserializeAttachment()).toMatchObject({ authScope: 'pairing', capabilities: ['relay.client-pong.v1'] });
+      expect(JSON.parse(server.sent[0].slice(__testing.CONTROL_PREFIX.length))).toMatchObject({
+        event: 'relay.ready', payload: { capabilities: ['relay.frame-limit.v2'] },
+      });
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('rejects owner recovery before accepting or advertising ready if retirement cannot persist (%s)', async Room => {
+    const token = 'owner-test-token';
+    const old = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'same-owner', connectedAt: 1 } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 1, authScope: 'full' } });
+    const { room, ready, kv } = createRelayRoomWithSockets([old, phone], {}, Room); await ready;
+    const hermes = Room === HermesRelayRoom; const field = hermes ? 'bridgeId' : 'gatewayId';
+    await kv.put(`${hermes ? 'hermes-pair-bridge:' : 'pair-gateway:'}paired-room`, JSON.stringify({ [field]: 'paired-room', relaySecretHash: await __testing.sha256Hex(token) }));
+    vi.spyOn(phone, 'serializeAttachment').mockImplementation(() => { throw new Error('test storage failure'); });
+    const server = new FakeWebSocket(); const accept = vi.fn();
+    const runtime = (room as unknown as { runtime: { state: { acceptWebSocket: unknown }; gatewaySocket: unknown } }).runtime;
+    runtime.state.acceptWebSocket = accept;
+    vi.stubGlobal('WebSocketPair', class { 0 = new FakeWebSocket(); 1 = server; });
+    try {
+      const response = await room.fetch(new Request(`https://relay.example/ws?${field}=paired-room&role=gateway&clientId=same-owner`, {
+        headers: { upgrade: 'websocket', authorization: `Bearer ${token}` },
+      }));
+      expect(response.status).toBe(503); expect(await response.text()).toContain('OWNER_RECOVERY_FAILED');
+      expect(accept).not.toHaveBeenCalled(); expect(server.sent).toEqual([]); expect(runtime.gatewaySocket).toBe(old);
+      expect(old.closeCalls).toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('rejects replacement using another paired credential before closing the owner (%s)', async Room => {
+    const token = 'different-valid-client-token';
+    const credentialHash = await __testing.sha256Hex(token);
+    const peer = new FakeWebSocket({ attachment: { role: 'client', clientId: 'existing-phone',
+      connectedAt: 1, credentialHash: await __testing.sha256Hex('original-valid-client-token') } });
+    const { room, ready, kv } = createRelayRoomWithSockets([peer], {}, Room);
+    await ready;
+    const hermes = Room === HermesRelayRoom;
+    const field = hermes ? 'bridgeId' : 'gatewayId';
+    const prefix = hermes ? 'hermes-pair-bridge:' : 'pair-gateway:';
+    await kv.put(`${prefix}paired-room`, JSON.stringify({ [field]: 'paired-room', relaySecretHash: 'owner-hash', clientTokens: [{ hash: credentialHash }] }));
+    const response = await room.fetch(new Request(`https://relay.example/ws?${field}=paired-room&role=client&clientId=existing-phone`, {
+      headers: { upgrade: 'websocket', authorization: `Bearer ${token}` },
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.text()).toContain('CLIENT_ID_CONFLICT');
+    expect(peer.closeCalls).toEqual([]);
+  });
+  it.each([RelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('rejects authenticated fan-out before socket allocation (%s)', async Room => {
+    const token = 'capacity-test-client-token';
+    const credentialHash = await __testing.sha256Hex(token);
+    const peers = Array.from({ length: 8 }, (_, i) => new FakeWebSocket({ attachment: {
+      role: 'client', clientId: `device-${i}`, connectedAt: 1, credentialHash,
+    } }));
+    const { room, ready, kv } = createRelayRoomWithSockets(peers, {}, Room);
+    await ready;
+    await kv.put('pair-gateway:gw_capacity', JSON.stringify({ gatewayId: 'gw_capacity', relaySecretHash: 'owner-hash', clientTokens: [{ hash: credentialHash }] }));
+    const response = await room.fetch(new Request('https://relay.example/ws?gatewayId=gw_capacity&role=client&clientId=new-device', {
+      headers: { upgrade: 'websocket', authorization: `Bearer ${token}` },
+    }));
+    expect(response.status).toBe(429);
+    expect(await response.text()).toContain('CLIENT_LIMIT_REACHED');
+    expect(peers.every(peer => peer.closeCalls.length === 0)).toBe(true);
+  });
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('ignores late owner close events for the current heartbeat (%s)', async (Room) => {
     const owner = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 2 } });
     const client = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2 } });
     const stale = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1 } });
@@ -157,6 +431,51 @@ describe('relay worker helpers', () => {
     expect(runtime.pendingGatewayPingAt).toBe(1234);
     expect(runtime.gatewayPingCapability).toBe('supported');
     expect(client.closeCalls).toEqual([]);
+  });
+
+  it.each([
+    [RelayRoom, 'openclaw'], [HermesRelayRoom, 'hermes'], [CodexRelayRoom, 'codex'],
+    [ClaudeCodeRelayRoom, 'claude-code'], [PiRelayRoom, 'pi'],
+  ] as const)('fences old broadcasts/challenges if owner changes across yielded persistence (%s)', async (Room, backend) => {
+    const old = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'same-owner', connectedAt: 1 } });
+    const { room, storage, ready } = createRelayRoomWithSockets([old], {}, Room); await ready;
+    let release!: () => void;
+    const wait = new Promise<void>(resolve => { release = resolve; });
+    // This deliberately permits reentry: real DO storage currently has input
+    // gates, but future non-storage work must not weaken socket fencing.
+    vi.spyOn(storage, 'put').mockImplementationOnce(() => wait);
+    const frame = backend === 'hermes' || backend === 'openclaw'
+      ? JSON.stringify({ type: 'event', event: 'connect.challenge', payload: { nonce: 'old-test-challenge' } })
+      : JSON.stringify({ type: 'event', event: `${backend}.update`, payload: {} });
+    const handling = room.webSocketMessage(old as never, frame);
+    const current = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'same-owner', connectedAt: 2 } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2, authScope: 'full' } });
+    const runtime = (room as unknown as { runtime: { gatewaySocket: unknown; clients: Map<string, unknown>; activeClientId: string | null; pendingChallenge: unknown; gatewayLastActivityAt: number } }).runtime;
+    runtime.gatewaySocket = current; runtime.clients.set('phone', phone); runtime.activeClientId = 'phone';
+    runtime.pendingChallenge = null; runtime.gatewayLastActivityAt = 777;
+    release(); await handling;
+    expect(phone.sent).toEqual([]); expect(phone.closeCalls).toEqual([]);
+    expect(runtime.pendingChallenge).toBeNull(); expect(runtime.gatewayLastActivityAt).toBe(777);
+  });
+
+  it.each([RelayRoom, HermesRelayRoom, CodexRelayRoom, ClaudeCodeRelayRoom, PiRelayRoom])('does not close a new-generation client while the old owner lease write awaits (%s)', async Room => {
+    const old = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 1 } });
+    const oldPhone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 1, authScope: 'full' } });
+    const { room, storage, ready } = createRelayRoomWithSockets([old, oldPhone], {}, Room);
+    await ready;
+    let release!: () => void;
+    const wait = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(storage, 'put').mockImplementationOnce(() => wait);
+    const closing = room.webSocketClose(old as never, 1006, 'network_closed');
+    const current = new FakeWebSocket({ attachment: { role: 'gateway', clientId: 'owner', connectedAt: 2 } });
+    const phone = new FakeWebSocket({ attachment: { role: 'client', clientId: 'phone', connectedAt: 2, authScope: 'full' } });
+    const runtime = (room as unknown as { runtime: { gatewaySocket: unknown; clients: Map<string, unknown> } }).runtime;
+    runtime.gatewaySocket = current; runtime.clients.set('phone', phone);
+    release(); await closing;
+    expect(runtime.gatewaySocket).toBe(current); expect(runtime.clients.get('phone')).toBe(phone);
+    expect(phone.closeCalls).toEqual([]); expect(oldPhone.closeCalls.some(call => call.code === 4011)).toBe(true);
+    await room.webSocketClose(oldPhone as never, 4011, 'gateway_unavailable');
+    expect(runtime.clients.get('phone')).toBe(phone);
   });
 
   it.each([RelayRoom, HermesRelayRoom])('keeps the replacement client on a late close after rehydration (%s)', async (Room) => {

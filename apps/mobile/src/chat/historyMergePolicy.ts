@@ -6,6 +6,31 @@ const ASSISTANT_MATCH_GRACE_MS = 5_000;
 const SAME_TURN_REPLACEMENT_GRACE_MS = 60_000;
 const USER_MATCH_GRACE_MS = 60_000;
 
+/** Only exact, unambiguous native echoes can correct the phone's send clock. */
+function userEchoTimestamp(previous: UiMessage[], next: UiMessage[]) {
+  const keys = (message: UiMessage): string[] => message.role === 'user' ? [
+    ...(message.idempotencyKey ? [`send:${message.idempotencyKey}`] : []),
+    ...(message.historyMessageId ? [`history:${message.historyMessageId}`] : []),
+  ] : [];
+  const counts = (messages: UiMessage[]) => {
+    const result = new Map<string, number>();
+    for (const message of messages) for (const key of keys(message)) {
+      result.set(key, (result.get(key) ?? 0) + 1);
+    }
+    return result;
+  };
+  const before = counts(previous);
+  const after = counts(next);
+  return (local: UiMessage, echo: UiMessage): number | undefined => {
+    const timestamp = echo.timestampMs;
+    const echoKeys = keys(echo);
+    const confirmed = typeof timestamp === 'number' && timestamp > 0
+      && Number.isFinite(timestamp) && Number.isFinite(new Date(timestamp).getTime())
+      && keys(local).some(key => echoKeys.includes(key) && before.get(key) === 1 && after.get(key) === 1);
+    return confirmed ? timestamp : local.timestampMs ?? timestamp;
+  };
+}
+
 /** Retire a stale live/source copy only when the snapshot confirms its replacement. */
 export function retireAliasedTools(previous: UiMessage[], next: UiMessage[], aliases?: Readonly<Record<string, string>>): UiMessage[] {
   if (!aliases) return previous;
@@ -20,6 +45,7 @@ export function retireAliasedTools(previous: UiMessage[], next: UiMessage[], ali
 
 /** Carry local row identity across exact echoes; wire IDs still drive reconciliation/actions. */
 export function preserveMessagePresentation(previous: UiMessage[], next: UiMessage[]): UiMessage[] {
+  const timestampForEcho = userEchoTimestamp(previous, next);
   const byId = new Map(previous.filter((message) => message.renderKey).map((message) => [message.id, message]));
   const bySend = new Map<string, UiMessage | null>();
   for (const message of byId.values()) {
@@ -42,10 +68,10 @@ export function preserveMessagePresentation(previous: UiMessage[], next: UiMessa
       ...message,
       renderKey: local.renderKey,
       ...(local.sentLocally ? { sentLocally: true as const } : {}),
-      // A local user's geometry (including its time break and photo preview)
-      // must not change just because the backend echoed the same submission.
+      // Keep photo geometry and row identity, but an exact native echo owns the
+      // clock: retaining a faster phone clock can put a question after its reply.
       ...(message.role === 'user' ? {
-        timestampMs: local.timestampMs ?? message.timestampMs,
+        timestampMs: timestampForEcho(local, message),
         imageUris: local.imageUris ?? message.imageUris,
         imageMetas: local.imageMetas ?? message.imageMetas,
       } : {}),
@@ -257,6 +283,7 @@ export function preserveOptimisticAssistantMessage(
   nextMessages: UiMessage[],
 ): UiMessage[] {
   const previousLastUser = findLastOptimisticUser(previousMessages);
+  const timestampForEcho = userEchoTimestamp(previousMessages, nextMessages);
   let mergedMessages = nextMessages;
   if (previousLastUser) {
     const knownOlderIds = new Set(previousMessages.filter(message => message.role === 'user' && message.id !== previousLastUser.id)
@@ -289,7 +316,9 @@ export function preserveOptimisticAssistantMessage(
         renderKey: previousLastUser.renderKey,
         ...(previousLastUser.sentLocally ? { sentLocally: true as const } : {}),
         idempotencyKey: message.idempotencyKey ?? previousLastUser.idempotencyKey,
-        timestampMs: previousLastUser.timestampMs ?? message.timestampMs,
+        // Decide from the original echo before a legacy fallback inherits our
+        // send key; presentation's second pass must retain this decided clock.
+        timestampMs: timestampForEcho(previousLastUser, message),
         imageUris: previousLastUser.imageUris ?? message.imageUris,
         imageMetas: previousLastUser.imageMetas ?? message.imageMetas,
       } : message);

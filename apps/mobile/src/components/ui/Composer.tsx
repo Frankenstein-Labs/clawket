@@ -107,9 +107,11 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
   const inputSizeStyle = useAnimatedStyle(() => expanded
     ? { height: undefined, flexGrow: 1, flexShrink: 1, flexBasis: 0 }
     : { height: value.length === 0 ? targetHeight : animatedHeight.value, flexGrow: 0, flexShrink: 0, flexBasis: 'auto' }, [expanded, value.length, targetHeight]);
-  // A downward drag on the compact composer puts the keyboard away, the way a
-  // drag on the timeline does; the responder reads live focus/scroll state so
-  // it is created once and never steals a scroll from a tall draft.
+  // A late UI-thread height can outlive a cleared draft. Native layout bounds
+  // collapse the empty editor without remounting it or disturbing selection.
+  const emptyInputHeight = !expanded && voiceState === 'idle' && value.length === 0 ? targetHeight : undefined;
+  // Only the toolbar owns drag-to-dismiss. Capturing above the native editor
+  // would also steal downward cursor/selection-handle drags.
   const inputScrollable = !expanded && contentHeight > maxHeight;
   const gestureStateRef = useRef({ focused, inputScrollable });
   gestureStateRef.current = { focused, inputScrollable };
@@ -140,7 +142,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
   const voiceGesture = useVoiceGesture({ phase: voiceState, enabled: Boolean(onVoicePress) && !voiceDisabled && editable && voiceState !== 'transcribing',
     start: onVoiceStart ?? onVoicePress ?? (() => {}), stop: onVoiceStop ?? onVoicePress ?? (() => {}), cancel: onVoiceCancel ?? (() => {}),
     focus: () => inputRef.current?.focus() });
-  const inputVoiceTarget = Boolean(onVoicePress) && !voiceDisabled && editable && !expanded && (!focused || !value) && !isRunning;
+  const inputVoiceTarget = Boolean(onVoicePress) && !voiceDisabled && editable && !expanded && !focused && !value && !isRunning;
   const inputPlaceholder = inputVoiceTarget && !value ? t(voiceGesture.tooShort ? 'Hold longer to talk' : 'Type or hold to talk') : placeholder;
   const voiceHint = voiceState === 'transcribing' ? t('Transcribing…')
     : voiceRecordingSaved ? t('Recording saved locally · Transcription paused') : voiceGesture.holding ? t(voiceGesture.cancelling ? 'Release to cancel' : 'Release to send · Slide up to cancel') : t('Listening…');
@@ -170,8 +172,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
   }), [onChangeText]);
 
   return (
-    <View testID={testID} style={[styles.composer, !expanded ? [styles.compact, glassChrome] : null, style, expanded ? styles.expanded : null]}
-      {...(expanded ? null : keyboardDismissResponder.panHandlers)}>
+    <View testID={testID} style={[styles.composer, !expanded ? [styles.compact, glassChrome] : null, style, expanded ? styles.expanded : null]}>
       {expanded ? <View testID={testID ? `${testID}-editor-header` : undefined} style={styles.editorHeader}>
         <ComposerAction icon={Minimize2} label={t('Collapse editor')} onPress={() => onExpandedChange?.(false)}
           testID={testID ? `${testID}-collapse` : undefined} />
@@ -193,7 +194,9 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
           focusAfterLayoutRef.current = false;
           inputRef.current?.focus();
         }}
-        style={[styles.inputShell, inputSizeStyle, !editable ? styles.disabled : null]}>
+        style={[styles.inputShell, inputSizeStyle,
+          { minHeight: emptyInputHeight ?? ControlSize.pill, maxHeight: emptyInputHeight },
+          !editable ? styles.disabled : null]}>
         <Text testID={testID ? `${testID}-measurement` : undefined} accessible={false}
           accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none"
           numberOfLines={6} style={[styles.measurement, { height: lineHeight * 6 }]}
@@ -221,7 +224,8 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
             testID={testID ? `${testID}-expand` : undefined} />
         </View> : null}
       </Animated.View>
-      <View style={styles.toolbar}>
+      <View testID={testID ? `${testID}-toolbar` : undefined} style={styles.toolbar}
+        {...(expanded ? null : keyboardDismissResponder.panHandlers)}>
         {voiceActive && onVoiceCancel ? <ComposerAction icon={X} label={t('Cancel', { ns: 'common' })} onPress={onVoiceCancel}
           testID={testID ? `${testID}-voice-cancel` : undefined} /> : onAddPress ? <ComposerAction icon={Plus} label={accessibilityLabels.add} onPress={onAddPress}
           tone="secondary" disabled={addDisabled || !editable} testID={testID ? `${testID}-add` : undefined} /> : null}

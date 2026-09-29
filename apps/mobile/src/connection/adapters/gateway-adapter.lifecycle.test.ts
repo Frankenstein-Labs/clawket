@@ -41,6 +41,7 @@ class LifecycleGateway {
   private readonly listeners = new Map<string, Set<(payload: any) => void>>();
 
   public configure(_config: GatewayConfig | null): void {}
+  public getTransferGraceMs(): number { return 0; }
 
   public on(event: GatewayEventName, listener: (payload: any) => void): () => void {
     const listeners = this.listeners.get(event) ?? new Set();
@@ -286,7 +287,7 @@ describe('GatewayAdapter lifecycle boundaries', () => {
       connectTimeoutMs: 25,
     });
     const connecting = adapter.connect();
-    const rejection = expect(connecting).rejects.toMatchObject({ code: 'bridge_offline' });
+    const rejection = expect(connecting).rejects.toMatchObject({ code: 'timeout' });
 
     await jest.advanceTimersByTimeAsync(26);
     await rejection;
@@ -294,6 +295,20 @@ describe('GatewayAdapter lifecycle boundaries', () => {
 
     expect(fake.disconnectCalls).toBe(1);
     expect(adapter.state).toBe('offline');
+  });
+
+  it.each([OpenClawAdapter, HermesAdapter])('joins a bounded known-transfer handshake instead of closing its outer connection timer', async Adapter => {
+    jest.useFakeTimers(); const fake = new LifecycleGateway();
+    jest.spyOn(fake, 'getTransferGraceMs').mockReturnValue(60_000);
+    const backend = Adapter === OpenClawAdapter ? 'openclaw' : 'hermes';
+    const adapter = new Adapter(connection(backend), { gateway: gateway(fake), historyCache: null, connectTimeoutMs: 25_000 });
+    const connecting = adapter.connect();
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(fake.disconnectCalls).toBe(0);
+    fake.emit('connection', { state: 'ready' });
+    if (backend === 'hermes') fake.emit('health', { status: 'ok', hermesApiReachable: true });
+    await expect(connecting).resolves.toBeUndefined();
+    expect(adapter.state).toBe('ready'); adapter.disconnect();
   });
 
   it('uses the prompted non-main session for legacy events without a session key', async () => {

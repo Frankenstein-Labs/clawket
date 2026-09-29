@@ -298,6 +298,59 @@ describe('mapAdapterSessionUpdate', () => {
     }, options)).toMatchObject({ finalMessage: undefined });
   });
 
+  it.each([
+    'Model authentication failed. Sign in again on your computer.',
+    'The model account has insufficient credits or quota.',
+    'The model is rate limited. Try again shortly.',
+    "The agent couldn't complete this reply. Please try again.",
+  ])('keeps the same localized terminal error identity in live and recovered history: %s', (text) => {
+    const terminalMessage = {
+      id: 'codex-turn-error:native-turn', role: 'system' as const,
+      text, timestampMs: 900,
+    };
+    const live = mapAdapterSessionUpdate({
+      type: 'run_finished', sessionKey: session.key, runId: 'bridge-run',
+      stopReason: 'error', terminalMessage,
+      message: { role: 'assistant', content: terminalMessage.text },
+    }, options);
+    const recovered = mapAdapterSessionUpdate({
+      type: 'history_reconciled', sessionKey: session.key,
+      history: { key: session.key, messages: [terminalMessage], hasActiveRun: false },
+    }, options);
+    expect(live).toMatchObject({ finalMessage: undefined, systemMessage: {
+      ...terminalMessage, text: `translated:${terminalMessage.text}`,
+    } });
+    expect(recovered.type === 'history_reconciled' && recovered.messages[0]).toMatchObject({
+      ...terminalMessage, text: `translated:${terminalMessage.text}`,
+    });
+    expect(mapAdapterChatMessage({ ...terminalMessage, role: 'assistant' }, options.translate)?.text)
+      .toBe(terminalMessage.text);
+    expect(mapAdapterChatMessage({ ...terminalMessage, role: 'user' }, options.translate)?.text)
+      .toBe(terminalMessage.text);
+    expect(mapAdapterChatMessage({ ...terminalMessage, text: 'Ordinary system prose' }, options.translate)?.text)
+      .toBe('Ordinary system prose');
+  });
+
+  it('does not turn invalid terminal notices or successful turns into a failure row', () => {
+    const base = { type: 'run_finished' as const, sessionKey: session.key, runId: 'bridge-run', stopReason: 'error' as const };
+    for (const terminalMessage of [
+      undefined,
+      { id: '', role: 'system', text: 'Failed' },
+      { id: 'notice', role: 'assistant', text: 'Failed' },
+      { id: 'notice', role: 'system', text: '' },
+      { id: 'x'.repeat(257), role: 'system', text: 'Failed' },
+    ]) {
+      expect(mapAdapterSessionUpdate({ ...base, terminalMessage } as SessionUpdate, options))
+        .toMatchObject({ systemMessage: undefined });
+    }
+    expect(mapAdapterSessionUpdate({ ...base, stopReason: 'end_turn', terminalMessage: {
+      id: 'notice', role: 'system', text: 'Failed',
+    } }, options)).toMatchObject({ systemMessage: undefined });
+    expect(mapAdapterSessionUpdate({ ...base, terminalMessage: {
+      id: 'notice', role: 'system', text: 'Failed', timestampMs: NaN,
+    } }, options)).toMatchObject({ systemMessage: { id: 'notice', timestampMs: 1_000 } });
+  });
+
   it('maps compaction, approval, session, usage, system, and error updates', () => {
     expect(mapAdapterSessionUpdate({
       type: 'compaction',
@@ -474,6 +527,74 @@ describe('useAdapterChatEvents', () => {
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
+  });
+
+  it.each(['codex', 'openclaw', 'hermes', 'claude-code', 'pi'] as const)(
+    'describes %s cancellation without changing the other backends',
+    async (backendKind) => {
+      const adapter = createMockAdapter({
+        connection: { ...connection, backendKind },
+        sessions: [session],
+        timeline: [{
+          atMs: 10,
+          update: {
+            type: 'run_finished',
+            sessionKey: session.key,
+            runId: 'cancelled-run',
+            stopReason: 'cancelled',
+          },
+        }],
+      });
+      const onUpdate = jest.fn();
+      const { unmount } = renderHook(() => useAdapterChatEvents({ adapter, onUpdate, now: () => 123 }));
+      await act(async () => { await adapter.connect(); });
+      act(() => adapter.replayTimeline());
+
+      expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'run_finished',
+        activeRunId: null,
+        isSending: false,
+        stopReason: 'cancelled',
+        systemMessage: {
+          id: 'sys_abort_cancelled-run',
+          role: 'system',
+          text: backendKind === 'codex'
+            ? 'Reply stopped. Commands already running may continue.'
+            : 'Run aborted by user.',
+          timestampMs: 123,
+        },
+      }));
+      unmount();
+      adapter.disconnect();
+    },
+  );
+
+  it('does not show a stopped notice for a completed Codex reply', async () => {
+    const adapter = createMockAdapter({
+      connection: { ...connection, backendKind: 'codex' },
+      sessions: [session],
+      timeline: [{
+        atMs: 10,
+        update: {
+          type: 'run_finished',
+          sessionKey: session.key,
+          runId: 'completed-run',
+          stopReason: 'end_turn',
+          message: { role: 'assistant', content: 'Done' },
+        },
+      }],
+    });
+    const onUpdate = jest.fn();
+    const { unmount } = renderHook(() => useAdapterChatEvents({ adapter, onUpdate }));
+    await act(async () => { await adapter.connect(); });
+    act(() => adapter.replayTimeline());
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      finalMessage: expect.objectContaining({ text: 'Done' }),
+      systemMessage: undefined,
+    }));
+    unmount();
+    adapter.disconnect();
   });
 
   it('subscribes to state, sessions, and mapped update events and cleans them up', async () => {

@@ -70,3 +70,10 @@ Cloudflare Workers 历史聚合（Production 与 Preview 分开，未启用新�
 已识别插线 Android 正式版 3.0.0/30001 和 QA 3.1.0/30100；iOS 测试模拟器已有 3.1.0 开发 App。投屏/模拟器的 UI 自动化窗口不可用，未完成交互验收；测试投屏已停止、启动的模拟器已关闭。Android DNS ping 落到代理地址，不是到真实 Registry 的 HTTPS 成功证据。
 
 代码修改不会自动进入已安装的 TestFlight。未执行分发打包、上传、OTA、npm 发布、Worker 部署或生产配置更改。手机修复需后续授权的 App 更新；Bridge 修复需加载新的 CLI 并重启其自有进程。真实 iPhone 的扫码、Profile、模型、前后台和小猫视觉验收仍待完成。
+
+
+## 后续归因与隐私修正（本地代码，尚未上线）
+
+负责人随后反馈 OpenClaw 随网络恢复可以连接。这支持“当时网络路径可能异常”，但不能倒推出上午/下午每一次失败的根因。复查发现 Mobile 曾把一般握手超时记为 `bridge_offline`、无错误码异常记为 `network`；上表保留历史原始分类，不能将这些标签当作已证实的 Bridge/网络故障。新代码改为 `timeout` / `unknown` 并保留实际到达的阶段。
+
+新增诊断只收集连接阶段、耗时、固定错误分类、HTTP 状态及失败时的 OS 网络类别；Relay/Registry 日志收紧为白名单与固定路径/原因，Codex 原生日志仅记录固定原因和数量。禁止聊天、请求/响应正文、二维码、凭据、原生 stderr/异常原文及个人路径进入这些新增诊断。证据判断表、未覆盖范围和验证见 [连接诊断规程](20-connection-diagnostics.md#september-28-privacy-preserving-failure-attribution)。未增加稳定跟踪身份、自动上传本地日志或外部网络探测；未发布/部署这批改动。

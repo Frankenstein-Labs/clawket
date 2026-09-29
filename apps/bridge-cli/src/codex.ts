@@ -78,6 +78,10 @@ export async function handleCodexCommand(args: string[]): Promise<void> {
   const show = (text: string) => { if (process.send) process.send({ type: 'codex.display', text }); else console.log(text); };
   const installed = await inspectCodexInstallation(config.command);
   const service = new CodexService({ project: config.project, directory: join(directory, 'sessions'), command: config.command, device: config.device });
+  service.on('diagnostic', diagnostic => console.log(JSON.stringify({
+    scope: 'codex_bridge', event: 'native_rpc_diagnostic', ts: new Date().toISOString(),
+    reason: diagnostic.reason, pendingCount: diagnostic.pendingCount, frameBytes: diagnostic.frameBytes,
+  })));
   let server: CodexServer | undefined, relay: CodexRelay | undefined;
   try {
     const health = await service.health() as { model: string; modelReady: boolean };
@@ -97,9 +101,9 @@ export async function handleCodexCommand(args: string[]): Promise<void> {
         const previousRegistry = previous?.registryUrl ?? (() => { try { return JSON.parse(previous?.invitation?.qrPayload ?? '{}').s; } catch { return undefined; } })();
         const registered = previous && previousRegistry === registryUrl
           ? { ...previous, ...await post<{ accessCode: string }>(registryUrl.replace(/\/$/, '') + '/v1/pair/access-code', { gatewayId: previous.gatewayId, relaySecret: previous.relaySecret }) }
-          : await post<{ gatewayId: string; relaySecret: string; relayUrl: string; accessCode: string }>(registryUrl.replace(/\/$/, '') + '/v1/pair/register', { displayName: `Codex · ${config.device ? 'Computer' : basename(config.project)}` });
+          : await post<{ gatewayId: string; relaySecret: string; relayUrl: string; accessCode: string }>(registryUrl.replace(/\/$/, '') + '/v1/pair/register', { displayName: 'Codex' });
         if (!registered.gatewayId || !registered.relaySecret || !registered.relayUrl || !registered.accessCode) throw new Error('Invalid Codex registration');
-        qrPayload = JSON.stringify({ v: 2, k: 'cp', b: 'codex', s: registryUrl, g: registered.gatewayId, a: registered.accessCode, n: `Codex · ${config.device ? 'Computer' : basename(config.project)}` });
+        qrPayload = JSON.stringify({ v: 2, k: 'cp', b: 'codex', s: registryUrl, g: registered.gatewayId, a: registered.accessCode, n: 'Codex' });
         const draft = buildPairingSessionDraft({ ...registered, qrPayload });
         config.host = '127.0.0.1'; config.relay = { registryUrl, relayUrl: registered.relayUrl, gatewayId: registered.gatewayId, relaySecret: registered.relaySecret };
         try {

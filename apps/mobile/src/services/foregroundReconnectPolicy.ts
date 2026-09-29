@@ -1,8 +1,10 @@
 import type { ConnectionState as AdapterConnectionState } from '@clawket/agent-protocol';
+import type { ConnectionState as GatewayConnectionState } from '../types';
 
-type ForegroundConnectionState = AdapterConnectionState | 'pairing_pending' | 'closed';
+type ForegroundConnectionState = AdapterConnectionState | GatewayConnectionState;
 
-export const APP_FOREGROUND_PROBE_AWAY_MS = 60_000;
+export const APP_FOREGROUND_PROBE_AWAY_MS = 1;
+export const FOREGROUND_PROBE_TIMEOUT_MS = 2_000;
 
 export function shouldProbeGatewayOnForegroundResume(input: {
   platformOs: string;
@@ -13,11 +15,7 @@ export function shouldProbeGatewayOnForegroundResume(input: {
     return false;
   }
 
-  // iOS commonly suspends backgrounded apps hard enough that an inherited
-  // "ready" socket cannot be trusted after returning to foreground.
-  if (input.platformOs === 'ios' && input.awayMs > 0) {
-    return true;
-  }
-
+  // Either platform can change networks while briefly backgrounded. The
+  // coordinator coalesces this bounded health check with chat/send recovery.
   return input.connectionState !== 'ready' || input.awayMs >= APP_FOREGROUND_PROBE_AWAY_MS;
 }

@@ -561,3 +561,37 @@ describe('registry worker', () => {
     });
   });
 });
+
+it.each(['openclaw', 'hermes'] as const)('redacts %s unknown paths, query strings, custom methods and request content in logs', async backend => {
+  const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const env = { ...createEnv(), RELAY_BACKEND: backend, HERMES_ROUTES_KV: new MemoryKV() };
+  const base = backend === 'hermes' ? '/v1/hermes' : '/v1';
+  try {
+    await fetchHandler(new Request('https://registry.example.com/private-customer-name?token=secret', { method: 'PRIVATE' }), env);
+    expect(JSON.parse(String(spy.mock.calls.at(-1)?.[0]))).toMatchObject({ backend, path: '/:unmatched', method: 'OTHER', status: 404 });
+    await fetchHandler(new Request(`https://registry.example.com${base}/verify/private-device?token=secret`), env);
+    expect(JSON.parse(String(spy.mock.calls.at(-1)?.[0]))).toMatchObject({ path: `${base}/verify/:${backend === 'hermes' ? 'bridgeId' : 'gatewayId'}`, status: 401 });
+    await fetchHandler(new Request(`https://registry.example.com${base}/pair/claim`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'private transcript', token: 'secret' }) }), env);
+    expect(JSON.parse(String(spy.mock.calls.at(-1)?.[0]))).toMatchObject({ path: `${base}/pair/claim`, status: 400 });
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/private|secret|transcript|customer/);
+  } finally { spy.mockRestore(); }
+});
+
+it('logs token-sync transport failure as a fixed reason without native exception details', async () => {
+  const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const env = { ...createEnv(), PAIRING_SYNC_SECRET: 'sync-secret',
+    RELAY_SYNC_SERVICE: { fetch: vi.fn(async () => { throw new Error('private URL token=secret native details'); }) } };
+  try {
+    const registered = await (await fetchHandler(new Request('https://registry.example.com/v1/pair/register', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    }), env)).json() as { gatewayId: string; accessCode: string };
+    const response = await fetchHandler(new Request('https://registry.example.com/v1/pair/claim', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(registered),
+    }), env);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(String(spy.mock.calls.at(-1)?.[0]))).toEqual({ scope: 'registry_worker', event: 'relay_token_sync_failed',
+      ts: expect.any(String), reason: 'transport_error' });
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/private|secret|native details/);
+  } finally { spy.mockRestore(); }
+});

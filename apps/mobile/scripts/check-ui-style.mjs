@@ -497,6 +497,63 @@ function collectInitializers(sourceFile) {
   return byScope;
 }
 
+function hasScopedChatKeyboardPadding(sourceFile, rel) {
+  if (rel !== 'src/screens/Thread/ThreadView.tsx') return false;
+  let nativeImport = false;
+  let nativeImportCount = 0;
+  let nativeReferences = 0;
+  let stableChoice = false;
+  let androidImport = false;
+  let platformImport = false;
+  let renderedPadding = false;
+  let avoiderImports = 0;
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const specifier of bindings.elements) {
+      const imported = specifier.propertyName?.text ?? specifier.name.text;
+      if (imported === 'KeyboardAvoidingView') avoiderImports += 1;
+      if (statement.moduleSpecifier.text === 'react-native') {
+        if (imported === 'KeyboardAvoidingView') nativeImportCount += 1;
+        nativeImport ||= imported === 'KeyboardAvoidingView' && specifier.name.text === 'NativeKeyboardAvoidingView';
+        platformImport ||= imported === 'Platform' && specifier.name.text === 'Platform';
+      }
+      if (statement.moduleSpecifier.text === '../../components/chat/AndroidChatKeyboardAvoider') {
+        androidImport ||= imported === 'AndroidChatKeyboardAvoider' && specifier.name.text === 'AndroidChatKeyboardAvoider';
+      }
+    }
+  }
+  const inThreadView = node => {
+    let parent = node.parent;
+    while (parent && !ts.isFunctionLike(parent)) parent = parent.parent;
+    return parent && ts.isFunctionDeclaration(parent) && parent.name?.text === 'ThreadView';
+  };
+  const visit = node => {
+    if (ts.isIdentifier(node) && node.text === 'NativeKeyboardAvoidingView') nativeReferences += 1;
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node))
+      && ts.isIdentifier(node.tagName) && node.tagName.text === 'KeyboardAvoidingView' && inThreadView(node)) {
+      renderedPadding ||= node.attributes.properties.some(attribute => ts.isJsxAttribute(attribute)
+        && attribute.name.getText(sourceFile) === 'behavior'
+        && attribute.initializer && ts.isStringLiteral(attribute.initializer) && attribute.initializer.text === 'padding');
+    }
+    if (ts.isVariableDeclaration(node) && inThreadView(node) && ts.isIdentifier(node.name) && node.name.text === 'KeyboardAvoidingView'
+      && node.initializer && ts.isConditionalExpression(node.initializer)
+      && ts.isVariableDeclarationList(node.parent) && (node.parent.flags & ts.NodeFlags.Const) !== 0) {
+      const { condition, whenTrue, whenFalse } = node.initializer;
+      stableChoice ||= ts.isBinaryExpression(condition) && condition.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+        && ts.isPropertyAccessExpression(condition.left) && condition.left.getText(sourceFile) === 'Platform.OS'
+        && ts.isStringLiteral(condition.right) && condition.right.text === 'ios'
+        && ts.isIdentifier(whenTrue) && whenTrue.text === 'NativeKeyboardAvoidingView'
+        && ts.isIdentifier(whenFalse) && whenFalse.text === 'AndroidChatKeyboardAvoider';
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return nativeImport && nativeImportCount === 1 && avoiderImports === 1 && nativeReferences === 2
+    && platformImport && androidImport && stableChoice && renderedPadding;
+}
+
 function unwrap(expression) {
   let current = expression;
   while (
@@ -672,7 +729,7 @@ export function scanSource(rel, source) {
 
   const nativeImport = /import\s*\{([^}]*)\}\s*from\s*['"]react-native['"]/gs;
   for (const match of source.matchAll(nativeImport)) {
-    if (/\bKeyboardAvoidingView\b/.test(match[1])) {
+    if (/\bKeyboardAvoidingView\b/.test(match[1]) && !hasScopedChatKeyboardPadding(sourceFile, rel)) {
       violations.push({ ruleId: 'native-keyboard-avoider', line: 1 });
     }
   }

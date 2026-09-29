@@ -1,6 +1,17 @@
 import { expect, it } from 'vitest';
 import { PiRpc } from './rpc.js';
 
+it('observes command acknowledgement before subsequent events in the same JSONL chunk', async () => {
+  const script = `process.stdin.on('data', b => { const q=JSON.parse(String(b)); process.stdout.write(JSON.stringify({type:'response',id:q.id,success:true,data:{}})+'\\n'+JSON.stringify({type:'agent_start'})+'\\n'); }); process.stdin.on('end',()=>process.exit());`;
+  const rpc = new PiRpc(process.execPath, ['-e', script], process.cwd());
+  const order: string[] = [];
+  rpc.on('event', () => order.push('event'));
+  try {
+    await rpc.request('prompt', {}, { onSuccess: () => order.push('ack') });
+    expect(order).toEqual(['ack', 'event']);
+  } finally { await rpc.stop(); }
+});
+
 it('preserves JSONL Unicode separators and split UTF-8 while correlating responses', async () => {
   const script = `process.stdin.on('data', b => { const q=JSON.parse(String(b)); const text=Buffer.from(JSON.stringify({type:'response',id:q.id,success:true,data:{text:'你\\u2028好'}})+'\\n'); for(const byte of text) process.stdout.write(Buffer.from([byte])); }); process.stdin.on('end',()=>process.exit());`;
   const rpc = new PiRpc(process.execPath, ['-e', script], process.cwd());

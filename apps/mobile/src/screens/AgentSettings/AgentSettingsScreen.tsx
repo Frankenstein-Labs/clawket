@@ -62,6 +62,11 @@ import {
 } from './model';
 import { translateAgentSettingsKey } from './translation';
 
+// The last summary each live adapter answered, per Agent and calendar day. Reopening the profile
+// starts from it and refreshes in place, instead of drawing the hero's heartbeat line and the stat
+// values late (owner rule 2026-09-29: a wait never moves the layout). A replaced adapter starts over.
+const summaryCache = new WeakMap<AgentAdapter, Map<string, AgentSettingsSummary>>();
+
 export type AgentSettingsNavigate = (
   route: 'AgentSettingsSection',
   params: RootStackParamList['AgentSettingsSection'],
@@ -201,9 +206,10 @@ export function AgentSettingsScreen({
   }> | null>(null);
   const [hasStateError, setHasStateError] = useState(false);
   const [summaryPendingKey, setSummaryPendingKey] = useState<string | null>(null);
+  const cachedSummary = accessibleAdapter && summaryKey ? summaryCache.get(accessibleAdapter)?.get(summaryKey) : undefined;
   const summary = loadedSummary?.key === summaryKey
     ? loadedSummary.value
-    : initialSummary;
+    : cachedSummary ?? initialSummary;
   // Optional counts must never hold navigation hostage.
   const initialized = true;
 
@@ -219,15 +225,25 @@ export function AgentSettingsScreen({
 
   const initialSummaryRef = useRef(initialSummary);
   initialSummaryRef.current = initialSummary;
+  const adapterRef = useRef(accessibleAdapter);
+  adapterRef.current = accessibleAdapter;
   const mergeSummary = useCallback((key: string, nextSummary: AgentSettingsSummary) => {
     setLoadedSummary((previous) => ({
       key,
       value: {
-        ...(previous?.key === key ? previous.value : initialSummaryRef.current),
+        ...(previous?.key === key
+          ? previous.value
+          : (adapterRef.current ? summaryCache.get(adapterRef.current)?.get(key) : undefined) ?? initialSummaryRef.current),
         ...nextSummary,
       },
     }));
   }, []);
+  useEffect(() => {
+    if (!loadedSummary || !accessibleAdapter) return;
+    let values = summaryCache.get(accessibleAdapter);
+    if (!values) { values = new Map(); summaryCache.set(accessibleAdapter, values); }
+    values.set(loadedSummary.key, loadedSummary.value);
+  }, [accessibleAdapter, loadedSummary]);
 
   useEffect(() => {
     if (!accessibleAdapter || !agent || !summaryKey || connectionState !== 'ready') return undefined;

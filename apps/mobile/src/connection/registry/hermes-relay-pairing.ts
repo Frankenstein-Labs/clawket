@@ -1,3 +1,6 @@
+import { resolveOfficialRelayEnvironment } from '../../services/relay-environment';
+import { pairingRequest } from '../../services/pairing-request';
+
 type HermesPairClaimResponse = {
   bridgeId?: string;
   relayUrl?: string;
@@ -46,34 +49,39 @@ async function claimHermesRelay(
   serverUrl: string,
   body: Record<string, unknown>,
 ): Promise<HermesRelayPairingClaimResult> {
-  const response = await fetch(`${normalizeHttpBase(serverUrl)}${path}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  return pairingRequest(async (signal, receivedResponse) => {
+    const response = await fetch(`${normalizeHttpBase(serverUrl)}${path}`, {
+      signal,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
 
-  if (!response.ok) {
-    throw await toRelayError(response, 'Failed to claim Hermes Relay pairing code.');
-  }
+    receivedResponse(response.status);
+    if (!response.ok) {
+      throw await toRelayError(response, 'Failed to claim Hermes Relay pairing code.');
+    }
 
-  const payload = await response.json() as HermesPairClaimResponse;
-  const bridgeId = payload.bridgeId?.trim() ?? '';
-  const relayUrl = payload.relayUrl?.trim() ?? '';
-  const clientToken = payload.clientToken?.trim() ?? '';
-  if (!bridgeId || !relayUrl || !clientToken) {
-    throw new Error('Hermes pairing response missing relay connection fields.');
-  }
+    const payload = await response.json() as HermesPairClaimResponse;
+    const bridgeId = payload.bridgeId?.trim() ?? '';
+    const relayUrl = payload.relayUrl?.trim() ?? '';
+    const clientToken = payload.clientToken?.trim() ?? '';
+    if (!bridgeId || !relayUrl || !clientToken) {
+      throw new Error('Hermes pairing response missing relay connection fields.');
+    }
 
-  return {
-    bridgeId,
-    relayUrl,
-    clientToken,
-    displayName: typeof payload.displayName === 'string' ? payload.displayName : null,
-    region: typeof payload.region === 'string' ? payload.region : null,
-  };
+    return {
+      bridgeId,
+      relayUrl,
+      clientToken,
+      displayName: typeof payload.displayName === 'string' ? payload.displayName : null,
+      region: typeof payload.region === 'string' ? payload.region : null,
+    };
+  }, { backend: 'hermes', transport: 'relay', operation: path.endsWith('claim-code') ? 'pair_claim_code' : 'pair_claim',
+    environment: resolveOfficialRelayEnvironment(serverUrl) ?? 'custom' });
 }
 
 function normalizeHttpBase(url: string): string {

@@ -31,7 +31,9 @@ const SPEC_EVENT_PROPERTIES: Readonly<Record<string, ReadonlyArray<string>>> = {
   connect_phase: ['protocol', 'route', 'phase', 'elapsed_ms', 'phase_ms', 'attempt'],
   connect_ready: ['backend', 'transport', 'elapsed_ms', 'attempt'],
   connect_failed: ['backend', 'transport', 'code', 'stage', 'attempt'],
-  reconnect: ['backend', 'transport', 'reason'],
+  connection_diagnostic: ['backend', 'transport', 'operation', 'environment', 'outcome', 'phase', 'code', 'http_status', 'elapsed_ms', 'network', 'evidence'],
+  transport_diagnostic: ['backend', 'transport', 'environment', 'event', 'phase', 'code', 'close_code', 'elapsed_ms'],
+  reconnect: ['backend', 'transport', 'reason', 'origin', 'cause'],
   roster_viewed: ['connection_count', 'agent_count', 'pinned_count', 'unread_count', 'attention_count'],
   roster_row_opened: ['kind', 'unread', 'attention', 'locked', 'cached'],
   roster_pin_toggled: ['action', 'kind'],
@@ -213,13 +215,14 @@ describe('analytics event privacy boundary', () => {
 
     for (const [event, allowedProperties] of entries) {
       expect(new Set(allowedProperties).size).toBe(allowedProperties.length);
-      const input = Object.fromEntries([
-        ...allowedProperties.map((property) => [property, true]),
-        ['message_text', 'private message'],
-        ['raw_id', 'private-id'],
-      ]);
+      const expected = Object.fromEntries(allowedProperties.map((property) => [
+        property,
+        event === 'transport_diagnostic' && property === 'close_code' ? 1006
+          : event === 'transport_diagnostic' && property === 'elapsed_ms' ? 1000 : true,
+      ]));
+      const input = { ...expected, message_text: 'private message', raw_id: 'private-id' };
       expect(sanitizeAnalyticsEventProperties(event as keyof typeof ANALYTICS_EVENT_PROPERTY_WHITELIST, input))
-        .toEqual(Object.fromEntries(allowedProperties.map((property) => [property, true])));
+        .toEqual(expected);
     }
   });
 
@@ -451,4 +454,33 @@ test('agent file editing telemetry excludes source content and unbounded labels'
   expect(sanitizeAnalyticsEventProperties('agent_file_activity', { document: 'private filename' })).toEqual({ document: 'other' });
   expect(analyticsAgentDocument('SOUL.md')).toBe('soul');
   expect(analyticsAgentDocument('notes/private.md')).toBe('other');
+});
+
+it('closes every free-text path in connection diagnostics and drops payloads and identities', () => {
+  const privateText = 'private message https://host/?token=secret /Users/private';
+  const properties = Object.fromEntries(ANALYTICS_EVENT_PROPERTY_WHITELIST.connection_diagnostic.map(key => [key, privateText]));
+  const sanitized = sanitizeAnalyticsEventProperties('connection_diagnostic', {
+    ...properties, message: privateText, payload: privateText, ssid: privateText, ip: privateText,
+    token: privateText, gatewayId: privateText, diagnosticId: privateText, clientLabel: privateText,
+  });
+  expect(Object.keys(sanitized)).toEqual([...ANALYTICS_EVENT_PROPERTY_WHITELIST.connection_diagnostic]);
+  expect(new Set(Object.values(sanitized))).toEqual(new Set(['other']));
+  expect(sanitizeAnalyticsEventProperties('connection_diagnostic', { code: 'unknown', phase: 'body', http_status: 429 }))
+    .toEqual({ code: 'unknown', phase: 'body', http_status: 429 });
+});
+
+
+it('bounds transport diagnostics and separates a recovery trigger from its underlying cause', () => {
+  const privateText = 'private URL token path message';
+  const props = Object.fromEntries(ANALYTICS_EVENT_PROPERTY_WHITELIST.transport_diagnostic.map(key => [key, privateText]));
+  const sanitized = sanitizeAnalyticsEventProperties('transport_diagnostic', { ...props, message: privateText, url: privateText, reason: privateText });
+  expect(sanitized).toEqual({ backend: 'other', transport: 'other', environment: 'other', event: 'other', phase: 'other', code: 'other' });
+  expect(sanitizeAnalyticsEventProperties('transport_diagnostic', { backend: 'pi', event: 'close', phase: 'connecting', code: 'ws_error', close_code: 1006, elapsed_ms: 24, nativeError: privateText }))
+    .toEqual({ backend: 'pi', event: 'close', phase: 'connecting', code: 'ws_error', close_code: 1006, elapsed_ms: 24 });
+  expect(sanitizeAnalyticsEventProperties('transport_diagnostic', { close_code: 999, elapsed_ms: -1 })).toEqual({});
+  expect(sanitizeAnalyticsEventProperties('transport_diagnostic', { close_code: 5000, elapsed_ms: 86_400_001 })).toEqual({});
+  expect(sanitizeAnalyticsEventProperties('reconnect', { backend: 'openclaw', transport: 'relay', reason: 'probe_failed', origin: 'health_probe', cause: 'socket_open_timeout', message: privateText }))
+    .toEqual({ backend: 'openclaw', transport: 'relay', reason: 'probe_failed', origin: 'health_probe', cause: 'socket_open_timeout' });
+  expect(sanitizeAnalyticsEventProperties('reconnect', { origin: privateText, cause: privateText, reason: privateText }))
+    .toEqual({ origin: 'other', cause: 'other', reason: 'other' });
 });

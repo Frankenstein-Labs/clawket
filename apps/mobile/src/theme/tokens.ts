@@ -243,7 +243,7 @@ export const Motion = {
   companionGaze: 1_200,
   companionBlinkPause: 3_200,
   companionCuriosity: 9_600,
-  /** LoadingState stays invisible this long, so waits that end quickly never flash the Companion. */
+  /** LoadingState and a background SheetHeaderSpinner stay invisible this long, so quick waits never flash. */
   loadingGrace: 400,
   /** A wait longer than this explains itself and offers the connection page. */
   loadingSlowHint: 6_000,

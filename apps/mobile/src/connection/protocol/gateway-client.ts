@@ -58,6 +58,7 @@ import {
   type TransportStateChange,
 } from '../transports';
 import { routeGatewayEvent } from './events';
+import { scheduleRequestTimeout } from '../transports/request-timeout';
 import {
   buildRelayClientWsUrl,
   buildRelayControlFrame,
@@ -106,7 +107,7 @@ const DEFAULT_CONNECT_SCOPES = Object.freeze([
 type PendingRequest = {
   epoch: number;
   method: string;
-  timeout: ReturnType<typeof setTimeout>;
+  cancelTimeout: () => void;
   resolve: (payload: unknown) => void;
   reject: (error: Error) => void;
 };
@@ -238,7 +239,9 @@ export class GatewayProtocolClient {
   private connectRequestCompleted = false;
   private activeConnectAuthSource: RelayConnectAuthSelection['source'] | null = null;
   private bootstrapDisabledForConfig = false;
-  private readinessTimer: ReturnType<typeof setTimeout> | null = null;
+  private deviceTokenRepairAttempted = false;
+  private deviceTokenRepair: { scope: string; completion: Promise<boolean> } | null = null;
+  private readinessTimer: (() => void) | null = null;
   #identity: DeviceIdentity | null = null;
   private connectRequestMeta: { capabilities: string[] } | undefined;
   private connectResponseCapabilities: readonly string[] | undefined;
@@ -263,6 +266,7 @@ export class GatewayProtocolClient {
     this.epoch += 1;
     this.handshakeSerial += 1;
     this.bootstrapDisabledForConfig = false;
+    this.deviceTokenRepairAttempted = false;
     this.connectResponseCapabilities = undefined;
     this.connectResponseBridgeVersion = undefined;
     this.supportedMethods.clear();
@@ -345,6 +349,9 @@ export class GatewayProtocolClient {
     this.#identity = null;
   }
 
+  /** Read-only bound for the adapter’s outer handshake deadline. */
+  public getTransferGraceMs(): number { return this.#transport?.getTransferGraceMs() ?? 0; }
+
   public connect(): void {
     if (!this.#config?.url?.trim()) {
       this.emit('error', { code: 'config_missing', message: 'Gateway URL is not configured' });
@@ -354,6 +361,7 @@ export class GatewayProtocolClient {
     this.manuallyClosed = false;
     this.pairingPending = false;
     this.pendingSelfPairRequestId = null;
+    this.deviceTokenRepairAttempted = false;
     const epoch = ++this.epoch;
     this.setState('connecting');
     void this.startTransport(epoch);
@@ -413,12 +421,10 @@ export class GatewayProtocolClient {
         // Disposal rejects pending probes too. A retired adapter must never
         // reconnect and compete with its replacement for the same Relay ID.
         if (!isCurrent()) return false;
-        this.reconnect();
-        return this.waitForReady(Math.max(timeoutMs, 8_000));
+        return false;
       }
     }
-    if (this.state === 'idle' || this.state === 'closed') this.connect();
-    return this.waitForReady(Math.max(timeoutMs, 8_000));
+    return false;
   }
 
   public async request<T = unknown>(method: string, params?: object): Promise<T> {
@@ -445,6 +451,7 @@ export class GatewayProtocolClient {
       const shared = {
         url,
         webSocketFactory: this.#options.webSocketFactory,
+        onDiagnostic: this.#options.onTransportDiagnostic,
         reconnectBaseMs: this.#options.reconnectBaseMs,
         reconnectMaxMs: this.#options.reconnectMaxMs,
         reconnectFactor: this.#options.reconnectFactor,
@@ -489,7 +496,7 @@ export class GatewayProtocolClient {
           retryable: error.retryable,
         });
       }),
-      transport.onClose((event) => {
+      transport.onSocketRetired((event) => {
         if (epoch !== this.epoch || this.manuallyClosed) return;
         const reason = event.reason || 'Connection closed';
         this.rejectPendingRequests(reason, closeErrorCode(event.code));
@@ -667,7 +674,7 @@ export class GatewayProtocolClient {
     const pending = this.pendingRequests.get(id);
     if (!pending) return;
     this.pendingRequests.delete(id);
-    clearTimeout(pending.timeout);
+    pending.cancelTimeout();
     if (pending.epoch !== this.epoch) {
       pending.reject(new GatewayRequestError({
         code: 'connection_restarted',
@@ -840,6 +847,7 @@ export class GatewayProtocolClient {
       this.#transport.configureHeartbeat({ tickIntervalMs: response.policy.tickIntervalMs });
     }
     this.connectRequestCompleted = true;
+    this.deviceTokenRepairAttempted = false;
     this.activeConnectAuthSource = null;
     this.pairingPending = false;
     this.pendingSelfPairRequestId = null;
@@ -853,6 +861,17 @@ export class GatewayProtocolClient {
     epoch: number,
     serial: number,
   ): Promise<ConnectPlan> {
+    // A remote close can start a new socket while secure storage is still clearing.
+    const repair = this.deviceTokenRepair;
+    if (repair?.scope === JSON.stringify(this.getDeviceTokenStorageScope())) {
+      const cleared = await repair.completion;
+      this.assertCurrentHandshake(epoch, serial);
+      if (this.deviceTokenRepair === repair) this.deviceTokenRepair = null;
+      if (!cleared) throw new GatewayRequestError({
+        code: 'auth_rejected', message: 'Could not clear the expired device credential.', retryable: false,
+      });
+    }
+    this.assertCurrentHandshake(epoch, serial);
     const store = this.#options.credentialStore ?? defaultCredentialStore;
     const storedRecord = await store
       .getDeviceTokenRecord(identity.deviceId, this.getDeviceTokenStorageScope())
@@ -934,6 +953,10 @@ export class GatewayProtocolClient {
           retryable: true,
         });
     const message = normalized.message;
+    if (normalized.code === 'auth_rejected') {
+      this.failDeviceTokenRepair(normalized);
+      return;
+    }
     if (
       this.activeConnectAuthSource === 'bootstrap-token'
       && this.hasLegacyCredential()
@@ -944,6 +967,7 @@ export class GatewayProtocolClient {
       queueMicrotask(() => this.recycleTransport(epoch, serial));
       return;
     }
+    const authSource = this.activeConnectAuthSource;
     this.activeConnectAuthSource = null;
     if (isPairingRequired(normalized)) {
       const details = isRecord(normalized.details) ? normalized.details : {};
@@ -961,13 +985,28 @@ export class GatewayProtocolClient {
       || message.toLowerCase().includes('device token mismatch')
     ) {
       const identity = this.#identity;
-      if (identity) {
-        void (this.#options.credentialStore ?? defaultCredentialStore)
-          .deleteDeviceToken(identity.deviceId, this.getDeviceTokenStorageScope())
-          .finally(() => this.recycleTransport(epoch, serial));
-      } else {
-        this.recycleTransport(epoch, serial);
+      if (authSource !== 'device-token' || !identity || this.deviceTokenRepairAttempted) {
+        this.failDeviceTokenRepair(normalized);
+        return;
       }
+      this.deviceTokenRepairAttempted = true;
+      // Keep the adapter/coordinator readiness promise alive during this bounded
+      // repair instead of publishing a terminal authentication error.
+      const scope = this.getDeviceTokenStorageScope();
+      const repair = Promise.resolve().then(() => (
+        (this.#options.credentialStore ?? defaultCredentialStore)
+          .deleteDeviceToken(identity.deviceId, scope)
+      ));
+      this.deviceTokenRepair = {
+        scope: JSON.stringify(scope),
+        completion: repair.then(() => true, () => false),
+      };
+      void repair.then(() => {
+        this.recycleTransport(epoch, serial);
+      }, () => {
+        if (this.isCurrentHandshake(epoch, serial)) this.failDeviceTokenRepair(normalized);
+      });
+      return;
     } else if (isFatalDeviceAuthError(normalized)) {
       this.#transport?.disconnect(4008, normalized.code);
     } else {
@@ -977,6 +1016,17 @@ export class GatewayProtocolClient {
       code: normalized.code,
       message,
       retryable: normalized.retryable,
+    });
+  }
+
+  private failDeviceTokenRepair(error: GatewayRequestError): void {
+    this.deviceTokenRepair = null;
+    // Retire automatic transport retries before exposing a terminal error.
+    this.disconnect();
+    this.emit('error', {
+      code: 'auth_rejected',
+      message: `auth_rejected: ${error.message}`,
+      retryable: false,
     });
   }
 
@@ -1078,6 +1128,7 @@ export class GatewayProtocolClient {
         retryable: true,
       }));
     }
+    const transport = this.#transport;
     const id = this.requestId();
     const epoch = this.epoch;
     const frame = {
@@ -1087,7 +1138,7 @@ export class GatewayProtocolClient {
       params,
     };
     return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const cancelTimeout = scheduleRequestTimeout(transport, timeoutMs, () => {
         this.pendingRequests.delete(id);
         reject(new GatewayRequestError({
           code: 'request_timeout',
@@ -1095,18 +1146,18 @@ export class GatewayProtocolClient {
           details: { method, timeoutMs, state: this.state, route: this.route },
           retryable: true,
         }));
-      }, timeoutMs);
+      });
       this.pendingRequests.set(id, {
         epoch,
         method,
-        timeout,
+        cancelTimeout,
         resolve: (payload) => resolve(payload as T),
         reject,
       });
       try {
-        this.#transport?.send(JSON.stringify(frame));
+        transport.send(JSON.stringify(frame));
       } catch (error) {
-        clearTimeout(timeout);
+        cancelTimeout();
         this.pendingRequests.delete(id);
         reject(error instanceof Error ? error : new Error(String(error)));
       }
@@ -1127,28 +1178,11 @@ export class GatewayProtocolClient {
       });
   }
 
-  private async waitForReady(timeoutMs: number): Promise<boolean> {
-    if (this.state === 'ready') return true;
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (value: boolean) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        off();
-        resolve(value);
-      };
-      const off = this.on('connection', ({ state }) => {
-        if (state === 'ready') finish(true);
-        if (state === 'closed' && this.manuallyClosed) finish(false);
-      });
-      const timer = setTimeout(() => finish(false), timeoutMs);
-    });
-  }
-
   private startReadinessTimer(epoch: number, serial: number, timeoutMs: number): void {
     this.clearReadinessTimer();
-    this.readinessTimer = setTimeout(() => {
+    const transport = this.#transport;
+    if (!transport) return;
+    this.readinessTimer = scheduleRequestTimeout(transport, readPositiveNumber(timeoutMs, HANDSHAKE_TIMEOUT_MS), () => {
       this.readinessTimer = null;
       if (!this.isCurrentHandshake(epoch, serial) || this.state === 'ready') return;
       this.emit('error', {
@@ -1157,12 +1191,12 @@ export class GatewayProtocolClient {
         retryable: true,
       });
       this.recycleTransport(epoch, serial);
-    }, readPositiveNumber(timeoutMs, HANDSHAKE_TIMEOUT_MS));
+    });
   }
 
   private clearReadinessTimer(): void {
     if (!this.readinessTimer) return;
-    clearTimeout(this.readinessTimer);
+    this.readinessTimer();
     this.readinessTimer = null;
   }
 
@@ -1175,7 +1209,7 @@ export class GatewayProtocolClient {
 
   private rejectPendingRequests(message: string, code: string): void {
     for (const pending of this.pendingRequests.values()) {
-      clearTimeout(pending.timeout);
+      pending.cancelTimeout();
       pending.reject(new GatewayRequestError({ code, message, retryable: true }));
     }
     this.pendingRequests.clear();
@@ -1327,13 +1361,13 @@ export class GatewayProtocolClient {
     sessionKey: string,
     text: string,
     attachments?: Array<{ type: string; mimeType: string; content: string }>,
-    options?: { idempotencyKey?: string },
+    options?: { idempotencyKey?: string; thinkingLevel?: string },
   ): Promise<{ runId: string }> {
     const idempotencyKey = options?.idempotencyKey ?? this.requestId();
     const result = await this.request<{ runId?: string }>('chat.send', {
       sessionKey,
       message: text,
-      thinking: 'off',
+      ...(options?.thinkingLevel !== undefined ? { thinking: options.thinkingLevel } : {}),
       deliver: false,
       idempotencyKey,
       ...(attachments?.length ? { attachments } : {}),

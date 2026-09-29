@@ -17,11 +17,13 @@ describe('PostHog diagnostics', () => {
     expect(diagnostics.recentEvents[0]).toEqual({
       kind: 'event',
       name: 'entry_2',
+      recordedAt: expect.stringMatching(/^\d{4}-.*Z$/),
       properties: { index: 2 },
     });
     expect(diagnostics.recentEvents[19]).toEqual({
       kind: 'screen',
       name: 'entry_21',
+      recordedAt: expect.stringMatching(/^\d{4}-.*Z$/),
       properties: { index: 21 },
     });
 

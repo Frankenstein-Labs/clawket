@@ -791,12 +791,12 @@ async function syncClientTokensToRelay(
         status: response.status,
       }));
     }
-  } catch (error) {
+  } catch {
     console.warn(JSON.stringify({
       scope: policy.telemetryScope,
       event: 'relay_token_sync_failed',
       ts: new Date().toISOString(),
-      message: error instanceof Error ? error.message : String(error),
+      reason: 'transport_error',
     }));
   }
 }
@@ -858,7 +858,12 @@ function normalizeRequestPath(policy: RegistryBackendPolicy, pathname: string): 
     if (pathname.startsWith('/v1/pair/session/')) return '/v1/pair/session/:sessionId';
     if (pathname.startsWith('/pair/')) return '/pair/:sessionId';
   }
-  return pathname;
+  const staticPaths = [
+    '/v1/health', `${policy.pairBasePath}/register`, `${policy.pairBasePath}/access-code`,
+    `${policy.pairBasePath}/claim`, '/v1/hermes/pair/claim-code', '/v1/pair/session',
+    '/v2/pair/session/resolve', '/.well-known/apple-app-site-association', '/.well-known/assetlinks.json',
+  ];
+  return staticPaths.includes(pathname) ? pathname : '/:unmatched';
 }
 
 function logRegistryTelemetry(
@@ -868,17 +873,16 @@ function logRegistryTelemetry(
   url: URL,
   status: number,
   elapsedMs: number,
-  extra?: Record<string, unknown>,
 ): void {
   console.log(JSON.stringify({
     scope: policy.telemetryScope,
     event,
     ts: new Date().toISOString(),
-    method: request.method,
+    backend: policy.backend,
+    method: ['GET', 'POST', 'OPTIONS', 'HEAD', 'PUT', 'PATCH', 'DELETE'].includes(request.method) ? request.method : 'OTHER',
     path: normalizeRequestPath(policy, url.pathname),
     status,
     elapsedMs,
-    ...extra,
   }));
 }
 

@@ -20,6 +20,7 @@ import {
   MessageSquareText,
   Palette,
   QrCode,
+  ScanLine,
   Terminal,
   WifiOff,
 } from 'lucide-react-native';
@@ -44,6 +45,7 @@ import { FlowHeader, PageIntro, ChoiceRow, FormStep, CommandBlock, MessagePrevie
 import { SegmentedTabs } from '../../components/ui/SegmentedTabs';
 import { useKeyboardRevealScroll } from '../../components/ui/useKeyboardRevealScroll';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { LoadingState, useLoadingHandoff } from '../../components/ui/LoadingState';
 import {
   buildAgentPairingPrompt,
   buildBackendPairingCommand,
@@ -75,6 +77,8 @@ export type OnboardingScreenProps = Readonly<{
   onPastePairingCode?: (backendKind: PairableBackendKind) => MaybePromise<string | null>;
   onSubmitPairing: (submission: PairingSubmission) => MaybePromise<void>;
   onScanQr: (expectedBackendKind: PairableBackendKind) => void;
+  /** Chooser header scan: the scanned QR names its own backend. */
+  onScanAnyQr?: () => void;
   onImportQr?: (expectedBackendKind: PairableBackendKind) => void;
   onOpenYouMind: () => void;
   onOpenWebsite: (backendKind: OnboardingWebsiteBackendKind) => void;
@@ -136,6 +140,7 @@ export function OnboardingScreen({
   onPastePairingCode,
   onSubmitPairing,
   onScanQr,
+  onScanAnyQr,
   onImportQr,
   onOpenYouMind,
   onOpenWebsite,
@@ -223,6 +228,13 @@ export function OnboardingScreen({
   useEffect(() => {
     if (!connecting) submitInFlightRef.current = false;
   }, [connecting]);
+  // The last failure keeps its place while the next attempt connects and changes only with that
+  // attempt's outcome: removing it at Connect moved the form, and the button under the finger, up
+  // and back down on every failed retry (owner rule 2026-09-29).
+  const heldErrorRef = useRef<Extract<OnboardingStatus, { kind: 'error' }> | null>(null);
+  if (status.kind === 'error') heldErrorRef.current = status;
+  else if (!connecting) heldErrorRef.current = null;
+  const shownError = status.kind === 'error' ? status : heldErrorRef.current;
 
   if (status.kind === 'loading') {
     return (
@@ -299,7 +311,9 @@ export function OnboardingScreen({
     <View testID="onboarding-screen" style={[styles.screen, { paddingTop: insets.top }]}>
       <FlowHeader onBack={connecting ? onClose : onClose || !choosing ? goBack : undefined} testID="onboarding-close"
         title={environment === 'preview' ? t('Preview') : undefined}
-        right={onOpenDesignSystem ? <FloatingButton icon={Palette} appearance="plain" accessibilityLabel={t('Design language')} onPress={onOpenDesignSystem} /> : undefined} />
+        right={choosing && onScanAnyQr
+          ? <FloatingButton testID="onboarding-scan-any-qr" icon={ScanLine} appearance="plain" accessibilityLabel={t('Scan to connect')} onPress={onScanAnyQr} />
+          : onOpenDesignSystem ? <FloatingButton icon={Palette} appearance="plain" accessibilityLabel={t('Design language')} onPress={onOpenDesignSystem} /> : undefined} />
       <KeyboardAvoidingView testID="onboarding-keyboard-avoiding" enabled={!isIPad} style={styles.screen} behavior="padding">
       <Reanimated.ScrollView ref={keyboardReveal.scrollRef} testID="onboarding-scroll"
         // On iPad use the native keyboard frame and focused-field reveal. Do not also
@@ -310,7 +324,9 @@ export function OnboardingScreen({
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <PageIntro title={choosing ? t('Connect your agent') : t('Connect {{backend}}', { backend: backendLabel })} />
         {status.kind === 'offline' ? <Banner tone="neutral" icon={WifiOff} testID="onboarding-offline" message={t('Offline · reconnecting', { ns: 'common' })} actionLabel={onRetry ? t('Reconnect', { ns: 'common' }) : undefined} onAction={onRetry} /> : null}
-        {status.kind === 'error' ? <ErrorBanner code={status.code} backendKind={backendKind} onAction={onErrorAction} /> : null}
+        {shownError ? <ErrorBanner code={shownError.code} backendKind={backendKind}
+          // Its action stays drawn during the attempt, so the banner keeps its size, but never starts a second one.
+          onAction={onErrorAction ? (code) => { if (!connecting) onErrorAction(code); } : undefined} /> : null}
         {localError ? <Banner tone="bad" message={t('Please try again later.', { ns: 'common' })} /> : null}
         {choosing ? <>
           <View testID="onboarding-chooser" style={styles.chooser}>
@@ -409,10 +425,14 @@ function ConnectionProgress({
   const { theme } = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const ready = phase === 'ready';
+  const loadingPhase = useLoadingHandoff(!ready, ready);
   return (
     <View testID="onboarding-progress" style={styles.progress}>
-      {ready ? <CheckCircle2 size={IconSize.sm} color={theme.colors.good} /> : null}
-      <Text style={styles.progressLabel}>{ready ? t('Ready') : t('common:Connecting')}</Text>
+      {loadingPhase ? <LoadingState testID="onboarding-connecting-cat" phase={loadingPhase} message={t('common:Connecting')} /> : null}
+      {ready ? <View style={styles.readyProgress}>
+        <CheckCircle2 size={IconSize.sm} color={theme.colors.good} />
+        <Text style={styles.progressLabel}>{t('Ready')}</Text>
+      </View> : null}
     </View>
   );
 }
@@ -521,6 +541,10 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
     docsList: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
     alternatives: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Space.xs },
     progress: {
+      alignSelf: 'stretch',
+      paddingVertical: Space.md,
+    },
+    readyProgress: {
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',

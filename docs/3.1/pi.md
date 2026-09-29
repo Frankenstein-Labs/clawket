@@ -31,6 +31,8 @@ node apps/bridge-cli/dist/index.js pi stop --project /absolute/path/to/project
 
 高级本机选项：`--pi-command` 指定可执行文件；`--agent-dir` 指定 Pi 配置目录；`--sessions-dir` 指定原生历史目录；`--config` 指定项目 Bridge 配置；`--foreground` 保持前台。首次配对时保存这些配置。默认原生历史发现遵循 Pi 的环境变量、项目 `.pi/settings.json`、全局 `settings.json` 的 `sessionDir` 优先级。后台服务使用启动时的环境变量；修改环境后需重新启动。
 
+同一项目 Bridge 已运行时，再次 `pair` 会先认证原实例，然后刷新同一连接的二维码；不停止当前任务、不新建连接身份，也不改变已经配对的手机。此路径只提供二维码，终端会明确提示不能刷新六位码；新二维码会使旧的未使用邀请码失效。已有本地连接须保留 `--local`，直接重印原本地连接的二维码。显式项目、Pi 配置/历史目录、可执行文件、端口、监听地址或 Registry 与原实例不一致时，必须使用独立配置；不能借重复配对悄悄改变运行范围。旧配置只有能从匹配的 Pi 邀请中确认原 Registry 时才允许刷新，不能从 Relay 地址猜测。认证不确定或 owner 锁仍存在但监听不可用时保守拒绝并保留原实例。本轮未改变离线 `pair` 的既有重新注册行为；电脑重启后恢复原连接仍应使用 `start`。
+
 ## 实现范围
 
 | 能力 | 行为 |

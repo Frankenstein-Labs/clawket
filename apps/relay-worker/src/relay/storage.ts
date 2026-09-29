@@ -23,6 +23,7 @@ export type RehydrateSummary = {
   orphanSocketsClosed: number;
   nonOpenSocketsClosed: number;
   duplicateSocketsClosed: number;
+  retiredClientSocketsClosed?: number;
   hasGateway?: boolean;
   hasBridge?: boolean;
 };
@@ -189,6 +190,7 @@ export function reconcileSockets(runtime: RelayRuntime, options: ReconcileSocket
   let orphanSocketsClosed = 0;
   let nonOpenSocketsClosed = 0;
   let duplicateSocketsClosed = 0;
+  let retiredClientSocketsClosed = 0;
   let gatewayCandidate: { socket: WebSocket; connectedAt: number } | null = null;
   const clientCandidates = new Map<string, { socket: WebSocket; connectedAt: number; pairing: boolean }>();
   for (const ws of sockets) {
@@ -201,6 +203,11 @@ export function reconcileSockets(runtime: RelayRuntime, options: ReconcileSocket
     if (ws.readyState !== WebSocket.OPEN) {
       nonOpenSocketsClosed += 1;
       closeSocketBestEffort(ws, 'dead_socket');
+      continue;
+    }
+    if (attachment.role === 'client' && attachment.backendSessionRetired) {
+      retiredClientSocketsClosed += 1;
+      try { ws.close(SOCKET_CLOSE_CODES.GATEWAY_UNAVAILABLE, runtime.policy.ownerUnavailableReason); } catch { /* Never restore a retired route even if close fails. */ }
       continue;
     }
     if (attachment.role === 'gateway' && attachment.targetConnectionId && runtime.policy.backend === 'openclaw') continue;
@@ -235,6 +242,15 @@ export function reconcileSockets(runtime: RelayRuntime, options: ReconcileSocket
     };
     if (!existing) {
       clientCandidates.set(attachment.clientId, candidate);
+      continue;
+    }
+    // Older rooms may contain a restricted ticket and a full client sharing an
+    // ID. A ticket must never evict the authenticated route when memory is lost,
+    // even if it connected later or was supplied as the preferred socket.
+    if (existing.pairing !== candidate.pairing) {
+      duplicateSocketsClosed += 1;
+      closeSocketBestEffort(candidate.pairing ? ws : existing.socket, 'duplicate_socket');
+      if (!candidate.pairing) clientCandidates.set(attachment.clientId, candidate);
       continue;
     }
     const nextWins = shouldPreferSocketCandidate({
@@ -287,6 +303,7 @@ export function reconcileSockets(runtime: RelayRuntime, options: ReconcileSocket
     orphanSocketsClosed,
     nonOpenSocketsClosed,
     duplicateSocketsClosed,
+    ...(retiredClientSocketsClosed ? { retiredClientSocketsClosed } : {}),
     [runtime.policy.ownerPresentField]: hasOwner,
   };
   logRuntimeTelemetry(runtime, 'rehydrate_summary', {

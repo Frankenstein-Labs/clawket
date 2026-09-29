@@ -34,6 +34,8 @@ import {
 
 let mockScheme: 'light' | 'dark' = 'light';
 let mockReducedMotion = false;
+let mockFontScale = 1;
+let mockComposerAnimatedHeight: number | undefined;
 
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
@@ -69,7 +71,7 @@ jest.mock('react-native', () => {
     },
     Text: primitive('Text'),
     TextInput: primitive('TextInput'),
-    useWindowDimensions: () => ({ width: 375, height: 812, scale: 3, fontScale: 1 }),
+    useWindowDimensions: () => ({ width: 375, height: 812, scale: 3, fontScale: mockFontScale }),
     View: primitive('View'),
   };
 });
@@ -96,7 +98,11 @@ jest.mock('react-native-reanimated', () => {
     FadeIn: { duration: () => ({ name: 'FadeIn' }) },
     LinearTransition: { duration: () => ({ name: 'LinearTransition' }) },
     useAnimatedProps: (factory: () => unknown) => factory(),
-    useAnimatedStyle: (factory: () => unknown) => factory(),
+    useAnimatedStyle: (factory: () => Record<string, unknown>) => {
+      const style = factory();
+      return mockComposerAnimatedHeight !== undefined && style.flexBasis !== undefined
+        ? { ...style, height: mockComposerAnimatedHeight } : style;
+    },
     useFrameCallback: () => ({ setActive: jest.fn(), isActive: false, callbackId: -1 }),
     useReducedMotion: () => mockReducedMotion,
     useSharedValue: (value: unknown) => ({ value }),
@@ -425,7 +431,7 @@ describe.each(['light', 'dark'] as const)('%s thread primitives', (scheme) => {
     expect(view.queryByTestId('composer-primary')).toBeNull();
   });
 
-  it('offers the full input as a hold target and returns touch ownership to native editing', () => {
+  it('limits input hold-to-talk to an empty unfocused editor', () => {
     const start = jest.fn();
     const props = { testID: 'composer', placeholder: 'Message', accessibilityLabels: { add: 'Add', voice: 'Voice', send: 'Send', stop: 'Stop' },
       onChangeText: jest.fn(), onSend: jest.fn(), onVoicePress: jest.fn(), onVoiceStart: start, value: '' };
@@ -439,13 +445,39 @@ describe.each(['light', 'dark'] as const)('%s thread primitives', (scheme) => {
     view.rerender(<Composer {...props} voiceState="listening" />);
     expect(view.getByTestId('composer-voice-input-target')).toBe(target);
     view.rerender(<Composer {...props} />);
-    fireEvent(view.getByTestId('composer-input'), 'focus', {});
-    expect(view.getByTestId('composer-voice-input-target').props.pointerEvents).toBe('auto');
+    const input = view.getByTestId('composer-input');
+    fireEvent(input, 'focus', {});
+    // Empty focused inputs must receive native paste/selection touches too.
+    expect(view.getByTestId('composer-voice-input-target').props.pointerEvents).toBe('none');
+    expect(input.props.placeholder).toBe('Message');
+    expect(input.props.editable).toBe(true);
+    expect(input.props.contextMenuHidden).not.toBe(true);
     view.rerender(<Composer {...props} value="Editing a draft" />);
+    fireEvent(input, 'blur', {});
+    // A saved draft remains directly selectable even before focusing it.
     expect(view.getByTestId('composer-voice-input-target').props.pointerEvents).toBe('none');
     expect(view.getByTestId('composer-input').props.placeholder).toBe('Message');
+    view.rerender(<Composer {...props} />);
+    expect(view.getByTestId('composer-voice-input-target').props.pointerEvents).toBe('auto');
+    fireEvent(input, 'focus', {});
+    expect(view.getByTestId('composer-voice-input-target').props.pointerEvents).toBe('none');
     view.rerender(<Composer {...props} expanded />);
     expect(view.getByTestId('composer-voice-input-target').props.pointerEvents).toBe('none');
+    expect(view.getByTestId('composer-input')).toBe(input);
+  });
+
+  it('keeps keyboard-dismiss capture outside native text selection', () => {
+    const props = { testID: 'composer', placeholder: 'Message',
+      accessibilityLabels: { add: 'Add', voice: 'Voice', send: 'Send', stop: 'Stop' },
+      onChangeText: jest.fn(), onSend: jest.fn(), value: 'Select this draft' };
+    const view = render(<Composer {...props} />);
+    expect(view.getByTestId('composer').props.__config).toBeUndefined();
+    expect(view.getByTestId('composer-input-shell').props.__config).toBeUndefined();
+    fireEvent(view.getByTestId('composer-input'), 'focus', {});
+    const capture = view.getByTestId('composer-toolbar').props.__config.onMoveShouldSetPanResponderCapture;
+    expect(capture({}, { dx: 0, dy: 24, numberActiveTouches: 1 })).toBe(true);
+    view.rerender(<Composer {...props} expanded />);
+    expect(view.getByTestId('composer-toolbar').props.__config).toBeUndefined();
   });
 
   it('renders bottom sheet chrome with one 40 percent backdrop and a visible close action', () => {
@@ -662,6 +694,84 @@ describe.each(['light', 'dark'] as const)('%s thread primitives', (scheme) => {
 
 describe('long-form composer', () => {
   const labels = { add: 'Add', voice: 'Voice', send: 'Send', stop: 'Stop' };
+
+  it.each(['android', 'ios'] as const)('bounds a cleared %s editor despite a stale animated height or text measurement', platform => {
+    const { Platform } = require('react-native');
+    const previousPlatform = Platform.OS;
+    Platform.OS = platform;
+    const props = { testID: 'editor', value: 'A long wrapped draft', placeholder: 'Message', accessibilityLabels: labels,
+      onChangeText: jest.fn(), onSend: jest.fn(), onExpandedChange: jest.fn() };
+    const view = render(<Composer {...props} />);
+    try {
+      const nativeInput = view.getByTestId('editor-input');
+      fireEvent(view.getByTestId('editor-measurement', { includeHiddenElements: true }), 'textLayout', {
+        nativeEvent: { lines: [{}, {}, {}, {}, {}] },
+      });
+      // Simulate the measured native failure: the UI thread keeps the previous
+      // five-line height even though React has committed the empty draft.
+      mockComposerAnimatedHeight = LineHeight.body * 5 + Space.sm * 2;
+      view.rerender(<Composer {...props} value="" />);
+      const shellStyle = () => flattenStyle(view.getByTestId('editor-input-shell').props.style);
+      expect(shellStyle()).toMatchObject({
+        height: mockComposerAnimatedHeight, minHeight: ControlSize.pill, maxHeight: ControlSize.pill,
+      });
+      fireEvent(view.getByTestId('editor-measurement', { includeHiddenElements: true }), 'textLayout', {
+        nativeEvent: { lines: [{}, {}, {}, {}, {}, {}] },
+      });
+      expect(shellStyle()).toMatchObject({ minHeight: ControlSize.pill, maxHeight: ControlSize.pill });
+      expect(view.getByTestId('editor-input')).toBe(nativeInput);
+
+      mockComposerAnimatedHeight = undefined;
+      view.rerender(<Composer {...props} value="New draft" />);
+      expect(shellStyle().maxHeight).toBeUndefined();
+      expect(view.getByTestId('editor-input')).toBe(nativeInput);
+      fireEvent(view.getByTestId('editor-measurement', { includeHiddenElements: true }), 'textLayout', {
+        nativeEvent: { lines: [{}] },
+      });
+      expect(shellStyle().height).toBe(ControlSize.pill);
+    } finally {
+      view.unmount();
+      mockComposerAnimatedHeight = undefined;
+      Platform.OS = previousPlatform;
+    }
+  });
+
+  it('keeps the empty editor tall enough for enlarged text without changing its native input', () => {
+    const props = { testID: 'editor', value: '', placeholder: 'Message', accessibilityLabels: labels,
+      onChangeText: jest.fn(), onSend: jest.fn() };
+    const view = render(<Composer {...props} />);
+    try {
+      const nativeInput = view.getByTestId('editor-input');
+      mockFontScale = 2;
+      view.rerender(<Composer {...props} />);
+      expect(flattenStyle(view.getByTestId('editor-input-shell').props.style)).toMatchObject({
+        minHeight: LineHeight.body * 2 + Space.sm * 2,
+        maxHeight: LineHeight.body * 2 + Space.sm * 2,
+      });
+      expect(view.getByTestId('editor-input')).toBe(nativeInput);
+    } finally { view.unmount(); mockFontScale = 1; }
+  });
+
+  it('releases empty-editor bounds while expanded or presenting voice capture', () => {
+    const props = { testID: 'editor', value: '', placeholder: 'Message', accessibilityLabels: labels,
+      onChangeText: jest.fn(), onSend: jest.fn(), onVoicePress: jest.fn(), onExpandedChange: jest.fn() };
+    const view = render(<Composer {...props} />);
+    const nativeInput = view.getByTestId('editor-input');
+    const shellStyle = () => flattenStyle(view.getByTestId('editor-input-shell').props.style);
+    expect(shellStyle().maxHeight).toBe(ControlSize.pill);
+    view.rerender(<Composer {...props} expanded />);
+    expect(shellStyle().maxHeight).toBeUndefined();
+    expect(shellStyle()).toMatchObject({ flexGrow: 1, flexShrink: 1, flexBasis: 0 });
+    for (const voiceState of ['listening', 'transcribing'] as const) {
+      view.rerender(<Composer {...props} voiceState={voiceState} />);
+      expect(shellStyle().maxHeight).toBeUndefined();
+      expect(view.getByTestId('editor-input', { includeHiddenElements: true })).toBe(nativeInput);
+    }
+    view.rerender(<Composer {...props} />);
+    expect(shellStyle().maxHeight).toBe(ControlSize.pill);
+    expect(view.getByTestId('editor-input')).toBe(nativeInput);
+    view.unmount();
+  });
 
   it('keeps saved voice recovery reachable with an existing text draft', () => {
     const recover = jest.fn();

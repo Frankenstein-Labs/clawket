@@ -27,6 +27,11 @@ import { takeCreatedCronJob, useCronJobs } from './useCronJobs';
 // Gorhom-integrated scroll view (a plain ScrollView in a dynamic-height sheet
 // hands its drags to the sheet, which snaps back instead of scrolling).
 const HEARTBEAT_SNAP_POINTS: string[] = ['82%', '92%'];
+// The first page of run records each live adapter last answered, per Agent: returning to the Runs tab
+// starts from it and refreshes in place instead of flashing placeholders over an empty list first
+// (owner rule 2026-09-29: a wait never moves the layout).
+type RunsPage = Readonly<{ runs: ReadonlyArray<CronRunLogEntry>; nextOffset: number | null }>;
+const runsCache = new WeakMap<AgentAdapter, Map<string, RunsPage>>();
 
 export type CronSectionProps = Readonly<{
   adapter: AgentAdapter;
@@ -74,8 +79,11 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
     // `t` and `lead` are stable for this list; only a focus (refreshKey) delivers a new task.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.agentId, agent.connectionId, refreshKey]);
-  const [runs, setRuns] = useState<ReadonlyArray<CronRunLogEntry>>([]);
-  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const runsKey = `${agent.connectionId}:${agent.agentId}`;
+  const [runs, setRuns] = useState<ReadonlyArray<CronRunLogEntry>>(() => runsCache.get(adapter)?.get(runsKey)?.runs ?? []);
+  const [nextOffset, setNextOffset] = useState<number | null>(() => runsCache.get(adapter)?.get(runsKey)?.nextOffset ?? null);
+  // Placeholders stand in only until the history first answers; later reads refresh it in place.
+  const [runsAnswered, setRunsAnswered] = useState(() => runsCache.get(adapter)?.has(runsKey) === true);
   const [runsLoading, setRunsLoading] = useState(false);
   const [heartbeat, setHeartbeat] = useState<HeartbeatSettings | null>(null);
   const [heartbeatVisible, setHeartbeatVisible] = useState(false);
@@ -83,6 +91,7 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
   const [busy, setBusy] = useState<string | null>(null);
   const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [heldMessage, setHeldMessage] = useState<string | null>(null);
   const runRequest = useRef(0);
   const canCreate = adapter.capabilities.cronCreate && Boolean(operations?.add);
   const canShowHeartbeat = adapter.capabilities.heartbeat && Boolean(operations?.heartbeat?.get);
@@ -95,13 +104,19 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
       if (!isCurrent() || request !== runRequest.current) return;
       setRuns(current => offset ? [...current, ...page.entries] : page.entries);
       setNextOffset(page.hasMore ? page.nextOffset : null);
+      if (!offset) {
+        let pages = runsCache.get(adapter);
+        if (!pages) { pages = new Map(); runsCache.set(adapter, pages); }
+        pages.set(runsKey, { runs: page.entries, nextOffset: page.hasMore ? page.nextOffset : null });
+      }
+      setRunsAnswered(true);
       setError(null);
     } catch (reason) {
       if (isCurrent() && request === runRequest.current) setError(errorMessage(reason, t('Failed to load scheduled tasks', { ns: 'settings' })));
     } finally {
       if (isCurrent() && request === runRequest.current) setRunsLoading(false);
     }
-  }, [isCurrent, online, operations, t]);
+  }, [adapter, isCurrent, online, operations, runsKey, t]);
   useEffect(() => { if (view === 'runs') void loadRuns(); }, [loadRuns, refreshKey, view]);
   // Seeing the run records is what clears the profile's red failure count: the failures head this
   // tab, so every current one is marked as seen once the job list behind them is known.
@@ -154,6 +169,7 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
     }
   };
   const message = error ?? (loadError ? errorMessage(loadError, t('Failed to load scheduled tasks', { ns: 'settings' })) : null);
+  const shownMessage = message ?? heldMessage;
   const failedJobs = failedCronJobs(jobs ?? []);
   const failedRuns = failedJobs.map(cronFailureRunEntry);
   // The failed runs sit first, rebuilt from job state; drop their history twins so the same run
@@ -161,14 +177,19 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
   const visibleRuns = filterAgentCronRuns(runs, jobs ?? []).filter((run) => !failedRuns.some((failed) => (
     failed.jobId === run.jobId && (failed.runAtMs ?? failed.ts) === (run.runAtMs ?? run.ts)
   )));
-  if (jobs === null && !message && online) return <CronLoading />;
+  if (jobs === null && !shownMessage && online) return <CronLoading />;
   return <>
     <View testID="agent-cron-section" style={styles.root}>
       {operations?.runs ? <SegmentedTabs testID="agent-cron-tabs" tabs={[
         { key: 'jobs', label: t('Jobs', { ns: 'settings' }) }, { key: 'runs', label: t('Runs', { ns: 'settings' }) },
       ]} active={view} onSwitch={setView} /> : null}
-      {message ? <Banner testID="agent-cron-error" tone="bad" message={message} actionLabel={t('Retry')}
-        onAction={() => { setError(null); void reload(); if (view === 'runs') void loadRuns(); }} /> : null}
+      {shownMessage ? <Banner testID="agent-cron-error" tone="bad" message={shownMessage} actionLabel={t('Retry')}
+        onAction={() => {
+          // The notice holds its place until the retry answers, instead of vanishing and returning.
+          setHeldMessage(shownMessage);
+          setError(null);
+          void Promise.all([reload(), view === 'runs' ? loadRuns() : undefined]).finally(() => setHeldMessage(null));
+        }} /> : null}
       {view === 'jobs' ? <View style={styles.groups}>
         <View style={styles.jobList}>
           <View style={styles.summaryRow}>
@@ -207,12 +228,12 @@ function CronSectionContent({ adapter, agent, online, refreshKey, onCreate, onEd
             title={run.jobName ?? run.jobId} subtitle={formatCronDate(run.runAtMs ?? run.ts, i18n?.resolvedLanguage)} value={t('Failed', { ns: 'settings' })}
             attention showChevron onPress={() => setSelectedRun(run)} />)}
         </View> : null}
-        {runsLoading && !runs.length ? <CronLoading /> : null}
+        {runsLoading && !runsAnswered && !runs.length ? <CronLoading /> : null}
         {visibleRuns.map((run, index) => <SettingsRow key={`${run.jobId}:${run.ts}:${index}`} testID={`agent-cron-run-${run.jobId}-${run.ts}`}
           title={run.jobName ?? jobs?.find(job => job.id === run.jobId)?.name ?? run.jobId}
           subtitle={formatCronDate(run.runAtMs ?? run.ts, i18n?.resolvedLanguage)} value={translateCronRunStatus(cronRunStatus(run), t)}
           attention={run.status === 'error'} showChevron onPress={() => setSelectedRun(run)} />)}
-        {!runsLoading && !visibleRuns.length && !failedRuns.length ? <Text testID="agent-cron-runs-empty" style={styles.emptyText}>{t('No runs yet', { ns: 'settings' })}</Text> : null}
+        {(runsAnswered || !runsLoading) && !visibleRuns.length && !failedRuns.length ? <Text testID="agent-cron-runs-empty" style={styles.emptyText}>{t('No runs yet', { ns: 'settings' })}</Text> : null}
         {nextOffset !== null ? <Button testID="cron-runs-more" label={t('Load more', { ns: 'settings' })} variant="ghost" loading={runsLoading} disabled={!online}
           onPress={() => { if (!runsLoading) void loadRuns(nextOffset); }} /> : null}
       </View>}

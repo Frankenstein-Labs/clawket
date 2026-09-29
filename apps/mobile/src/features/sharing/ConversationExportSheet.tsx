@@ -89,8 +89,9 @@ export function ConversationExportSheet({ target, adapter, onClose }: Readonly<{
     closeAccessibilityLabel={t('Close', { ns: 'common' })} snapPoints={SNAP_POINTS} testID="conversation-export">
     <BottomSheetScrollView contentContainerStyle={styles.content}>
       {!ready && !connecting ? <Banner message={t('Offline', { ns: 'common' })} /> : error ? <Banner message={errorText} actionLabel={t('Retry')} onAction={() => setRevision(value => value + 1)} /> : null}
-      {connecting ? <View style={styles.loading}><LoadingState size="compact" pose="connecting" message={t('Connecting', { ns: 'common' })} testID="conversation-export-connecting" /></View> : null}
-      {!data && !error && ready ? <View style={styles.loading}><LoadingState size="compact" message={t('Loading history')} /></View> : null}
+      {/* One loader carries both stages, so Connecting → Loading history changes the label, not the scene. */}
+      {connecting || (!data && !error && ready) ? <View style={styles.loading}><LoadingState size="compact" pose={connecting ? 'connecting' : 'loading'}
+        message={connecting ? t('Connecting', { ns: 'common' }) : t('Loading history')} testID={connecting ? 'conversation-export-connecting' : 'conversation-export-loading'} /></View> : null}
       {data ? <View style={styles.form}><Text style={[styles.caption, { color: theme.colors.inkSecondary }]}>{t('Text and attachment names')}</Text><SettingsGroup>
         {target?.connectionId && target.agentId ? <><SettingsRow title={t('Save conversation')} showChevron disabled={sharing} onPress={() => void archive()} testID="conversation-export-archive" /><SettingsDivider /></> : null}
         <SettingsRow title="Markdown" value=".md" showChevron disabled={sharing} onPress={() => void share('markdown')} testID="conversation-export-markdown" />

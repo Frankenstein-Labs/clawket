@@ -144,3 +144,51 @@ it('forwards the selected conversation when listing project skills', async () =>
   expect(JSON.parse(sockets[0].sent.at(-1)!)).toMatchObject({ method: 'skills.list', params: { sessionKey: 'native:qa-project' } });
   sockets[0].reply(); await result;
 });
+
+it('uses the latest local connection name even when an Agent reply was already in flight', async () => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const pending = adapter.listAgents();
+  adapter.connection.label = 'Work laptop';
+  const request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true,
+    payload: [{ agentId: 'main', name: 'Fixed backend name', isMain: true, mainSessionKey: '' }] }) });
+  expect(await pending).toEqual([expect.objectContaining({ connectionId: record.id, name: 'Work laptop' })]);
+  expect(adapter.state).toBe('ready');
+});
+
+it('negotiates permission/archive controls and keeps native IDs in reversible archives', async () => {
+  const connected = adapter.connect(); sockets[0].open();
+  let request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true,
+    payload: { backend: 'codex', sessionPermissions: true, sessionArchive: true, fastMode: true } }) });
+  await connected;
+  expect(adapter.capabilities.sessionPermissions).toBe(true);
+  const archived = adapter.listArchivedSessions();
+  request = JSON.parse(sockets[0].sent.at(-1)!);
+  expect(request.method).toBe('sessions.archived');
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true,
+    payload: [{ key: 'opaque', sessionId: 'native-id', archived: true, allowedActions: { archive: true } }] }) });
+  expect((await archived)[0]).toMatchObject({ sessionId: 'native-id', archived: true, connectionId: 'phone' });
+  const restored = adapter.archiveSession('opaque', false);
+  request = JSON.parse(sockets[0].sent.at(-1)!);
+  expect(request).toMatchObject({ method: 'sessions.archive', params: { sessionKey: 'opaque', archived: false } });
+  sockets[0].reply(); await restored;
+});
+
+it.each([
+  ['ws://192.168.1.2:17880/v1/codex/ws', true],
+  ['ws://127.0.0.1:17880/v1/codex/ws', false],
+  ['wss://example.com/v1/codex/ws', false],
+])('computes permission transport warning locally for %s', async (url, expected) => {
+  adapter.disconnect();
+  adapter = new CodexAdapter({ ...record, url: url as string, transportKind: 'custom', relay: undefined },
+    { webSocketFactory: () => { const socket = new Socket(); sockets.push(socket); return socket; } });
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const state = adapter.management.models!.getSelection!('session');
+  const request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true, payload: {
+    models: [], currentModel: 'native', currentProvider: 'provider', currentBaseUrl: '',
+    permissions: { mode: 'workspace', available: true, scope: 'session', unencryptedTransport: !expected },
+  } }) });
+  expect((await state).permissions?.unencryptedTransport).toBe(expected);
+});

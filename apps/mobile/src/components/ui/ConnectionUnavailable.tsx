@@ -16,6 +16,8 @@ export type ConnectionUnavailableProps = Readonly<{
   onRetry?: () => void;
   onManage?: () => void;
   onViewSaved?: () => void;
+  /** A retry the person started is running: its button spins in place and the card keeps its size. */
+  retrying?: boolean;
   compact?: boolean;
   testID?: string;
 }>;
@@ -23,7 +25,7 @@ export type ConnectionUnavailableProps = Readonly<{
 /** An unavailable connection is not proof that the computer is powered off. */
 export function ConnectionUnavailable({
   name, lastReadyAt, message, actionLabel, onRetry, onManage, onViewSaved,
-  compact = false, testID = 'connection-unavailable',
+  retrying = false, compact = false, testID = 'connection-unavailable',
 }: ConnectionUnavailableProps): React.JSX.Element {
   const { t } = useTranslation('common');
   const translateRelativeTime = useRelativeTimeTranslator();
@@ -44,7 +46,7 @@ export function ConnectionUnavailable({
       {t('Check your network and make sure the remote service is running.')}
     </Text> : null}
     <View style={styles.actions}>
-      {onRetry ? <Button testID={`${testID}-retry`} label={actionLabel ?? t('Reconnect')} onPress={onRetry} multiline /> : null}
+      {onRetry ? <Button testID={`${testID}-retry`} label={actionLabel ?? t('Reconnect')} onPress={onRetry} loading={retrying} multiline /> : null}
       {onManage ? <Button testID={`${testID}-manage`} label={t('Manage connection', { ns: 'config' })} variant="ghost" onPress={onManage} multiline /> : null}
       {onViewSaved ? <Button testID={`${testID}-saved`} label={t('View saved messages')} variant="text" onPress={onViewSaved} multiline /> : null}
     </View>

@@ -40,6 +40,7 @@ const historyMock = {
   }),
   setHistoryLoaded: jest.fn(),
   setHasMoreHistory: jest.fn(),
+  applyReconciledHistory: jest.fn().mockReturnValue(false),
   setThinkingLevel: jest.fn(),
   refreshSessions: jest.fn(),
   onLoadMoreHistory: jest.fn(),
@@ -61,6 +62,11 @@ const voiceInputHookMock = {
 };
 
 const modelPickerHookMock = {
+  hasRuntimeSettings: false,
+  nativeThinkingLevel: null as string | null,
+  runtimeSettingsBusy: false,
+  runtimeSettingsPendingRef: { current: false },
+    runtimeSettingsUnconfirmedRef: { current: false },
   availableModels: [{ id: 'gpt-5', name: 'gpt-5', provider: 'openai' }],
   modelPickerError: null,
   modelPickerLoading: false,
@@ -188,7 +194,10 @@ function resetMockState() {
   historyMock.historyLoaded = true;
   historyMock.messages = [];
   historyMock.thinkingLevel = null;
+  modelPickerHookMock.hasRuntimeSettings = false;
+  modelPickerHookMock.nativeThinkingLevel = null;
   historyMock.setMessages.mockClear();
+  historyMock.applyReconciledHistory.mockReset().mockReturnValue(false);
   historyMock.setSessions.mockClear();
   historyMock.setSessionKey.mockClear();
   imagePickerHookMock.pendingImages = [];
@@ -365,6 +374,19 @@ describe('useChatController contract', () => {
         closeCommandPicker: commandPickerHookMock.closeCommandPicker,
       }),
     );
+  });
+
+  it.each([false, true])('only uses historical thinking as a fallback without native runtime settings (runtime settings: %s)', (hasRuntimeSettings) => {
+    historyMock.thinkingLevel = 'high';
+    modelPickerHookMock.hasRuntimeSettings = hasRuntimeSettings;
+    const adapter = createAdapter();
+    const { result, rerender } = renderHook(() => useChatController({
+      adapter, debugMode: false, showAgentAvatar: true,
+    }));
+    expect(result.current.thinkingLevel).toBe(hasRuntimeSettings ? null : 'high');
+    modelPickerHookMock.nativeThinkingLevel = 'low';
+    rerender({});
+    expect(result.current.thinkingLevel).toBe('low');
   });
 
   it('stays idle and subscribes safely while the active adapter is null', () => {
@@ -2077,6 +2099,20 @@ describe('useChatController contract', () => {
     ]);
     expect(historyMock.setHistoryLoaded).toHaveBeenCalledWith(true);
     expect(historyMock.setHasMoreHistory).toHaveBeenCalledWith(true);
+  });
+
+  it('delegates a reconciled paged head to the history window without discarding loaded older rows', async () => {
+    const adapter = createAdapter('ready');
+    renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const eventParams = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)?.[0];
+    historyMock.applyReconciledHistory.mockReturnValue(true);
+    historyMock.setMessages.mockClear(); historyMock.setHasMoreHistory.mockClear();
+    const head = { key: 'agent:main:main', messages: [], hasActiveRun: false };
+    await act(async () => { eventParams!.onUpdate?.({ type: 'history_reconciled', sessionKey: 'agent:main:main',
+      history: head, messages: [], nextCursor: 'older', hasActiveRun: false }); });
+    expect(historyMock.applyReconciledHistory).toHaveBeenCalledWith({ ...head, nextCursor: 'older' });
+    expect(historyMock.setHasMoreHistory).not.toHaveBeenCalled();
+    expect(historyMock.setMessages).not.toHaveBeenCalled();
   });
 
   it('avoids duplicate history recovery for a terminal adapter tool update', async () => {

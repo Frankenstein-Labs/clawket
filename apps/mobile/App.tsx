@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import { BridgeUpgradeScreen } from './src/features/app-updates/BridgeUpgradeScreen';
 import { useBridgeUpgrade } from './src/features/app-updates/useBridgeUpgrade';
 import { ConversationExportSheet } from './src/features/sharing/ConversationExportSheet';
@@ -64,7 +65,8 @@ import {
   NodeCapabilityToggles,
   shouldStartNodeSidecar,
 } from './src/services/node-capabilities';
-import { shouldProbeGatewayOnForegroundResume } from './src/services/foregroundReconnectPolicy';
+import { FOREGROUND_PROBE_TIMEOUT_MS, shouldProbeGatewayOnForegroundResume } from './src/services/foregroundReconnectPolicy';
+import { observeNetworkRecovery } from './src/services/networkRecoveryObserver';
 import { logAppTelemetry } from './src/services/app-telemetry';
 import { StorageService } from './src/services/storage';
 import {
@@ -714,6 +716,10 @@ function AppContent({
     prevReadyRef.current = false;
   }, [connections.activeConnectionId, connections.activeState]);
 
+  useEffect(() => observeNetworkRecovery(hint => {
+    getConnectionRuntime().observeNetworkState(hint);
+  }), []);
+
   // Ask the coordinator to verify the only live transport after foreground resume.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
@@ -750,7 +756,7 @@ function AppContent({
         shouldProbe,
       });
       if (shouldProbe) {
-        void getConnectionRuntime().probeActive(undefined, 'foreground');
+        void getConnectionRuntime().probeActive(FOREGROUND_PROBE_TIMEOUT_MS, 'foreground');
       }
     });
     return () => sub.remove();
@@ -1333,6 +1339,10 @@ function AppContent({
       presentPaywall(canAccessConnection(row.connectionId) ? 'agents' : 'gatewayConnections');
       return;
     }
+    if (action === 'copy_id') {
+      if (row.sessionId) await Clipboard.setStringAsync(row.sessionId);
+      return;
+    }
     // Any explicit action (rename, pin, export, delete) means this session is no longer an abandoned new one.
     FreshSessions.settle(row.connectionId, row.agentId, row.key);
     if (action === 'export') {
@@ -1360,13 +1370,17 @@ function AppContent({
     if (action === 'rename' && payload?.title) {
       await adapter.patchSession?.(row.key, { title: payload.title });
     }
+    if (action === 'archive') {
+      if (!adapter.archiveSession || !adapter.capabilities.sessionArchive) throw new Error('Archive unavailable');
+      await adapter.archiveSession(row.key, !row.archived);
+    }
     if (action === 'reset') await adapter.resetSession?.(row.key);
     if (action === 'delete') {
       await adapter.deleteSession?.(row.key);
       await SessionPreferencesService.clearSession(row.connectionId, row.agentId, row.key);
     }
     await getConnectionRuntime().refreshRoster();
-    if (action === 'delete') {
+    if (action === 'delete' || (action === 'archive' && !row.archived)) {
       const current = rootNavigationRef.getCurrentRoute();
       const params = current?.name === 'Thread' ? current.params as RootStackParamList['Thread'] : undefined;
       const agent = getConnectionRuntime().getSnapshot().roster.find(group => group.connection.id === row.connectionId)

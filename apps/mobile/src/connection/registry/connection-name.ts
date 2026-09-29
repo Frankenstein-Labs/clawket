@@ -1,3 +1,4 @@
+import type { BackendKind } from '@clawket/agent-protocol';
 import type { GatewayBackendKind, GatewayTransportKind } from '../../types';
 
 export function resolveSavedGatewayName(input: {
@@ -41,4 +42,9 @@ function parseHost(url: string): string {
   } catch {
     return '';
   }
+}
+
+/** These backends expose one device Agent whose local identity is the connection label. */
+export function connectionAgentDefaultName(backend: BackendKind | undefined): string | undefined {
+  return backend === 'codex' ? 'Codex' : backend === 'claude-code' ? 'Claude Code' : undefined;
 }

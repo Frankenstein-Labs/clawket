@@ -105,6 +105,9 @@ export function SearchScreen({
   const [recentSearches, setRecentSearches] = useState<ReadonlyArray<string>>([]);
   const [baseLoaded, setBaseLoaded] = useState(false);
   const [searchingMessages, setSearchingMessages] = useState(false);
+  // A message search has answered since the field was last empty. Typing then refines what is on
+  // screen instead of swapping it for placeholders (owner report 2026-09-29: every keystroke flashed).
+  const [messagesAnswered, setMessagesAnswered] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [retryRevision, setRetryRevision] = useState(0);
 
@@ -150,6 +153,7 @@ export function SearchScreen({
     if (!normalized) {
       setMessageMatches([]);
       setSearchingMessages(false);
+      setMessagesAnswered(false);
       return;
     }
     let cancelled = false;
@@ -158,10 +162,12 @@ export function SearchScreen({
       if (cancelled) return;
       setMessageMatches(matches);
       setSearchingMessages(false);
+      setMessagesAnswered(true);
     }).catch((error: unknown) => {
       if (cancelled) return;
       setDataError(error instanceof Error ? error.message : String(error));
       setSearchingMessages(false);
+      setMessagesAnswered(true);
     });
     return () => {
       cancelled = true;
@@ -234,7 +240,7 @@ export function SearchScreen({
   const state = resolveSearchPageState({
     initialized: runtime.initialized,
     permitted: permissionGranted,
-    loading: !baseLoaded || searchingMessages,
+    loading: !baseLoaded || (searchingMessages && !messagesAnswered && model.visibleResultCount === 0),
     offline,
     errorCode,
     visibleResultCount: model.visibleResultCount,

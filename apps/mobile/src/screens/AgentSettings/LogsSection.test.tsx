@@ -293,6 +293,15 @@ describe('LogsSection', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('inserts no offline notice during a short reconnect', async () => {
+    const adapter = adapterWith(jest.fn(async () => page([infoLine])));
+    const view = render(<LogsSection adapter={adapter} online />);
+    await waitFor(() => expect(view.getByText('Gateway ready')).toBeTruthy());
+    view.rerender(<LogsSection adapter={adapter} online={false} reconnecting />);
+    expect(view.queryByTestId('agent-logs-offline')).toBeNull();
+    expect(view.getByText('Gateway ready')).toBeTruthy();
+  });
+
   it('shows free users the newest entries, veils the rest, and never tails live', async () => {
     jest.useFakeTimers();
     const lines = Array.from({ length: 9 }, (_, index) => JSON.stringify({

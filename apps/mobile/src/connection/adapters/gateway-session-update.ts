@@ -219,14 +219,15 @@ export function mapGatewayErrorCode(code: string): AdapterErrorCode {
   if (normalized.includes('pairing_expired') || normalized.includes('claim_expired')) return 'pairing_expired';
   if (normalized.includes('pairing')) return 'pairing_required';
   if (normalized.includes('auth') || normalized.includes('unauthorized')) return 'unauthorized';
+  if (normalized.includes('timeout')) return 'timeout';
   if (
     normalized.startsWith('network')
     || normalized.startsWith('ws_')
     || normalized.includes('socket')
     || normalized.includes('dns')
   ) return 'network';
-  if (normalized.includes('challenge') || normalized.includes('bridge')) return 'bridge_offline';
-  if (normalized.includes('timeout')) return 'timeout';
+  if (normalized.includes('bridge')) return 'bridge_offline';
+  if (normalized.includes('challenge')) return 'server';
   if (normalized.includes('gateway') || normalized.includes('unavailable')) return 'gateway_offline';
   if (normalized.includes('network')) return 'network';
   if (normalized.includes('unsupported')) return 'unsupported';

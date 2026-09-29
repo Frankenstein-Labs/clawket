@@ -281,6 +281,8 @@ export function AgentSettingsSectionScreen({
   let sectionContent: React.ReactNode;
   if (adapter && agent) {
     const online = runtime.activeState === 'ready';
+    // The foreground grace window: sections keep what they show while the header says Reconnecting….
+    const reconnecting = runtime.recovering === true;
     if (section === 'skills' && !discoveringSkills) {
       sectionContent = (
         <SkillsSection
@@ -344,17 +346,19 @@ export function AgentSettingsSectionScreen({
           adapter={adapter}
           agent={agent}
           online={online}
+          reconnecting={reconnecting}
           saveRequest={toolsSaveRequest}
           onEditorChange={setToolsEditor}
         />
       );
     } else if (section === 'channels-devices') {
-      sectionContent = <ChannelsDevicesSection adapter={adapter} online={online} />;
+      sectionContent = <ChannelsDevicesSection adapter={adapter} online={online} reconnecting={reconnecting} />;
     } else if (section === 'logs') {
       sectionContent = (
         <LogsSection
           adapter={adapter}
           online={online}
+          reconnecting={reconnecting}
           isPro={isPro}
           onReconnect={retry}
           onOpenPaywall={openPaywall}
@@ -407,6 +411,7 @@ export function AgentSettingsSectionScreen({
         adapter={adapter}
         isPro={isPro}
         permissionDenied={permissionDenied}
+        reconnecting={runtime.recovering === true}
         onBack={navigation.goBack}
         onOpenPaywall={openPaywall}
       />
@@ -419,6 +424,7 @@ export function AgentSettingsSectionScreen({
         adapter={adapter}
         agent={agent}
         online={runtime.activeState === 'ready'}
+        reconnecting={runtime.recovering === true}
         navigation={navigation}
         isPro={isPro}
         onOpenPaywall={openPaywall}
@@ -433,6 +439,7 @@ export function AgentSettingsSectionScreen({
         adapter={adapter}
         agent={agent}
         online={runtime.activeState === 'ready'}
+        reconnecting={runtime.recovering === true}
         isPro={isPro}
         navigation={navigation}
         openCreateOnMount={route.params.action === 'create-agent'}

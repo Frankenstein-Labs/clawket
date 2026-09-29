@@ -2,6 +2,7 @@ import { CONTROL_PREFIX, type SocketAttachment } from './types';
 import type { RelayRuntime } from './runtime';
 import { isConnectChallengeFrame, isConnectStartReqFrame } from './frames';
 import { logRuntimeTelemetry } from './telemetry';
+import { sendRelayFrame } from './transfer';
 
 export const CLIENT_CHANNELS = 'bridge.client-sockets.v1';
 
@@ -63,7 +64,7 @@ export function routeClientChannel(runtime: RelayRuntime, ws: WebSocket, attachm
       target.serializeAttachment({ ...current, challengeDeliveredAt: Date.now() });
       logRuntimeTelemetry(runtime, 'challenge_delivered', { diagnosticId: current.diagnosticId, role: 'gateway' });
     }
-    target.send(text);
+    sendRelayFrame(runtime, target, text);
     return true;
   }
   if (attachment.role !== 'client' || !hasClientChannels(runtime)) return false;
@@ -79,8 +80,8 @@ export function routeClientChannel(runtime: RelayRuntime, ws: WebSocket, attachm
   if (text.startsWith(CONTROL_PREFIX)) {
     try {
       const control = JSON.parse(text.slice(CONTROL_PREFIX.length));
-      channel.send(CONTROL_PREFIX + JSON.stringify({ ...control, sourceClientId: attachment.clientId }));
+      sendRelayFrame(runtime, channel, CONTROL_PREFIX + JSON.stringify({ ...control, sourceClientId: attachment.clientId }));
     } catch { /* Invalid control frames cannot become Gateway requests. */ }
-  } else channel.send(text);
+  } else sendRelayFrame(runtime, channel, text);
   return true;
 }

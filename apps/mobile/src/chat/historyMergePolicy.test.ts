@@ -344,7 +344,7 @@ describe('preserveMessagePresentation', () => {
   it('retains local geometry and row identity for an exact echo without changing the wire ID or delivery evidence', () => {
     const echo: UiMessage = { id: 'history-server', role: 'user', text: 'Photo', timestampMs: 5000, idempotencyKey: 'send-1', imageUris: ['https://example.com/photo.jpg'] };
     expect(preserveMessagePresentation([local], [echo])).toEqual([{
-      ...echo, renderKey: local.renderKey, timestampMs: local.timestampMs,
+      ...echo, renderKey: local.renderKey,
       imageUris: local.imageUris, imageMetas: local.imageMetas,
     }]);
   });
@@ -364,6 +364,69 @@ describe('preserveMessagePresentation', () => {
     const echo: UiMessage = { id: 'history-answer', role: 'assistant', text: 'Answer', timestampMs: 2100 };
     const reconciled = preserveOptimisticAssistantMessage([final], [echo]);
     expect(preserveMessagePresentation([final], reconciled)[0].renderKey).toBe(final.renderKey);
+  });
+});
+
+describe('canonical user clocks after exact native echoes', () => {
+  const local: UiMessage = { id: 'usr_150000', renderKey: 'usr_150000', role: 'user', text: 'Photo',
+    timestampMs: 150_000, idempotencyKey: 'send-clock', sentLocally: true,
+    imageUris: ['file://photo.jpg'], imageMetas: [{ uri: 'file://photo.jpg', width: 400, height: 300 }] };
+  const echo: UiMessage = { id: 'native-user', historyMessageId: 'native-user', role: 'user', text: 'Photo',
+    timestampMs: 141_000, idempotencyKey: 'send-clock', imageUris: ['https://example.com/photo.jpg'] };
+  const reply: UiMessage = { id: 'native-reply', role: 'assistant', text: 'Received', timestampMs: 142_000 };
+  const merge = (previous: UiMessage[], next: UiMessage[]) => preserveMessagePresentation(previous,
+    preserveOptimisticAssistantMessage(previous, next));
+
+  it.each([
+    ['presentation', preserveMessagePresentation],
+    ['optimistic', preserveOptimisticAssistantMessage],
+    ['both passes', merge],
+  ] as const)('%s adopts the native clock without changing message order, identity or photo geometry', (_name, reconcile) => {
+    const result = reconcile([local], [echo, reply]);
+    expect(result.map(message => message.id)).toEqual([echo.id, reply.id]);
+    expect(result[0]).toMatchObject({ timestampMs: echo.timestampMs, renderKey: local.renderKey, sentLocally: true });
+    expect(result[0].imageUris).toBe(local.imageUris);
+    expect(result[0].imageMetas).toBe(local.imageMetas);
+    expect(result[1]).toBe(reply);
+    expect(merge(result, [echo, reply])[0].timestampMs).toBe(echo.timestampMs);
+  });
+
+  it('uses a unique known native history ID even without a send key', () => {
+    const previous = { ...local, id: echo.id, historyMessageId: echo.historyMessageId, idempotencyKey: undefined };
+    const next = { ...echo, idempotencyKey: undefined };
+    expect(merge([previous], [next, reply])[0].timestampMs).toBe(echo.timestampMs);
+  });
+
+  it.each([undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1])(
+    'preserves the phone clock when native time is missing or invalid (%s)', timestampMs => {
+      expect(merge([local], [{ ...echo, timestampMs }, reply])[0].timestampMs).toBe(local.timestampMs);
+    },
+  );
+
+  it('does not promote a send key inherited by a legacy text match into native time evidence', () => {
+    const previous = { ...local, text: 'Hello', imageUris: undefined, imageMetas: undefined };
+    const legacy: UiMessage = { id: 'legacy-user', role: 'user', text: 'Hello', timestampMs: 141_000 };
+    const first = merge([previous], [legacy, reply]);
+    expect(first[0]).toMatchObject({ idempotencyKey: previous.idempotencyKey, timestampMs: previous.timestampMs });
+    const refreshed = merge(first, [{ ...legacy, timestampMs: 141_500 }, reply]);
+    expect(refreshed[0].timestampMs).toBe(previous.timestampMs);
+  });
+
+  it('does not treat a shared UI ID as native identity evidence', () => {
+    const previous = { ...local, id: echo.id, idempotencyKey: undefined };
+    const next = { ...echo, historyMessageId: undefined, idempotencyKey: undefined };
+    expect(merge([previous], [next, reply])[0].timestampMs).toBe(previous.timestampMs);
+  });
+
+  it.each(['send', 'history'] as const)('does not correct a clock using ambiguous %s identity', identity => {
+    const previous = identity === 'send' ? local
+      : { ...local, id: echo.id, historyMessageId: echo.historyMessageId, idempotencyKey: undefined };
+    const next = identity === 'send' ? echo : { ...echo, idempotencyKey: undefined };
+    const duplicatePrevious = { ...previous, id: 'other-previous', renderKey: undefined };
+    // A duplicate without a render key must still make the evidence ambiguous.
+    expect(preserveMessagePresentation([duplicatePrevious, previous], [next, reply])[0].timestampMs).toBe(previous.timestampMs);
+    const duplicateNext = { ...next, id: 'other-native' };
+    expect(merge([previous], [next, duplicateNext, reply])[0].timestampMs).toBe(previous.timestampMs);
   });
 });
 

@@ -253,7 +253,10 @@ export function ModelPickerModal({
     );
   }, [searchQuery, styles, t]);
 
-  const content = loading ? (
+  // A reopen refreshes the catalog already on screen; placeholders stand in only for a first read
+  // (owner report 2026-09-29: every open flashed skeleton rows, then pushed the search field in).
+  const waiting = loading && models.length === 0;
+  const content = waiting ? (
     // Rows of the catalog about to appear, not a spinner in an empty sheet.
     <ListSkeleton testID="model-picker-loading" accessibilityLabel={t('Loading models...')} icon rows={6} style={styles.skeleton} />
   ) : error ? (
@@ -321,7 +324,7 @@ export function ModelPickerModal({
       androidKeyboardInputMode="adjustResize"
       style={styles.sheetContent}
     >
-      {!loading && !error ? renderControls() : null}
+      {!error ? renderControls() : null}
       {content}
     </Sheet>
   );

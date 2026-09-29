@@ -37,10 +37,11 @@ jest.mock('../../services/analytics/events', () => ({
   analyticsEvents: new Proxy({}, { get: (_target, key: string) => (mockAnalytics as Record<string, jest.Mock>)[key] }),
 }));
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: require('../../theme/theme').buildInterfaceTheme('light', 'light', require('../../theme/accents').builtInAccents.iceBlue) }) }));
-jest.mock('../../components/ui/ScreenHeader', () => ({ ScreenHeader: ({ title, onBack, rightContent }: Record<string, unknown>) => {
+jest.mock('../../components/ui/ScreenHeader', () => ({ ScreenHeader: ({ title, status, onBack, rightContent }: Record<string, unknown>) => {
   const R = require('react');
-  return R.createElement('View', null, R.createElement('Text', { testID: 'models-title' }, title), R.createElement('Pressable', { testID: 'models-back', onPress: onBack }), rightContent);
+  return R.createElement('View', null, status ?? R.createElement('Text', { testID: 'models-title' }, title), R.createElement('Pressable', { testID: 'models-back', onPress: onBack }), rightContent);
 } }));
+jest.mock('../../components/ui/ConnectionStatusPill', () => ({ ConnectionStatusPill: (props: Record<string, unknown>) => require('react').createElement('ConnectionStatusPill', props) }));
 jest.mock('../../components/ui/Banner', () => ({ Banner: ({ testID, message, onAction }: Record<string, any>) => {
   const R = require('react');
   return R.createElement('View', { testID, onAction }, R.createElement('Text', null, message));
@@ -374,6 +375,11 @@ describe('ModelsScreen', () => {
     const { adapter } = openClawAdapter({ getCatalog });
     const view = render(<ModelsScreen adapter={adapter} agent={agent} online={false} navigation={navigation} />);
     await waitFor(() => expect(view.getByTestId('agent-models-load-error')).toBeTruthy());
+    // Offline yields the title slot to the status capsule; nothing is inserted above the page.
+    expect(view.getByTestId('agent-models-offline').props.status).toBe('offline');
+    expect(view.queryByText('Offline · reconnecting')).toBeNull();
+    view.rerender(<ModelsScreen adapter={adapter} agent={agent} online={false} reconnecting navigation={navigation} />);
+    expect(view.UNSAFE_getByType('ConnectionStatusPill' as never).props.status).toBe('reconnecting');
     await act(async () => { view.getByTestId('agent-models-load-error').props.onAction(); });
     await waitFor(() => expect(view.getByTestId('agent-model-row-openai:mini')).toBeTruthy());
     expect(view.getByTestId('agent-model-enabled-openai:mini').props.disabled).toBe(true);

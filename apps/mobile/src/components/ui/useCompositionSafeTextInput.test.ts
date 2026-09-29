@@ -62,10 +62,12 @@ describe('useCompositionSafeTextInput', () => {
     });
     rerender({ value: 'pin' });
     rerender({ value: '拼音' });
-    expect(setNativeProps).toHaveBeenCalledWith({ text: '拼音' });
+    expect(result.current.valueProps).toEqual({ defaultValue: '拼音' });
 
     rerender({ value: '' });
-    expect(clear).toHaveBeenCalledTimes(1);
+    expect(result.current.valueProps).toEqual({ defaultValue: '' });
+    expect(clear).not.toHaveBeenCalled();
+    expect(setNativeProps).not.toHaveBeenCalled();
   });
 
   it('remains controlled on Android', () => {

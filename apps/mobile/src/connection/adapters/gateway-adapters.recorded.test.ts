@@ -176,6 +176,31 @@ function packet(label: string): any {
 }
 
 describe('OpenClawAdapter recorded v1 boundary', () => {
+  it.each([undefined, 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const)(
+    'preserves the distinction between inherited and explicit thinking (%s)', async thinkingLevel => {
+      const fake = new RecordedGateway();
+      const adapter = new OpenClawAdapter(connection('openclaw'), { gateway: gateway(fake), historyCache: null });
+      await adapter.prompt('agent:main:main', { text: 'hello', idempotencyKey: 'thinking-test', thinkingLevel });
+      const params = fake.requests.at(-1)!.params;
+      expect(params).toEqual({
+        sessionKey: 'agent:main:main', message: 'hello', deliver: false, idempotencyKey: 'thinking-test',
+        ...(thinkingLevel !== undefined ? { thinking: thinkingLevel } : {}),
+      });
+      expect(Object.prototype.hasOwnProperty.call(params, 'thinking')).toBe(thinkingLevel !== undefined);
+    },
+  );
+
+  it.each(['/think high', 'describe this image'])('does not override inherited thinking for %s', async text => {
+    const fake = new RecordedGateway();
+    const adapter = new OpenClawAdapter(connection('openclaw'), { gateway: gateway(fake), historyCache: null });
+    const attachments = text.startsWith('/think') ? undefined : [{ type: 'image' as const, mimeType: 'image/png', content: 'cG5n' }];
+    await adapter.prompt('agent:main:main', { text, idempotencyKey: 'inherited-test', attachments });
+    expect(fake.requests).toEqual([{ method: 'chat.send', params: {
+      sessionKey: 'agent:main:main', message: text, deliver: false, idempotencyKey: 'inherited-test',
+      ...(attachments ? { attachments } : {}),
+    } }]);
+  });
+
   it.each(['main', 'daily'])('scopes the gateway main alias %s to each agent', async (alias) => {
     const fake = new RecordedGateway();
     fake.listAgents = async () => ({
@@ -395,6 +420,7 @@ describe('OpenClawAdapter recorded v1 boundary', () => {
     const recordedChat = openClawFixture.frames.find((frame) => frame.sequence === 20)?.payload as any;
     await expect(adapter.prompt('agent:main:main', {
       text: recordedChat.params.message,
+      thinkingLevel: recordedChat.params.thinking,
       idempotencyKey: recordedChat.params.idempotencyKey,
     })).resolves.toEqual({ runId: 'compat-run-1' });
     expect(fake.requests.at(-1)).toEqual({

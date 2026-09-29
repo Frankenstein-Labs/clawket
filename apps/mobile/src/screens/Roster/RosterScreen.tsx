@@ -662,6 +662,10 @@ export function RosterScreen({
   const roster = useRoster();
   const [refreshing, setRefreshing] = useState(false);
   const reconnectInFlight = useRef(false);
+  // A retry pressed on the unavailable card keeps that card, and every row under it, in place with a
+  // spinner on its button until the attempt answers: removing it at once pulled the list up and pushed
+  // it back down when the retry failed (owner rule 2026-09-29).
+  const [heldFailure, setHeldFailure] = useState<Readonly<{ connectionId: string; failure: ConnectionUnavailableProps }> | null>(null);
   const [addVisible, setAddVisible] = useState(false);
   const afterAddCloseRef = useRef<(() => void) | undefined>(undefined);
   const [actionRow, setActionRow] = useState<RosterDisplayRow | null>(null);
@@ -726,6 +730,24 @@ export function RosterScreen({
       reconnectInFlight.current = false;
     }
   }, [connections.activeConnectionId]);
+
+  const pausedActive = activeConnection ? connections.pausedConnectionIds?.includes(activeConnection.id) === true : false;
+  const connectionFailure: ConnectionUnavailableProps | undefined = !connections.recovering && !connections.switching && activeConnection
+    && (offline || connectionError) ? {
+      name: activeConnection.label,
+      lastReadyAt: connections.connectionDetails[activeConnection.id]?.lastReadyAt,
+      message: pausedActive ? t('Connection paused', { ns: 'config' }) : undefined,
+      actionLabel: pausedActive ? t('Resume connection', { ns: 'config' }) : undefined,
+      onRetry: () => {
+        const connectionId = activeConnection.id;
+        if (reconnectInFlight.current) return;
+        setHeldFailure({ connectionId, failure: connectionFailure! });
+        void reconnect().finally(() => setHeldFailure((held) => (held?.connectionId === connectionId ? null : held)));
+      },
+      onManage: onManageActiveConnection ? () => onManageActiveConnection(activeConnection.id) : undefined,
+    } : undefined;
+  const heldForActive = heldFailure && heldFailure.connectionId === connections.activeConnectionId ? heldFailure.failure : undefined;
+  const shownFailure = connectionFailure ?? heldForActive;
 
   const addActions = useMemo(
     () => assembleRosterAddActions({ canCreateAgent: canCreateAgent && Boolean(onCreateAgent) }),
@@ -832,17 +854,7 @@ export function RosterScreen({
       <RosterView
         selectedThread={presentation === 'sidebar' ? selectedThread : undefined}
         connecting={connections.activeState === 'connecting' || connections.activeState === 'handshaking'}
-        connectionFailure={!connections.recovering && !connections.switching && activeConnection
-          && (offline || connectionError) ? {
-            name: activeConnection.label,
-            lastReadyAt: connections.connectionDetails[activeConnection.id]?.lastReadyAt,
-            message: connections.pausedConnectionIds?.includes(activeConnection.id)
-              ? t('Connection paused', { ns: 'config' }) : undefined,
-            actionLabel: connections.pausedConnectionIds?.includes(activeConnection.id)
-              ? t('Resume connection', { ns: 'config' }) : undefined,
-            onRetry: reconnect,
-            onManage: onManageActiveConnection ? () => onManageActiveConnection(activeConnection.id) : undefined,
-          } : undefined}
+        connectionFailure={shownFailure ? { ...shownFailure, retrying: heldForActive !== undefined } : undefined}
         state={state}
         rows={rows}
         activeConnectionId={connections.activeConnectionId}

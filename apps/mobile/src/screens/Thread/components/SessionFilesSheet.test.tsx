@@ -67,3 +67,18 @@ test('keeps Android grants readable after the chooser returns', async () => {
   await waitFor(() => expect(onClose).toHaveBeenCalled()); act(() => mockAfterClose?.());
   await waitFor(() => expect(Sharing.shareAsync).toHaveBeenCalledTimes(1)); expect(mockDelete).not.toHaveBeenCalled();
 });
+
+test('reopening keeps the last list on screen while it refreshes quietly', async () => {
+  const { adapter } = setup(); const onClose = jest.fn();
+  const list = adapter.sessionFiles!.list as jest.Mock;
+  const view = render(<SessionFilesSheet visible adapter={adapter} sessionKey="one" online onClose={onClose} />);
+  await waitFor(() => expect(view.getByTestId('session-file-0')).toBeTruthy());
+  let finish!: (value: unknown) => void;
+  list.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  view.rerender(<SessionFilesSheet visible={false} adapter={adapter} sessionKey="one" online onClose={onClose} />);
+  view.rerender(<SessionFilesSheet visible adapter={adapter} sessionKey="one" online onClose={onClose} />);
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(view.getByTestId('session-file-0')).toBeTruthy();
+  await act(async () => finish({ files: [file, { ...file, id: 'second', name: 'notes.pdf' }] }));
+  expect(view.getByTestId('session-file-1')).toBeTruthy();
+});

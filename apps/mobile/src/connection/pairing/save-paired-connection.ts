@@ -1,3 +1,4 @@
+import { connectionAgentDefaultName } from '../registry/connection-name';
 import {
   buildGatewayDefaultName,
   resolveGatewayBackendKind,
@@ -45,14 +46,17 @@ export function buildPairedConnectionRecord(input: Readonly<{
         : {}),
     }
     : undefined;
-  const label = input.payload.relay?.displayName?.trim()
+  const defaultName = connectionAgentDefaultName(backendKind);
+  const pairedName = input.payload.relay?.displayName?.trim()
     || input.payload.hermes?.displayName?.trim()
+    || defaultName
     || buildGatewayDefaultName({
       backendKind,
       transportKind,
       url,
       index: input.connectionCount + 1,
     });
+  const label = defaultName && pairedName === `${defaultName} · Computer` ? defaultName : pairedName;
   const token = input.payload.token?.trim();
   const password = input.payload.password?.trim();
   const auth = token || password

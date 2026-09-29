@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import type {
   AgentDescriptor,
@@ -13,7 +14,8 @@ import type {
 
 import { useConnections, useRoster, type RosterConnectionGroup } from '../../connection';
 import { analyticsEvents } from '../../services/analytics/events';
-import { FontSize, StatusSize } from '../../theme/tokens';
+import { FontSize, Space, StatusSize } from '../../theme/tokens';
+import { CONNECTION_STATUS_FLOATING_CLEARANCE } from '../../components/ui/ConnectionStatusPill';
 import {
   SessionPanel,
   SessionPanelView,
@@ -155,6 +157,8 @@ jest.mock('../../components/ui/FloatingButton', () => {
   const { Pressable } = require('react-native');
   return {
     FloatingButton: (props: Record<string, unknown>) => ReactRuntime.createElement(Pressable, props),
+    createFloatingSurfaceStyle: () => ({ backgroundColor: 'floating' }),
+    FLOATING_BUTTON_STROKE_WIDTH: 1.75,
   };
 });
 
@@ -708,6 +712,12 @@ describe('SessionPanelView', () => {
     expect(view.getByTestId('session-panel-reconnecting')).toBeTruthy();
     expect(view.queryByTestId('session-panel-offline')).toBeNull();
     expect(view.getByText('Main session')).toBeTruthy();
+    // Connection state floats over the bottom of the list instead of leading it, and the last row can
+    // still scroll above it.
+    const list = view.getByTestId('session-panel-scroll');
+    expect(list.findAll((node) => node.props.testID === 'session-panel-reconnecting')).toHaveLength(0);
+    expect(flattenStyle(view.getByTestId('session-panel-reconnecting').props.style)).toMatchObject({ position: 'absolute', bottom: Space.sm });
+    expect(flattenStyle(list.props.contentContainerStyle).paddingBottom).toBe(Space.xxl + CONNECTION_STATUS_FLOATING_CLEARANCE);
 
     view.rerender(<SessionPanelView {...props({ state: 'permission' })} />);
     expect(view.getByTestId('session-panel-permission')).toBeTruthy();
@@ -823,5 +833,183 @@ describe('project refresh lifecycle', () => {
     connect(jest.fn(() => new Promise(() => {})));
     tree.rerender(<SessionPanel {...props} visible />);
     expect(tree.queryByTestId('session-panel-create')).toBeNull();
+  });
+});
+
+it('loads archives only on request and restores without opening a writable chat', async () => {
+  const archived = { ...rowById('agent:main:main'), archived: true, sessionId: 'native-id', allowedActions: { archive: true, rename: false, reset: false, delete: false, pin: false }, hasActiveRun: false };
+  const onLoadArchived = jest.fn().mockResolvedValue([archived]);
+  const onSessionAction = jest.fn().mockResolvedValue(undefined);
+  const onSelectSession = jest.fn();
+  const view = render(<SessionPanelView {...props({ capabilities: { ...capabilities, sessionArchive: true }, onLoadArchived, onSessionAction, onSelectSession })} />);
+  expect(onLoadArchived).not.toHaveBeenCalled();
+  await act(async () => { fireEvent.press(view.getByTestId('session-panel-archived')); });
+  fireEvent.press(view.getByTestId(`session-panel-row-${archived.id}`));
+  expect(onSelectSession).not.toHaveBeenCalled();
+  expect(view.getByText('Restore conversation')).toBeTruthy();
+  expect(view.queryByTestId('session-panel-action-delete')).toBeNull();
+  await act(async () => { chooseAfterDismiss(view, 'archive'); });
+  expect(onSessionAction).toHaveBeenCalledWith(archived, 'archive');
+  expect(view.queryByTestId(`session-panel-row-${archived.id}`)).toBeNull();
+});
+
+it('shows archive failure and keeps the original conversation available', async () => {
+  const original = { ...rowById('agent:main:main'), sessionId: 'native-id', allowedActions: { archive: true, rename: false, reset: false, delete: false, pin: false }, hasActiveRun: false };
+  const onSessionAction = jest.fn().mockRejectedValue(new Error('Owner rejected archive'));
+  const view = render(<SessionPanelView {...props({ rows: [original], capabilities: { ...capabilities, sessionArchive: true }, onSessionAction })} />);
+  fireEvent(view.getByTestId(`session-panel-row-${original.id}`), 'longPress');
+  await act(async () => { chooseAfterDismiss(view, 'archive'); });
+  expect(view.getByText('Save Failed')).toBeTruthy();
+  expect(view.getByTestId(`session-panel-row-${original.id}`)).toBeTruthy();
+});
+
+it.each(['resolve', 'reject'] as const)('ignores an old connection restore %s after opening another archive scope', async outcome => {
+  const archived = { ...rowById('agent:main:main'), archived: true, sessionId: 'native-id', allowedActions: { archive: true, rename: false, reset: false, delete: false, pin: false }, hasActiveRun: false };
+  let resolve!: () => void;
+  let reject!: (reason: Error) => void;
+  const onSessionAction = jest.fn(() => new Promise<void>((done, fail) => { resolve = done; reject = fail; }));
+  const shared = { capabilities: { ...capabilities, sessionArchive: true }, onLoadArchived: jest.fn().mockResolvedValue([archived]), onSessionAction };
+  const view = render(<SessionPanelView {...props({ ...shared, archiveScope: 'first' })} />);
+  await act(async () => { fireEvent.press(view.getByTestId('session-panel-archived')); });
+  fireEvent.press(view.getByTestId(`session-panel-row-${archived.id}`));
+  act(() => { chooseAfterDismiss(view, 'archive'); });
+  view.rerender(<SessionPanelView {...props({ ...shared, archiveScope: 'second' })} />);
+  await act(async () => { fireEvent.press(view.getByTestId('session-panel-archived')); });
+  await act(async () => { if (outcome === 'resolve') resolve(); else reject(new Error('Old restore failed')); });
+  expect(view.queryByText('Save Failed')).toBeNull();
+  expect(view.getByTestId(`session-panel-row-${archived.id}`)).toBeTruthy();
+});
+
+describe('project and archive scope chips', () => {
+  const work = { id: 'work', name: 'clawket', path: '/work/clawket', available: true };
+  const lab = { id: 'lab', name: 'workspace-ui-operator', path: '/lab/ui', available: true };
+  const direct = { ...rowById('agent:main:direct:Lucy'), project: work };
+  const design = { ...rowById('agent:main:channel:Design'), project: work };
+  const operations = { ...rowById('agent:main:channel:Operations'), project: lab };
+  const archived = {
+    ...rowById('agent:main:cron:Daily report'),
+    project: lab,
+    archived: true,
+    sessionId: 'native-id',
+    hasActiveRun: false,
+    allowedActions: { archive: true, rename: false, reset: false, delete: false, pin: false },
+  };
+  function scoped(patch: Partial<SessionPanelViewProps> = {}): SessionPanelViewProps {
+    return props({
+      rows: [direct, design, operations],
+      projects: [work, lab],
+      capabilities: { ...capabilities, sessionArchive: true },
+      onLoadArchived: jest.fn().mockResolvedValue([archived]),
+      ...patch,
+    });
+  }
+  function selected(view: ReturnType<typeof render>, testID: string): unknown {
+    return view.getByTestId(testID).props.accessibilityState?.selected;
+  }
+
+  beforeEach(() => {
+    mockTheme = { scheme: 'light', colors: lightColors };
+  });
+
+  it('keeps the project filter and the archive switch in one quiet chip row', () => {
+    const view = render(<SessionPanelView {...scoped()} />);
+    const scope = view.getByTestId('session-panel-scope');
+    expect(within(scope).getByText('All projects')).toBeTruthy();
+    expect(within(scope).getByText('Archived')).toBeTruthy();
+    expect(view.getByTestId('session-panel-archived').props.accessibilityLabel).toBe('Archived conversations');
+    expect(selected(view, 'codex-project-filter')).toBe(false);
+    expect(selected(view, 'session-panel-archived')).toBe(false);
+    expect(flattenStyle(view.getByTestId('codex-project-filter').props.style))
+      .toEqual(expect.objectContaining({ backgroundColor: lightColors.surface }));
+    // Projects replace the channel chips; the old stacked text links are gone.
+    expect(view.queryByTestId('session-panel-chips')).toBeNull();
+    expect(view.queryByText('Back to conversations')).toBeNull();
+
+    // A project backend without archive support keeps only the project chip.
+    view.rerender(<SessionPanelView {...scoped({ capabilities, onLoadArchived: undefined })} />);
+    expect(within(view.getByTestId('session-panel-scope')).getByTestId('codex-project-filter')).toBeTruthy();
+    expect(view.queryByTestId('session-panel-archived')).toBeNull();
+  });
+
+  it('marks the chosen project in ink and counts conversations in the picker', () => {
+    const view = render(<SessionPanelView {...scoped()} />);
+    fireEvent.press(view.getByTestId('codex-project-filter'));
+    const picker = view.getByTestId('codex-project-picker');
+    // The checked row shows no count; the others say how many conversations the choice would list.
+    expect(within(picker).getByTestId('codex-project-all')).toBeTruthy();
+    expect(within(picker).queryByText('3')).toBeNull();
+    expect(within(picker).getByText('2')).toBeTruthy();
+    expect(within(picker).getByText('1')).toBeTruthy();
+
+    fireEvent.press(within(picker).getByTestId('codex-project-work'));
+    expect(view.queryByTestId('codex-project-picker')).toBeNull();
+    const chip = view.getByTestId('codex-project-filter');
+    expect(selected(view, 'codex-project-filter')).toBe(true);
+    expect(within(chip).getByText('clawket')).toBeTruthy();
+    expect(flattenStyle(chip.props.style)).toEqual(expect.objectContaining({ backgroundColor: lightColors.ink }));
+    expect(view.getByTestId(`session-panel-row-${direct.id}`)).toBeTruthy();
+    expect(view.queryByTestId(`session-panel-row-${operations.id}`)).toBeNull();
+    expect(view.queryByTestId(`session-panel-row-${direct.id}-project`)).toBeNull();
+  });
+
+  it('selects the archive at once and a second press returns to the live list', async () => {
+    let finish!: (value: ReadonlyArray<SessionPanelRow>) => void;
+    const onLoadArchived = jest.fn(() => new Promise<ReadonlyArray<SessionPanelRow>>((resolve) => { finish = resolve; }));
+    const view = render(<SessionPanelView {...scoped({ onLoadArchived, onCreateSession: jest.fn() })} />);
+    expect(view.getByTestId('session-panel-create')).toBeTruthy();
+
+    fireEvent.press(view.getByTestId('session-panel-archived'));
+    expect(selected(view, 'session-panel-archived')).toBe(true);
+    expect(view.getByTestId('session-panel-loading')).toBeTruthy();
+    expect(view.queryByTestId('session-panel-create')).toBeNull();
+
+    fireEvent.press(view.getByTestId('session-panel-archived'));
+    expect(selected(view, 'session-panel-archived')).toBe(false);
+    expect(view.getByTestId(`session-panel-row-${direct.id}`)).toBeTruthy();
+    expect(view.getByTestId('session-panel-create')).toBeTruthy();
+    // The cancelled load cannot switch the list afterwards.
+    await act(async () => finish([archived]));
+    expect(selected(view, 'session-panel-archived')).toBe(false);
+    expect(view.queryByTestId(`session-panel-row-${archived.id}`)).toBeNull();
+  });
+
+  it('explains a failed archive load and retries from the notice', async () => {
+    const onLoadArchived = jest.fn()
+      .mockRejectedValueOnce(new Error('Bridge unavailable'))
+      .mockResolvedValueOnce([archived]);
+    const view = render(<SessionPanelView {...scoped({ onLoadArchived })} />);
+    await act(async () => { fireEvent.press(view.getByTestId('session-panel-archived')); });
+    expect(view.getByText('Could not load archived conversations')).toBeTruthy();
+    expect(view.queryByText('Save Failed')).toBeNull();
+    expect(selected(view, 'session-panel-archived')).toBe(false);
+    expect(view.getByTestId(`session-panel-row-${direct.id}`)).toBeTruthy();
+
+    await act(async () => { fireEvent.press(view.getByTestId('session-panel-archive-error-action')); });
+    expect(onLoadArchived).toHaveBeenCalledTimes(2);
+    expect(view.queryByTestId('session-panel-archive-error')).toBeNull();
+    expect(selected(view, 'session-panel-archived')).toBe(true);
+    expect(view.getByTestId(`session-panel-row-${archived.id}`)).toBeTruthy();
+  });
+
+  it('keeps the chosen project while browsing the archive', async () => {
+    const view = render(<SessionPanelView {...scoped()} />);
+    fireEvent.press(view.getByTestId('codex-project-filter'));
+    fireEvent.press(view.getByTestId('codex-project-work'));
+    await act(async () => { fireEvent.press(view.getByTestId('session-panel-archived')); });
+    expect(view.getByText('No archived conversations')).toBeTruthy();
+
+    fireEvent.press(view.getByTestId('codex-project-filter'));
+    fireEvent.press(view.getByTestId('codex-project-lab'));
+    expect(view.getByTestId(`session-panel-row-${archived.id}`)).toBeTruthy();
+    expect(selected(view, 'session-panel-archived')).toBe(true);
+  });
+
+  it('appends the archive switch to channel chips on a backend without projects', () => {
+    const view = render(<SessionPanelView {...props({
+      capabilities: { ...capabilities, sessionArchive: true },
+      onLoadArchived: jest.fn().mockResolvedValue([]),
+    })} />);
+    expect(within(view.getByTestId('session-panel-chips')).getByTestId('session-panel-archived')).toBeTruthy();
+    expect(view.queryByTestId('session-panel-scope')).toBeNull();
   });
 });

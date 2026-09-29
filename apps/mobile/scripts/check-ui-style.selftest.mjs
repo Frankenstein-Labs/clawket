@@ -18,6 +18,7 @@ function run({
   baseline = {},
   source = 'export const styles = {};\n',
   screenSource = 'export const screen = {};\n',
+  screenFile = 'SelfTestScreen.tsx',
   componentFile = 'SelfTest.tsx',
   appSource = 'export default function App() { return null; }\n',
   dependencies = {},
@@ -49,7 +50,9 @@ function run({
       writeFileSync(componentPath, source);
     }
     if (!omitScreensDirectory) {
-      writeFileSync(path.join(sandbox, 'src', 'screens', 'SelfTestScreen.tsx'), screenSource);
+      const screenPath = path.join(sandbox, 'src', 'screens', screenFile);
+      mkdirSync(path.dirname(screenPath), { recursive: true });
+      writeFileSync(screenPath, screenSource);
     }
     writeFileSync(path.join(sandbox, 'App.tsx'), appSource);
     writeFileSync(path.join(sandbox, 'package.json'), JSON.stringify({ dependencies }));
@@ -141,6 +144,46 @@ expectFailure('the removed legacy theme type cannot return', {
 
 expectFailure('native keyboard avoider is ratcheted', {
   source: "import { KeyboardAvoidingView } from 'react-native'; export const x = KeyboardAvoidingView;\n",
+}, 'native-keyboard-avoider');
+
+const chatKeyboardFallback = `
+import { KeyboardAvoidingView as NativeKeyboardAvoidingView, Platform } from 'react-native';
+import { AndroidChatKeyboardAvoider } from '../../components/chat/AndroidChatKeyboardAvoider';
+export function ThreadView() {
+  const KeyboardAvoidingView = Platform.OS === 'ios' ? NativeKeyboardAvoidingView : AndroidChatKeyboardAvoider;
+  return <KeyboardAvoidingView behavior="padding" />;
+}`;
+expectPass('only the reviewed platform chat padding exception is permitted', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback,
+});
+expectFailure('chat keyboard padding must retain the reviewed iOS branch', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback.replace("=== 'ios'", "=== 'android'"),
+}, 'native-keyboard-avoider');
+expectFailure('chat keyboard padding must retain the scoped Android component', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback.replace(': AndroidChatKeyboardAvoider;', ': NativeKeyboardAvoidingView;'),
+}, 'native-keyboard-avoider');
+expectFailure('chat keyboard padding cannot be reassigned', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback.replace('const KeyboardAvoidingView', 'let KeyboardAvoidingView'),
+}, 'native-keyboard-avoider');
+expectFailure('chat keyboard padding requires the reviewed padding behavior', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback.replace('behavior="padding"', 'behavior="height"'),
+}, 'native-keyboard-avoider');
+expectFailure('chat keyboard padding cannot also import a controller avoider', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback
+    + "\nimport { KeyboardAvoidingView as ControllerKeyboardAvoidingView } from 'react-native-keyboard-controller';\n",
+}, 'native-keyboard-avoider');
+expectFailure('the native keyboard exception does not apply to other screens', {
+  source: chatKeyboardFallback,
+}, 'native-keyboard-avoider');
+expectFailure('a valid chat fallback cannot authorize a second native alias', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback
+    + "\nimport { KeyboardAvoidingView as UnsafeAvoider } from 'react-native';\n",
+}, 'native-keyboard-avoider');
+expectFailure('a valid chat fallback cannot authorize direct native rendering', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback.replace('<KeyboardAvoidingView behavior="padding" />', '<NativeKeyboardAvoidingView behavior="padding" />'),
+}, 'native-keyboard-avoider');
+expectFailure('the stable choice must belong to the actual chat component', {
+  screenFile: 'Thread/ThreadView.tsx', screenSource: chatKeyboardFallback.replace('function ThreadView()', 'function UnusedExample()'),
 }, 'native-keyboard-avoider');
 
 expectFailure('native bottom-tab dependency is forbidden', {

@@ -5,6 +5,8 @@ import { buildTheme } from '../../theme/theme';
 import { ControlSize, FontSize, IconSize, Radius, Shadow, Space } from '../../theme/tokens';
 import {
   ConnectionStatusPill,
+  CONNECTION_STATUS_FLOATING_CLEARANCE,
+  CONNECTION_STATUS_PILL_HEIGHT,
   CONNECTION_STATUS_PILL_HIT_SLOP,
 } from './ConnectionStatusPill';
 
@@ -217,12 +219,26 @@ describe.each(['light', 'dark'] as const)('%s ConnectionStatusPill', (scheme) =>
     expect(view.getByTestId('pill-action').props.accessibilityLabel).toBe('Offline · reconnecting, Reconnect');
   });
 
-  it('reads as text when a message has no action to take', () => {
+  it('reads as text when a message has no action to take, and lets touches through to the content', () => {
     const view = render(
       <ConnectionStatusPill testID="pill" placement="inline" status="offline" message="Offline · showing cached results" />,
     );
     expect(view.queryByTestId('pill-action')).toBeNull();
     expect(view.getByText('Offline · showing cached results')).toBeTruthy();
     expect(view.getByLabelText('Offline · showing cached results').props.accessibilityRole).toBe('text');
+    expect(view.getByLabelText('Offline · showing cached results').props.pointerEvents).toBe('none');
+  });
+
+  it('rides the bottom edge of a top-down list when asked, keeping an action pressable', () => {
+    const onAction = jest.fn();
+    const view = render(
+      <ConnectionStatusPill testID="pill" edge="bottom" status="offline" message="Offline · reconnecting" actionLabel="Reconnect" onAction={onAction} />,
+    );
+    const dock = flattenStyle(view.getByTestId('pill').props.style);
+    expect(dock).toMatchObject({ position: 'absolute', bottom: Space.sm, left: 0, right: 0, alignItems: 'center' });
+    expect(dock).not.toHaveProperty('top');
+    expect(CONNECTION_STATUS_FLOATING_CLEARANCE).toBe(CONNECTION_STATUS_PILL_HEIGHT + Space.sm);
+    fireEvent.press(view.getByTestId('pill-action'));
+    expect(onAction).toHaveBeenCalledTimes(1);
   });
 });

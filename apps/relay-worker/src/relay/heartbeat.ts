@@ -4,6 +4,7 @@ import {
   CONNECT_START_BUFFER_TTL_MS,
   GATEWAY_PING_TIMEOUT_DEFAULT_MS,
   SOCKET_CLOSE_CODES,
+  type SocketAttachment,
 } from './types';
 import {
   isAwaitingChallengeExpired,
@@ -15,6 +16,14 @@ import { logRuntimeTelemetry } from './telemetry';
 import type { RelayRuntime } from './runtime';
 import { parsePositiveInt } from './utils';
 import { sendControlToGateway } from './control';
+import { transferAwareHandshakeTimeout, transferAwarePongTimeout } from './transfer';
+
+function gatewayPingTimeout(runtime: RelayRuntime): number {
+  const configured = parsePositiveInt(runtime.env.GATEWAY_PING_TIMEOUT_MS,
+    runtime.policy.gatewayPingTimeoutMs ?? GATEWAY_PING_TIMEOUT_DEFAULT_MS);
+  return transferAwarePongTimeout(runtime,
+    runtime.gatewaySocket?.deserializeAttachment() as SocketAttachment | null, configured);
+}
 
 export async function ensureHeartbeat(runtime: RelayRuntime, options: { resetDeadline?: boolean } = {}): Promise<void> {
   const interval = parsePositiveInt(runtime.env.HEARTBEAT_INTERVAL_MS, runtime.policy.heartbeatIntervalMs);
@@ -25,10 +34,7 @@ export async function ensureHeartbeat(runtime: RelayRuntime, options: { resetDea
   const now = Date.now();
   let nextAlarmAt = now + interval;
   if (runtime.policy.watchdog !== 'none' && runtime.pendingGatewayPingAt > 0) {
-    const timeoutMs = parsePositiveInt(
-      runtime.env.GATEWAY_PING_TIMEOUT_MS,
-      runtime.policy.gatewayPingTimeoutMs ?? GATEWAY_PING_TIMEOUT_DEFAULT_MS,
-    );
+    const timeoutMs = gatewayPingTimeout(runtime);
     nextAlarmAt = Math.min(nextAlarmAt, runtime.pendingGatewayPingAt + timeoutMs);
   }
   // Constructor rehydration may run for every frame. Keep the existing earlier
@@ -66,10 +72,7 @@ export function reconcileGatewayLiveness(runtime: RelayRuntime, now: number): vo
     return;
   }
 
-  const timeoutMs = parsePositiveInt(
-    runtime.env.GATEWAY_PING_TIMEOUT_MS,
-    runtime.policy.gatewayPingTimeoutMs ?? GATEWAY_PING_TIMEOUT_DEFAULT_MS,
-  );
+  const timeoutMs = gatewayPingTimeout(runtime);
   if (runtime.pendingGatewayPingAt > 0) {
     if (runtime.gatewayLastActivityAt >= runtime.pendingGatewayPingAt) {
       runtime.pendingGatewayPingAt = 0;
@@ -120,8 +123,10 @@ export function prunePendingConnectStarts(runtime: RelayRuntime, now: number): v
 }
 
 export function pruneExpiredAwaitingChallenges(runtime: RelayRuntime, now: number): void {
-  const ttlMs = runtime.awaitingChallengeTtlMs();
+  const configuredTtlMs = runtime.awaitingChallengeTtlMs();
   for (const [clientId, entry] of runtime.awaitingChallenge.entries()) {
+    const attachment = runtime.clients.get(clientId)?.deserializeAttachment() as SocketAttachment | null;
+    const ttlMs = transferAwareHandshakeTimeout(attachment, configuredTtlMs);
     if (!isAwaitingChallengeExpired(entry.queuedAt, now, ttlMs)) continue;
     runtime.awaitingChallenge.delete(clientId);
     runtime.connectStartAtByClientId.delete(clientId);
@@ -139,22 +144,19 @@ export function pruneExpiredAwaitingChallenges(runtime: RelayRuntime, now: numbe
 
 export function pruneStaleHandshakeClients(runtime: RelayRuntime, now: number): void {
   let changed = false;
-  const ttlMs = runtime.awaitingChallengeTtlMs();
+  const configuredTtlMs = runtime.awaitingChallengeTtlMs();
   const pongTimeoutMs = runtime.clientPongTimeoutMs();
   for (const [clientId, client] of runtime.clients.entries()) {
     if (client.readyState !== WebSocket.OPEN) {
       changed = dropClientState(runtime, clientId, 'non_open_ready_state') || changed;
       continue;
     }
-    const attachment = client.deserializeAttachment() as {
-      connectedAt?: number;
-      capabilities?: string[];
-      lastPongAt?: number;
-      challengeDeliveredAt?: number;
-    } | null;
+    const attachment = client.deserializeAttachment() as SocketAttachment | null;
+    const ttlMs = transferAwareHandshakeTimeout(attachment, configuredTtlMs);
     const supportsClientPong = attachment?.capabilities?.includes(CLIENT_PONG_CAPABILITY) === true;
     const lastPongAt = attachment?.lastPongAt ?? attachment?.connectedAt ?? 0;
-    if (supportsClientPong && lastPongAt > 0 && isClientIdleExpired(lastPongAt, now, pongTimeoutMs)) {
+    const effectivePongTimeoutMs = transferAwarePongTimeout(runtime, attachment, pongTimeoutMs);
+    if (supportsClientPong && lastPongAt > 0 && isClientIdleExpired(lastPongAt, now, effectivePongTimeoutMs)) {
       try {
         client.close(SOCKET_CLOSE_CODES.IDLE_OR_STALE_TIMEOUT, 'client_pong_timeout');
       } catch {

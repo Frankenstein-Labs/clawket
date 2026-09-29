@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type ForwardedRef } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ForwardedRef } from 'react';
 import { Platform, type TextInput, type TextInputProps } from 'react-native';
 
 type Params = {
@@ -26,48 +26,55 @@ export function useCompositionSafeTextInput({
   value,
   onChangeText,
 }: Params): CompositionSafeTextInputBindings {
-  const inputRef = useRef<TextInput>(null);
-  const initialValueRef = useRef(value);
   const nativeValueRef = useRef(value);
-  const lastPropValueRef = useRef(value);
+  const nativeEditRevisionRef = useRef(0);
+  const [sync, setSync] = useState({
+    propValue: value,
+    defaultValue: value,
+    pending: false,
+    nativeEditRevision: 0,
+  });
+
+  // Track prop transitions in React state, so an abandoned render cannot consume
+  // a draft restore. Native typing echoes leave the React text baseline alone.
+  if (Platform.OS === 'ios' && value !== sync.propValue) {
+    const external = value !== nativeValueRef.current;
+    setSync({
+      propValue: value,
+      defaultValue: external ? value : sync.defaultValue,
+      pending: external,
+      nativeEditRevision: nativeEditRevisionRef.current,
+    });
+  }
 
   const handleInputRef = useCallback((input: TextInput | null | undefined) => {
-    const nextInput = input ?? null;
-    inputRef.current = nextInput;
-    assignRef(forwardedRef, nextInput);
+    assignRef(forwardedRef, input ?? null);
   }, [forwardedRef]);
 
   const handleChangeText = useCallback((nextValue: string) => {
+    nativeEditRevisionRef.current += 1;
     nativeValueRef.current = nextValue;
     onChangeText?.(nextValue);
   }, [onChangeText]);
 
-  // Keep iOS native-owned while typing so a controlled JS echo cannot replace
-  // marked/composing text. Genuine external changes still update the input.
-  useEffect(() => {
-    const propValueChanged = value !== lastPropValueRef.current;
-    lastPropValueRef.current = value;
-    if (
-      Platform.OS !== 'ios'
-      || !propValueChanged
-      || value === nativeValueRef.current
-    ) {
-      return;
+  // The child RN TextInput layout effect first synchronizes one external value
+  // with its own native event count. Then release value, retaining the updated
+  // defaultValue for later Fabric commits/late host attachment. setNativeProps
+  // alone leaves that React text baseline stale, while defaultValue alone cannot
+  // restore A after native editing B when the previous React baseline is also A.
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'ios' || !sync.pending) return;
+    if (nativeEditRevisionRef.current === sync.nativeEditRevision) {
+      nativeValueRef.current = sync.defaultValue;
     }
-
-    nativeValueRef.current = value;
-    if (value.length === 0) {
-      inputRef.current?.clear();
-      return;
-    }
-    inputRef.current?.setNativeProps({ text: value });
-  }, [value]);
+    setSync(current => current === sync ? { ...current, pending: false } : current);
+  }, [sync]);
 
   return {
     handleChangeText,
     handleInputRef,
     valueProps: Platform.OS === 'ios'
-      ? { defaultValue: initialValueRef.current }
+      ? { defaultValue: sync.defaultValue, ...(sync.pending ? { value: sync.defaultValue } : {}) }
       : { value },
   };
 }

@@ -7,13 +7,13 @@ import {
 } from './foregroundRefreshPolicy';
 
 describe('shouldReconnectBeforeForegroundRefresh', () => {
-  it('does not force reconnect while a run is still active', () => {
+  it('checks transport freshness while a run is active without assuming it must restart', () => {
     expect(shouldReconnectBeforeForegroundRefresh({
       platformOs: 'android',
       awayMs: FOREGROUND_RECONNECT_AWAY_MS + 1,
       hasRunningChat: true,
       connectionState: 'ready',
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it('does not force reconnect after a short background gap', () => {

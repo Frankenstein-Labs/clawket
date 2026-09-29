@@ -30,6 +30,7 @@ export type PostHogDiagnostics = {
 };
 
 export type PostHogDiagnosticEvent = {
+  recordedAt: string;
   kind: 'event' | 'screen';
   name: string;
   properties: Readonly<Record<string, boolean | number | string>>;
@@ -43,7 +44,7 @@ export function recordPostHogDiagnosticEvent(
   name: string,
   properties: Record<string, boolean | number | string>,
 ): void {
-  recentEvents.push({ kind, name, properties: { ...properties } });
+  recentEvents.push({ recordedAt: new Date().toISOString(), kind, name, properties: { ...properties } });
   if (recentEvents.length > MAX_DIAGNOSTIC_EVENTS) {
     recentEvents.splice(0, recentEvents.length - MAX_DIAGNOSTIC_EVENTS);
   }

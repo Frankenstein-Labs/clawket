@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
-import { FontSize } from '../../theme/tokens';
+import { FontSize, Space } from '../../theme/tokens';
+import { CONNECTION_STATUS_FLOATING_CLEARANCE } from '../../components/ui/ConnectionStatusPill';
 import type { SearchResult, SearchSection } from './model';
 import { SearchView, type SearchViewProps } from './SearchView';
 
@@ -63,6 +64,7 @@ jest.mock('react-native', () => {
     Pressable: host('Pressable'),
     ScrollView: host('ScrollView'),
     StyleSheet: {
+      absoluteFill: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
       create: <T,>(styles: T) => styles,
       flatten: (style: unknown) => flattenStyle(style),
       hairlineWidth: 1,
@@ -72,6 +74,12 @@ jest.mock('react-native', () => {
     View: host('View'),
   };
 });
+
+jest.mock('react-native-keyboard-controller', () => ({
+  KeyboardStickyView: ({ children, ...props }: Record<string, unknown> & { children?: React.ReactNode }) => (
+    require('react').createElement('KeyboardStickyView', props, children)
+  ),
+}));
 
 jest.mock('lucide-react-native', () => {
   const ReactRuntime = require('react');
@@ -109,6 +117,8 @@ jest.mock('../../components/ui/FloatingButton', () => ({
     'Pressable',
     { ...props, onPress },
   ),
+  createFloatingSurfaceStyle: () => ({ backgroundColor: 'floating' }),
+  FLOATING_BUTTON_STROKE_WIDTH: 1.75,
 }));
 
 jest.mock('../../components/ui/SearchInput', () => ({
@@ -375,7 +385,20 @@ describe('SearchView', () => {
     expect(view.getByTestId(testID)).toBeTruthy();
   });
 
-  it('shows the recovery window as a quiet capsule ahead of cached results', () => {
+  it('floats connection state over the bottom of the results and above the keyboard, never moving them', () => {
+    const view = render(<SearchView {...props({ state: 'offline', reconnecting: true, sections })} />);
+    const scroll = view.getByTestId('search-scroll');
+    expect(scroll.findAll((node) => node.props.testID === 'search-reconnecting')).toHaveLength(0);
+    expect(flattenStyle(view.getByTestId('search-reconnecting').props.style)).toMatchObject({ position: 'absolute', bottom: 16 + Space.sm });
+    expect(view.UNSAFE_getByType('KeyboardStickyView' as never).props).toMatchObject({ pointerEvents: 'box-none', offset: { closed: 0, opened: 16 } });
+    // The last row can still scroll above the capsule; online the list keeps its usual end.
+    expect(flattenStyle(scroll.props.contentContainerStyle).paddingBottom).toBe(16 + Space.xl + CONNECTION_STATUS_FLOATING_CLEARANCE);
+    view.rerender(<SearchView {...props({ state: 'ready', sections })} />);
+    expect(flattenStyle(view.getByTestId('search-scroll').props.contentContainerStyle).paddingBottom).toBe(16 + Space.xl);
+    expect(view.queryByTestId('search-reconnecting')).toBeNull();
+  });
+
+  it('shows the recovery window as a quiet capsule over cached results', () => {
     const view = render(<SearchView {...props({
       state: 'offline',
       reconnecting: true,

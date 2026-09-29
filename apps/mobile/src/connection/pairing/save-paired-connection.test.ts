@@ -164,3 +164,18 @@ describe('save paired connection', () => {
     });
   });
 });
+
+describe('native device connection names', () => {
+  it.each([['codex', 'Codex'], ['claude-code', 'Claude Code']] as const)('%s defaults to the product name and preserves custom names', (backendKind, name) => {
+    const build = (displayName?: string) => buildPairedConnectionRecord({
+      payload: { backendKind, mode: 'relay', url: 'wss://relay.example/ws',
+        relay: { serverUrl: 'https://registry.example', gatewayId: 'test', clientToken: 'token', displayName } },
+      debugMode: false, connectionCount: 0,
+    }).label;
+    expect(build()).toBe(name);
+    expect(build(`${name} · Computer`)).toBe(name);
+    expect(build('Studio laptop')).toBe('Studio laptop');
+    expect(buildPairedConnectionRecord({ payload: { backendKind, mode: 'local', url: 'ws://localhost/ws' },
+      debugMode: false, connectionCount: 0 }).label).toBe(name);
+  });
+});

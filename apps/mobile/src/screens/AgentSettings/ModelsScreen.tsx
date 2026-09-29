@@ -14,6 +14,7 @@ import type {
 } from '@clawket/agent-protocol';
 import type { RootStackParamList } from '../../navigation/root-stack';
 import { Banner } from '../../components/ui/Banner';
+import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
 import { Button } from '../../components/ui/Button';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { ChevronRight } from '../../components/ui/DirectionalIcon';
@@ -74,6 +75,8 @@ export type ModelsScreenProps = Readonly<{
   adapter: AgentAdapter;
   agent: AgentDescriptor;
   online: boolean;
+  /** The runtime's foreground grace window is open: show quiet reconnecting instead of offline. */
+  reconnecting?: boolean;
   navigation: Pick<NativeStackNavigationProp<RootStackParamList, 'AgentSettingsSection'>, 'goBack' | 'dispatch'>;
   /** Opens the OpenClaw config editor for provider keys and endpoints. */
   onOpenProviderConfig?: () => void;
@@ -92,6 +95,7 @@ export function ModelsScreen({
   adapter,
   agent,
   online,
+  reconnecting = false,
   navigation,
   onOpenProviderConfig,
   isPro = false,
@@ -384,6 +388,9 @@ export function ModelsScreen({
     <View testID="agent-models-screen" style={styles.screen}>
       <ScreenHeader
         title={t('Models', { ns: 'settings' })}
+        // Connection state takes the title slot, never a banner that pushes the page (owner rule 2026-09-16).
+        status={!online && reconnecting ? <ConnectionStatusPill placement="inline" status="reconnecting" message={t('Reconnecting…', { ns: 'common' })} />
+          : !online ? <ConnectionStatusPill testID="agent-models-offline" placement="inline" status="offline" message={t('Offline · reconnecting', { ns: 'common' })} /> : undefined}
         topInset={insets.top}
         onBack={back}
         style={styles.header}
@@ -404,7 +411,6 @@ export function ModelsScreen({
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Space.xl }]}
       >
-        {!online ? <Banner message={t('Offline · reconnecting', { ns: 'common' })} /> : null}
         {error ? <Banner testID="agent-models-error" tone="bad" message={error} /> : null}
         {loading && !bundle ? (
           <ModelsLoading />
@@ -596,7 +602,7 @@ export function ModelsScreen({
         } : undefined}
       />
 
-      <ModelHealthSheet visible={healthVisible} adapter={adapter} online={online} onClose={() => setHealthVisible(false)} />
+      <ModelHealthSheet visible={healthVisible} adapter={adapter} online={online} reconnecting={reconnecting} onClose={() => setHealthVisible(false)} />
       <FallbackModelsSheet
         visible={fallbacksVisible}
         fallbacks={fallbackRows}

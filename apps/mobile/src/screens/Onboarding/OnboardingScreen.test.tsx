@@ -93,6 +93,16 @@ jest.mock('../../theme', () => ({
   useAppTheme: () => ({ theme: mockTheme }),
 }));
 
+jest.mock('../../components/ui/LoadingState', () => {
+  const ReactRuntime = require('react');
+  const { View, Text } = require('react-native');
+  return {
+    useLoadingHandoff: (loading: boolean, ready: boolean) => loading ? 'wait' : ready ? 'ready' : null,
+    LoadingState: ({ testID, phase, message }: { testID: string; phase: string; message: string }) =>
+      ReactRuntime.createElement(View, { testID, phase }, phase === 'wait' ? ReactRuntime.createElement(Text, null, message) : null),
+  };
+});
+
 // Read through a getter so one test can hide the YouMind Sprite entry again;
 // the screen reads the flag at render time, never at module load.
 let mockYouMindEntryVisible = true;
@@ -210,11 +220,13 @@ describe('OnboardingScreen', () => {
     for (const phase of ['relay_connected', 'waiting_bridge'] as const) {
       view.rerender(<OnboardingScreen {...props} status={{ kind: 'connecting', phase }} />);
       expect(view.getByText('common:Connecting')).toBeTruthy();
+      expect(view.getByTestId('onboarding-connecting-cat').props.phase).toBe('wait');
       expect(view.queryByText('Relay connected')).toBeNull();
       expect(view.queryByText('Ready')).toBeNull();
     }
     view.rerender(<OnboardingScreen {...props} status={{ kind: 'connecting', phase: 'ready' }} />);
     expect(view.getByText('Ready')).toBeTruthy();
+    expect(view.getByTestId('onboarding-connecting-cat').props.phase).toBe('ready');
     expect(view.queryByText('common:Connecting')).toBeNull();
   });
 
@@ -497,6 +509,19 @@ describe('OnboardingScreen', () => {
     }
   });
 
+  it('offers a header scan on the chooser only', () => {
+    const onScanAnyQr = jest.fn();
+    const view = render(<OnboardingScreen {...createProps({ onScanAnyQr, initialBackend: undefined })} />);
+
+    fireEvent.press(view.getByTestId('onboarding-scan-any-qr'));
+    expect(onScanAnyQr).toHaveBeenCalledTimes(1);
+
+    // A backend's own step keeps its footer scan; the header scan leaves with the chooser.
+    fireEvent.press(view.getByTestId('onboarding-backend-hermes'));
+    expect(view.queryByTestId('onboarding-scan-any-qr')).toBeNull();
+    expect(view.getByTestId('onboarding-scan-qr')).toBeTruthy();
+  });
+
   it('hides every YouMind Sprite entry when the entry flag is off', () => {
     mockYouMindEntryVisible = false;
     const onScanQr = jest.fn();
@@ -571,6 +596,13 @@ describe('OnboardingScreen', () => {
     expect(error.getByText('Hermes is not responding')).toBeTruthy();
     fireEvent.press(error.getByTestId('onboarding-error-action'));
     expect(onErrorAction).toHaveBeenCalledWith('gateway_offline');
+    // The failure keeps its place while the next attempt connects, and cannot start another one.
+    error.rerender(<OnboardingScreen {...createProps({ initialBackend: 'hermes', status: { kind: 'connecting', phase: 'waiting_bridge' }, onErrorAction })} />);
+    expect(error.getByText('Hermes is not responding')).toBeTruthy();
+    fireEvent.press(error.getByTestId('onboarding-error-action'));
+    expect(onErrorAction).toHaveBeenCalledTimes(1);
+    error.rerender(<OnboardingScreen {...createProps({ initialBackend: 'hermes', status: { kind: 'idle' }, onErrorAction })} />);
+    expect(error.queryByTestId('onboarding-error')).toBeNull();
     error.unmount();
 
     const connecting = render(

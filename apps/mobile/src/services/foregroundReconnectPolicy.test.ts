@@ -12,12 +12,20 @@ describe('shouldProbeGatewayOnForegroundResume', () => {
     })).toBe(true);
   });
 
-  it('keeps the old threshold for non-iOS ready transports', () => {
+  it('does not probe a ready transport without a background gap', () => {
     expect(shouldProbeGatewayOnForegroundResume({
       platformOs: 'android',
       awayMs: APP_FOREGROUND_PROBE_AWAY_MS - 1,
       connectionState: 'ready',
     })).toBe(false);
+  });
+
+  it('probes Android after a brief background network change too', () => {
+    expect(shouldProbeGatewayOnForegroundResume({
+      platformOs: 'android',
+      awayMs: 100,
+      connectionState: 'ready',
+    })).toBe(true);
   });
 
   it('still probes immediately when the transport is already not ready', () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { policyForBackend } from '../backend-policy';
 import { ensureHeartbeat, pruneStaleHandshakeClients } from './heartbeat';
 import { RelayRuntime, selectActiveClient } from './runtime';
-import { rehydrateSockets } from './storage';
+import { rehydrateSockets, reconcileSockets } from './storage';
 import { clearClientChallengeMarker, handleGatewayMessage, prepareClientMessage } from './routing';
 import type { Env, SocketAttachment } from './types';
 
@@ -37,7 +37,7 @@ describe.each(['claude-code', 'codex', 'pi', 'hermes', 'local-model'])('%s pendi
     prepareClientMessage(before, tablet.deserializeAttachment(), JSON.stringify({ type: 'req', id: 'tablet-request', method: 'sessions.list' }));
     const restored = runtime(backend, sockets); rehydrateSockets(restored);
     const response = JSON.stringify({ type: 'res', id: 'phone-request', ok: true, payload: { models: [] } });
-    await handleGatewayMessage(restored, gateway.deserializeAttachment(), response, async () => {});
+    await handleGatewayMessage(restored, gateway as unknown as WebSocket, gateway.deserializeAttachment(), response, async () => {});
     expect(phone.sent).toEqual([response]);
     expect(tablet.sent).toEqual([]);
   });
@@ -66,7 +66,7 @@ describe.each(['openclaw', 'hermes'])('%s hibernation routing', (backend) => {
     const request = JSON.stringify({ type: 'req', id: 'request-1', method: 'sessions.list', params: {} });
     expect(prepareClientMessage(restored, client.deserializeAttachment(), request)).toBe(false);
     const response = JSON.stringify({ type: 'res', id: 'request-1', ok: true, payload: {} });
-    await handleGatewayMessage(restored, gateway.deserializeAttachment(), response, async () => {});
+    await handleGatewayMessage(restored, gateway as unknown as WebSocket, gateway.deserializeAttachment(), response, async () => {});
     expect(client.sent).toEqual([response]);
   });
 
@@ -100,6 +100,24 @@ it('never promotes a restricted pairing socket into a normal route', () => {
   rehydrateSockets(restored);
   expect(restored.activeClientId).toBeNull();
   expect(restored.clients.size).toBe(0);
+});
+
+it.each([
+  { pairingFirst: true, newerPairing: true },
+  { pairingFirst: false, newerPairing: true },
+  { pairingFirst: true, newerPairing: false },
+  { pairingFirst: false, newerPairing: false },
+])('keeps full identity over a colliding restricted ticket across hibernation: %j', ({ pairingFirst, newerPairing }) => {
+  const full = new Socket(attachment('same-id', { authScope: 'full', connectedAt: newerPairing ? 1 : 20, activeClient: true }));
+  const pairing = new Socket(attachment('same-id', { authScope: 'pairing', connectedAt: newerPairing ? 20 : 1, activeClient: true }));
+  const restored = runtime('openclaw', pairingFirst ? [pairing, full] : [full, pairing]);
+  reconcileSockets(restored, { preferredSocket: pairing as unknown as WebSocket });
+  expect(restored.clients.get('same-id')).toBe(full);
+  expect(restored.activeClientId).toBe('same-id');
+  expect(restored.pairingClients.size).toBe(0);
+  expect(restored.clientLastActivityAtById.get('same-id')).toBe(full.deserializeAttachment().connectedAt);
+  expect(full.readyState).toBe(WebSocket.OPEN);
+  expect(pairing.readyState).toBe(WebSocket.CLOSED);
 });
 
 it('clearing a delivered challenge preserves the route selected after the frame was read', () => {

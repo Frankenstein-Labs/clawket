@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,13 +11,15 @@ beforeEach(() => {
   writeFileSync(fixture, `const rl=require('node:readline').createInterface({input:process.stdin});
   function send(v){process.stdout.write(JSON.stringify(v)+'\\n')}
   rl.on('line',l=>{const f=JSON.parse(l);if(!f.id)return;
-    if(f.method==='initialize')send({id:f.id,result:{}});
+    if(f.method==='initialize')send({id:f.id,result:{userAgent:'Codex Desktop/0.153.3 (test)'}});
     else if(f.method==='utf8'){const b=Buffer.from(JSON.stringify({method:'delta',params:{text:'你好 🌸\\n '}})+'\\n');let i=0;const t=setInterval(()=>{process.stdout.write(b.subarray(i,i+1));if(++i===b.length){clearInterval(t);send({id:f.id,result:{ok:true}})}},1)}
     else if(f.method==='request'){send({id:'native-id',method:'approval',params:{}});send({id:f.id,result:{ok:true}})}
     else if(f.method==='rejected')send({id:f.id,error:{code:-32602,message:'secret native detail'}});
+    else if(f.method==='writer-busy')send({id:f.id,error:{code:-32603,message:'thread 12345678-1234-1234-1234-123456789abc already has an active writer'}});
     else if(f.method==='malformed')process.stdout.write('{broken\\n');
     else if(f.method==='null')send(null);
     else if(f.method==='exit')process.exit(1);
+    else if(f.method==='oversized'){process.stdout.write(JSON.stringify({id:f.id,result:{text:'x'.repeat(33*1024*1024)}})+'\\n')}
     else if(f.method!=='hang')send({id:f.id,result:{ok:true}});
   });`);
   rpc = new CodexRpc(fixture, root);
@@ -33,6 +35,8 @@ it('distinguishes server requests from notifications', async () => {
 it('reports explicit refusal without exposing native secrets', async () => {
   await expect(rpc.request('rejected')).rejects.toMatchObject({ outcome: 'rejected' });
   await expect(rpc.request('rejected')).rejects.not.toThrow('secret native detail');
+  await expect(rpc.request('writer-busy')).rejects.toMatchObject({ outcome:'rejected',code:'native_writer_busy' });
+  await expect(rpc.request('writer-busy')).rejects.not.toThrow('12345678-1234-1234-1234-123456789abc');
 });
 it('fails pending requests on malformed framing and process loss', async () => {
   await expect(rpc.request('malformed')).rejects.toThrow('disconnected');
@@ -52,4 +56,47 @@ it('bounds pending calls and settles them on shutdown', async () => {
 
 it('rejects non-object JSON frames without crashing the host', async () => {
   await expect(rpc.request('null')).rejects.toThrow('disconnected');
+});
+
+it.each([['malformed', 'invalid_frame'], ['null', 'invalid_frame'], ['exit', 'native_exit']])('diagnoses %s with metadata only', async (method, reason) => {
+  const events: unknown[] = [];
+  rpc.on('diagnostic', value => events.push(value));
+  await expect(rpc.request(method, { text: 'private transcript', token: 'secret' })).rejects.toThrow('disconnected');
+  await rpc.stop();
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ reason, pendingCount: 1 });
+  expect(Object.keys(events[0] as object).every(key => ['reason', 'pendingCount', 'frameBytes'].includes(key))).toBe(true);
+  expect(JSON.stringify(events)).not.toMatch(/private|secret|broken|native-id/);
+});
+
+it('records a bounded native request timeout without replaying or exposing request details', async () => {
+  await rpc.request('ready');
+  const events: unknown[] = []; rpc.on('diagnostic', value => events.push(value));
+  vi.useFakeTimers();
+  try {
+    const pending = rpc.request('hang', { text: 'private transcript', token: 'secret' });
+    const rejected = expect(pending).rejects.toMatchObject({ outcome: 'uncertain' });
+    await vi.advanceTimersByTimeAsync(30_000); await rejected;
+    expect(events).toEqual([{ reason: 'request_timeout', pendingCount: 0 }]);
+  } finally { vi.useRealTimers(); }
+  await expect(rpc.request('still-alive')).resolves.toEqual({ ok: true });
+});
+
+it('a failing diagnostics sink cannot prevent native failure cleanup', async () => {
+  rpc.on('diagnostic', () => { throw new Error('logger failed'); });
+  await expect(rpc.request('malformed')).rejects.toThrow('disconnected');
+  await expect(rpc.request('after')).rejects.toThrow('unavailable');
+});
+
+it('drains an oversized native frame without killing the running process or replaying calls', async () => {
+  const diagnostics: any[] = []; rpc.on('diagnostic', value => diagnostics.push(value));
+  let closed = false; rpc.on('closed', () => { closed = true; });
+  await expect(rpc.request('oversized')).rejects.toMatchObject({ outcome: 'uncertain' });
+  await expect(rpc.request('still-alive')).resolves.toEqual({ ok: true });
+  expect(closed).toBe(false);
+  expect(diagnostics).toEqual([expect.objectContaining({ reason: 'frame_too_large', pendingCount: 1 })]);
+});
+
+it('recognizes the native version even when the host originator contains spaces', async () => {
+  await rpc.request('ready'); expect(rpc.nativeVersion).toBe('0.153.3');
 });

@@ -58,6 +58,8 @@ const MONOSPACE_FONT = Platform.select({
 export type LogsSectionProps = Readonly<{
   adapter: AgentAdapter;
   online: boolean;
+  /** The foreground grace window: the header says Reconnecting…, so no offline notice is inserted. */
+  reconnecting?: boolean;
   isPro?: boolean;
   onReconnect?: () => void;
   onOpenPaywall?: (reason: 'logs', onContinue?: () => void) => void;
@@ -66,6 +68,7 @@ export type LogsSectionProps = Readonly<{
 export function LogsSection({
   adapter,
   online,
+  reconnecting = false,
   isPro = true,
   onReconnect,
   onOpenPaywall,
@@ -230,7 +233,7 @@ export function LogsSection({
 
   return (
     <View testID="agent-logs-section" style={styles.stack}>
-      {!online ? (
+      {!online && !reconnecting ? (
         <Banner
           testID="agent-logs-offline"
           message={t('Offline · showing cached settings', { ns: 'config' })}

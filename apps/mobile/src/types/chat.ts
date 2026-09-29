@@ -72,6 +72,8 @@ export type UiMessage = {
   };
   /** Local acknowledgement failed; server acceptance is unknown. */
   sendUncertain?: boolean;
+  /** Bridge receipt only. Keep execution uncertainty until exact native history confirms it. */
+  bridgeRecordedRunId?: string;
   idempotencyKey?: string;
   timestampMs?: number;
   streaming?: boolean;

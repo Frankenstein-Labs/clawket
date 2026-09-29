@@ -418,8 +418,9 @@ describe('Registry backend contract matrix', () => {
       expect(JSON.parse(String(warn.mock.calls[0][0]))).toMatchObject({
         scope: backendCase.telemetryScope,
         event: 'relay_token_sync_failed',
-        message: 'relay sync unavailable',
+        reason: 'transport_error',
       });
+      expect(JSON.parse(String(warn.mock.calls[0][0]))).not.toHaveProperty('message');
     } finally {
       warn.mockRestore();
       globalThis.fetch = originalFetch;

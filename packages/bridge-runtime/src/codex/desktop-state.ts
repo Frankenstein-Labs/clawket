@@ -1,3 +1,6 @@
+import { nativeSettings, type NativeSettings } from './settings.js';
+import { DESKTOP_IPC_FRAME_BYTES, DesktopHistoryLimitError } from './desktop-limits.js';
+
 /** Codex Desktop v11 carries a canonical turn graph on current builds. */
 export function desktopTurns(state: any): any[] {
   const history = state?.turnHistory?.kind === 'canonical' ? state.turnHistory.history : undefined;
@@ -13,20 +16,34 @@ export function desktopTurns(state: any): any[] {
   return Array.isArray(state?.turns) ? state.turns : [];
 }
 
-export function desktopState(thread: any, requests: any[], model?: string, effort?: string): any {
+export function desktopState(thread: any, requests: any[], settings: NativeSettings, olderCursor: string | null = null): any {
+  if (!nativeSettings(settings) || settings.cwd !== thread.cwd) throw new Error('Native effective settings are unavailable');
   const turns = (thread.turns ?? []).map((t: any) => ({ ...t, turnId: t.id,
-    params: { cwd: thread.cwd, input: (t.items ?? []).find((i: any) => i.type === 'userMessage')?.content ?? [], attachments: [], summary: 'none', personality: null, outputSchema: null, collaborationMode: null }, hookRuns: [],
+    params: { cwd: settings.cwd, input: (t.items ?? []).find((i: any) => i.type === 'userMessage')?.content ?? [], attachments: [],
+      summary: settings.summary, personality: settings.personality, outputSchema: null, collaborationMode: settings.collaborationMode }, hookRuns: [],
+    ...(t.itemsView === 'summary' ? { itemsPagination: { olderCursor: null, isLoadingOlder: false, hasLoadedOldest: false,
+      summaryItemIds: (t.items ?? []).map((item: any) => item.id) } } : {}),
   }));
   const entries = turns.map((t: any) => ({ key: `turn:${t.id}`, value: `turn:${t.id}` }));
   const entitiesByKey = Object.fromEntries(turns.map((t: any) => [`turn:${t.id}`, t]));
-  return { id: thread.id, hostId: 'local', turns, requests, cwd: thread.cwd, title: thread.name ?? '',
+  const oldestLoadedTurnId = turns[0]?.id ?? null;
+  const state = { id: thread.id, hostId: 'local', turns: [], requests, cwd: thread.cwd, title: thread.name ?? '',
     createdAt: thread.createdAt * 1000, updatedAt: thread.updatedAt * 1000, recencyAt: thread.updatedAt * 1000,
-    source: 'appServer', threadSource: 'user', originator: 'clawket', historyMode: 'legacy', mode: 'default', threadStartKind: 'default',
-    modelProvider: thread.modelProvider, latestModel: model ?? null, latestReasoningEffort: effort ?? null, latestCollaborationMode: null,
+    source: 'appServer', threadSource: 'user', originator: 'clawket', historyMode: 'paginated', mode: settings.collaborationMode.mode, threadStartKind: 'default',
+    modelProvider: settings.modelProvider, latestModel: settings.model, latestReasoningEffort: settings.effort,
+    latestCollaborationMode: settings.collaborationMode, latestThreadSettings: settings,
     hasUnreadTurn: false, rolloutPath: thread.path ?? '', gitInfo: thread.gitInfo ?? null, resumeState: 'resumed', latestTokenUsageInfo: null,
     workspaceKind: 'project', workspaceBrowserRoot: thread.cwd, projectlessOutputDirectory: null,
-    currentPermissions: { approvalPolicy: 'on-request', approvalsReviewer: 'user', runtimeWorkspaceRoots: [thread.cwd], sandboxPolicy: { type: 'workspaceWrite', writableRoots: [thread.cwd], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false } },
-    turnsPagination: { olderCursor: null, oldestLoadedTurnId: turns[0]?.id ?? null, isLoadingOlder: false, hasLoadedOldest: true },
-    turnHistory: { kind: 'canonical', history: { entitiesByKey, generation: 0, isComplete: true, islands: [{ id: 'tail:0', entries, olderBoundary: { status: 'exhausted', boundaryId: 'tail:0:older' }, newerBoundary: { status: 'exhausted', boundaryId: 'tail:0:newer' } }] } },
+    currentPermissions: { approvalPolicy: settings.approvalPolicy, approvalsReviewer: settings.approvalsReviewer,
+      runtimeWorkspaceRoots: [thread.cwd], sandboxPolicy: settings.sandboxPolicy, activePermissionProfile: settings.activePermissionProfile },
+    turnsPagination: { olderCursor, oldestLoadedTurnId, isLoadingOlder: false, hasLoadedOldest: olderCursor === null },
+    turnHistory: { kind: 'canonical', history: { entitiesByKey, generation: 0, isComplete: olderCursor === null,
+      islands: [{ id: 'tail:0', entries, olderBoundary: olderCursor === null ? { status: 'exhausted', boundaryId: 'tail:0:older' }
+        : { status: 'available', boundaryId: 'tail:0:older', handle: { cursor: olderCursor, oldestLoadedTurnId }, progressKey: JSON.stringify([olderCursor, oldestLoadedTurnId]) },
+        newerBoundary: { status: 'exhausted', boundaryId: 'tail:0:newer' } }] } },
   };
+  // Count the actual projection, including repeated input and collaboration
+  // settings. Leave room for the framed broadcast envelope; never drop images.
+  if (Buffer.byteLength(JSON.stringify(state)) > DESKTOP_IPC_FRAME_BYTES - 16 * 1024) throw new DesktopHistoryLimitError();
+  return state;
 }

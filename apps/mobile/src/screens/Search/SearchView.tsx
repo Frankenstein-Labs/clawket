@@ -17,10 +17,11 @@ import {
 } from 'lucide-react-native';
 import { ChevronLeft } from '../../components/ui/DirectionalIcon';
 import { useTranslation } from 'react-i18next';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
 import { Banner } from '../../components/ui/Banner';
-import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
+import { CONNECTION_STATUS_FLOATING_CLEARANCE, ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
 import { FloatingButton } from '../../components/ui/FloatingButton';
 import { SearchInput } from '../../components/ui/SearchInput';
 import { SegmentedTabs } from '../../components/ui/SegmentedTabs';
@@ -349,24 +350,35 @@ function SearchLoading(): React.JSX.Element {
   );
 }
 
-/** Search has no title slot to yield, so the capsule leads the results; the permission banner stays a banner. */
+function hasSearchConnectionStatus(state: SearchViewProps['state']): boolean {
+  return state === 'offline' || state === 'error';
+}
+
+/**
+ * Search has no title slot to yield, so the capsule floats over the bottom of the results, the edge a
+ * top-down list needs least; it used to lead the results and push them down on every reconnect (owner
+ * request 2026-09-29). The permission banner stays a banner.
+ */
 function SearchConnectionStatus({
   state,
   errorCode,
   reconnecting,
+  bottomInset,
   onRetry,
 }: Pick<
   SearchViewProps,
-  'state' | 'errorCode' | 'reconnecting' | 'onRetry'
+  'state' | 'errorCode' | 'reconnecting' | 'bottomInset' | 'onRetry'
 >): React.JSX.Element | null {
   const { t } = useTranslation('common');
+  const dock = { bottom: bottomInset + Space.sm };
   if (state === 'offline' && reconnecting) {
     return (
       <ConnectionStatusPill
         testID="search-reconnecting"
-        placement="inline"
+        edge="bottom"
         status="reconnecting"
         message={t('Reconnecting…')}
+        style={dock}
       />
     );
   }
@@ -374,9 +386,10 @@ function SearchConnectionStatus({
     return (
       <ConnectionStatusPill
         testID="search-offline"
-        placement="inline"
+        edge="bottom"
         status="offline"
         message={t('Offline · showing cached results')}
+        style={dock}
       />
     );
   }
@@ -384,11 +397,12 @@ function SearchConnectionStatus({
     return (
       <ConnectionStatusPill
         testID="search-error"
-        placement="inline"
+        edge="bottom"
         status="error"
         message={t('Search unavailable · {{code}}', { code: errorCode ?? 'network' })}
         actionLabel={onRetry ? t('Retry') : undefined}
         onAction={onRetry}
+        style={dock}
       />
     );
   }
@@ -445,7 +459,11 @@ export function SearchView({
     { key: 'messages' as const, label: t('Messages') },
     { key: 'favorites' as const, label: t('Favorites') },
   ], [t]);
-  const contentInsets = useMemo(() => ({ paddingBottom: bottomInset + Space.xl }), [bottomInset]);
+  // While a status floats over the bottom, the results can still scroll their last row above it.
+  const statusShown = hasSearchConnectionStatus(state);
+  const contentInsets = useMemo(() => ({
+    paddingBottom: bottomInset + Space.xl + (statusShown ? CONNECTION_STATUS_FLOATING_CLEARANCE : 0),
+  }), [bottomInset, statusShown]);
   const headerInsets = useMemo(() => ({ paddingTop: topInset + Space.sm }), [topInset]);
   const hasQuery = query.trim().length > 0;
   const showFilters = hasQuery && shouldShowSearchFilters(availableResultCount);
@@ -474,55 +492,61 @@ export function SearchView({
         />
         {onOpenArchives ? <FloatingButton icon={Archive} appearance="plain" accessibilityLabel={t('Saved conversations', { ns: 'chat' })} onPress={onOpenArchives} testID="search-archives" /> : null}
       </View>
-      <ScrollView
-        testID="search-scroll"
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[styles.content, contentInsets]}
-      >
-        <SearchConnectionStatus
-          state={state}
-          errorCode={errorCode}
-          reconnecting={reconnecting}
-          onRetry={onRetry}
-        />
-        <SearchStatusBanner
-          state={state}
-          onOpenPermission={onOpenPermission}
-        />
-        {showFilters ? (
-          <SegmentedTabs
-            testID="search-filters"
-            size="sm"
-            tabs={filterTabs}
-            active={filter}
-            onSwitch={onChangeFilter}
+      <View style={styles.results}>
+        <ScrollView
+          testID="search-scroll"
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.content, contentInsets]}
+        >
+          <SearchStatusBanner
+            state={state}
+            onOpenPermission={onOpenPermission}
           />
-        ) : null}
-        {state === 'loading' ? <SearchLoading /> : null}
-        {showContent && !hasQuery && recentSearches.length > 0 ? (
-          <RecentSearches searches={recentSearches} onSelect={onSelectRecent} />
-        ) : null}
-        {showContent && !hasQuery && favorites.length > 0 ? (
-          <FavoritesBrowse favorites={favorites} onSelectResult={onSelectResult} />
-        ) : null}
-        {showContent && hasQuery && sections.length > 0 ? (
-          <SearchSections
-            sections={sections}
-            query={query}
-            onSelectResult={onSelectResult}
+          {showFilters ? (
+            <SegmentedTabs
+              testID="search-filters"
+              size="sm"
+              tabs={filterTabs}
+              active={filter}
+              onSwitch={onChangeFilter}
+            />
+          ) : null}
+          {state === 'loading' ? <SearchLoading /> : null}
+          {showContent && !hasQuery && recentSearches.length > 0 ? (
+            <RecentSearches searches={recentSearches} onSelect={onSelectRecent} />
+          ) : null}
+          {showContent && !hasQuery && favorites.length > 0 ? (
+            <FavoritesBrowse favorites={favorites} onSelectResult={onSelectResult} />
+          ) : null}
+          {showContent && hasQuery && sections.length > 0 ? (
+            <SearchSections
+              sections={sections}
+              query={query}
+              onSelectResult={onSelectResult}
+            />
+          ) : null}
+          {showNoResults ? (
+            <Text
+              testID="search-empty"
+              style={[styles.emptyText, { color: theme.colors.inkSecondary }]}
+            >
+              {hasQuery
+                ? t('No results')
+                : t('Search agents, sessions, and messages from chats opened on this device')}
+            </Text>
+          ) : null}
+        </ScrollView>
+        {/* Rides above the keyboard while the field is focused; the bottom inset is already under it then. */}
+        <KeyboardStickyView pointerEvents="box-none" style={StyleSheet.absoluteFill} offset={{ closed: 0, opened: bottomInset }}>
+          <SearchConnectionStatus
+            state={state}
+            errorCode={errorCode}
+            reconnecting={reconnecting}
+            bottomInset={bottomInset}
+            onRetry={onRetry}
           />
-        ) : null}
-        {showNoResults ? (
-          <Text
-            testID="search-empty"
-            style={[styles.emptyText, { color: theme.colors.inkSecondary }]}
-          >
-            {hasQuery
-              ? t('No results')
-              : t('Search agents, sessions, and messages from chats opened on this device')}
-          </Text>
-        ) : null}
-      </ScrollView>
+        </KeyboardStickyView>
+      </View>
     </View>
   );
 }
@@ -537,6 +561,9 @@ function createThemedStyles(colors: CanonicalThemeColors) {
 
 const styles = StyleSheet.create({
   screen: {
+    flex: 1,
+  },
+  results: {
     flex: 1,
   },
   header: {
