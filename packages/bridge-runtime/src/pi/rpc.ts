@@ -6,7 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 export class PiRpc extends EventEmitter {
   private child: ChildProcessWithoutNullStreams | null = null;
   private sequence = 0;
-  private pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; onSuccess?: () => void }>();
   constructor(private readonly command: string, private readonly args: string[], private readonly cwd: string, private readonly env = process.env) { super(); }
   start(): void {
     if (this.child) return;
@@ -27,7 +27,8 @@ export class PiRpc extends EventEmitter {
           const pending = this.pending.get(event.id);
           if (!pending) continue;
           this.pending.delete(event.id); clearTimeout(pending.timer);
-          event.success ? pending.resolve(event.data) : pending.reject(new Error('Pi rejected the operation. Check the project configuration and Pi logs on your computer.'));
+          if (event.success) { pending.onSuccess?.(); pending.resolve(event.data); }
+          else pending.reject(new Error('Pi rejected the operation. Check the project configuration and Pi logs on your computer.'));
         } else this.emit('event', event);
       }
     });
@@ -37,12 +38,12 @@ export class PiRpc extends EventEmitter {
     child.on('error', () => this.fail('Pi could not start. Install Pi and check its executable path.'));
     child.on('close', () => { if (this.child === child) this.child = null; this.fail('Pi exited. Reopen the session to continue; interrupted prompts are never replayed.'); this.emit('exit'); });
   }
-  request<T = any>(type: string, params: object = {}): Promise<T> {
+  request<T = any>(type: string, params: object = {}, options: { onSuccess?: () => void; timeoutMs?: number } = {}): Promise<T> {
     this.start();
     const id = `clawket-${++this.sequence}`;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Pi request timed out; its outcome may be unknown.')); }, type === 'prompt' ? 24 * 60 * 60 * 1000 : 30_000);
-      this.pending.set(id, { resolve, reject, timer });
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Pi request timed out; its outcome may be unknown.')); }, options.timeoutMs ?? (type === 'prompt' ? 24 * 60 * 60 * 1000 : 30_000));
+      this.pending.set(id, { resolve, reject, timer, onSuccess: options.onSuccess });
       try { this.send({ ...params, type, id }); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
   }

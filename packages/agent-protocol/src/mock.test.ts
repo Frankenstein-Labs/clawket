@@ -20,6 +20,16 @@ const connection: ConnectionDescriptor = {
   isFreeSlot: true,
 };
 
+it('exposes receipt lookup only where supported and never invents persistence in generic fixtures', async () => {
+  for (const backendKind of ['codex', 'claude-code', 'pi'] as const) {
+    const adapter = createMockAdapter({ connection: { ...connection, backendKind } });
+    expect(await adapter.getPromptStatus!('session', 'request')).toEqual({ status: 'unknown' });
+    expect(createMockAdapter({ connection: { ...connection, backendKind }, capabilities: { promptStatus: false } }).getPromptStatus).toBeUndefined();
+  }
+  expect(createMockAdapter({ connection }).getPromptStatus).toBeUndefined();
+  expect(createMockAdapter({ connection: { ...connection, backendKind: 'hermes' } }).getPromptStatus).toBeUndefined();
+});
+
 const agents: AgentDescriptor[] = [
   {
     connectionId: connection.id,
@@ -92,6 +102,39 @@ function fixture() {
 }
 
 describe('createMockAdapter', () => {
+  it('keeps Codex runtime controls per session and archives reversibly', async () => {
+    const data = { ...fixture(), connection: { ...connection, backendKind: 'codex' as const } };
+    const adapter = createMockAdapter(data);
+    const models = adapter.management!.models!;
+    expect(await models.getSelection!('a')).not.toHaveProperty('permissions');
+    const fast = await models.setFastMode!('a', true);
+    fast.fastMode!.enabled = false;
+    expect((await models.getSelection!('a')).fastMode?.enabled).toBe(true);
+    const permissions = await models.setPermissions!('full-access', 'a');
+    permissions.permissions!.mode = 'read-only';
+    expect(await models.getSelection!('a')).toMatchObject({ fastMode: { enabled: true }, permissions: { mode: 'full-access' } });
+    expect(await models.getSelection!('b')).not.toHaveProperty('permissions');
+    await models.setPermissions!('read-only', 'b');
+    await models.setFastMode!('b', false);
+    expect((await models.getSelection!('b')).permissions?.mode).toBe('read-only');
+    await adapter.archiveSession!(sessions[0].key, true);
+    expect(await adapter.listSessions()).toHaveLength(1);
+    expect(await adapter.listSessions('main')).toEqual([]);
+    expect(await adapter.listArchivedSessions!()).toHaveLength(1);
+    expect(await adapter.listArchivedSessions!('writer')).toEqual([]);
+    expect(await adapter.listArchivedSessions!('main')).toHaveLength(1);
+    expect((await adapter.loadSession(sessions[0].key)).messages).toHaveLength(3);
+    await adapter.archiveSession!(sessions[0].key, false);
+    expect(await adapter.listSessions()).toHaveLength(2);
+    await expect(adapter.archiveSession!('missing', true)).rejects.toBeInstanceOf(AdapterError);
+    const provided = createMockAdapter({ ...data, management: { models: { setFastMode: models.setFastMode, setPermissions: models.setPermissions } } });
+    expect(provided.management?.models?.setFastMode).toBe(models.setFastMode);
+    expect(provided.management?.models?.setPermissions).toBe(models.setPermissions);
+    const legacy = createMockAdapter(fixture());
+    expect(legacy.archiveSession).toBeUndefined();
+    expect(legacy.management?.models?.setPermissions).toBeUndefined();
+    expect(legacy.management?.models?.setFastMode).toBeUndefined();
+  });
   it('implements state, probe, event subscriptions, and deterministic timeline playback', async () => {
     const adapter = createMockAdapter(fixture());
     const states: string[] = [];

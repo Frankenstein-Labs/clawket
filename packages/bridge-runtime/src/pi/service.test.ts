@@ -1,21 +1,23 @@
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, appendFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, appendFileSync, realpathSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PiService } from './service.js';
+import { nativePiDirectory } from './paths.js';
 
 const { children } = vi.hoisted(() => ({ children: [] as any[] }));
 vi.mock('./rpc.js', async () => {
   const { EventEmitter } = await import('node:events');
   return { PiRpc: class extends EventEmitter {
     sent: any[] = []; streaming = false; holdPrompt = false; leafId: string | null = null;
+    entries: any[] = []; sessionId = 'native-session'; acknowledgeFirst = true;
     constructor() { super(); children.push(this); }
-    async request(type: string, params: any = {}) {
+    async request(type: string, params: any = {}, options: any = {}) {
       this.sent.push({ type, ...params });
-      if (type === 'get_state') return { model: { id: 'test', provider: 'fixture', input: ['text'] }, isStreaming: this.streaming };
-      if (type === 'get_entries') return { entries: [], leafId: this.leafId };
+      if (type === 'get_state') return { model: { id: 'test', provider: 'fixture', input: ['text'] }, isStreaming: this.streaming, sessionId: this.sessionId };
+      if (type === 'get_entries') return { entries: params.since ? this.entries.slice(this.entries.findIndex(e => e.id === params.since) + 1) : this.entries, leafId: this.leafId };
       if (type === 'prompt' && this.holdPrompt) return new Promise(() => {});
-      if (type === 'prompt') { this.streaming = true; this.emit('event', { type: 'agent_start' }); }
+      if (type === 'prompt') { this.streaming = true; if (this.acknowledgeFirst) options.onSuccess?.(); this.emit('event', { type: 'agent_start' }); if (!this.acknowledgeFirst) options.onSuccess?.(); }
       if (type === 'abort') { this.streaming = false; this.emit('event', { type: 'agent_settled' }); }
       return {};
     }
@@ -30,6 +32,169 @@ function setup() {
   service = new PiService({ project: root, directory: join(root, 'bridge'), agentDirectory: join(root, 'agent') }); return service;
 }
 const request = (method: string, params: any = {}) => service!.request({ type: 'req', id: 'test', method, params }) as Promise<any>;
+it('sync preserves a temporarily unreadable native row, updates other rows, and removes only a confirmed missing file', async () => {
+  setup();
+  const dir = nativePiDirectory(root!, join(root!, 'agent')); mkdirSync(dir, { recursive: true });
+  const transcript = (name: string) => JSON.stringify({ type: 'session', version: 3, cwd: root }) + '\n'
+    + JSON.stringify({ type: 'session_info', name }) + '\n';
+  writeFileSync(join(dir, 'a.jsonl'), transcript('A'));
+  writeFileSync(join(dir, 'b.jsonl'), transcript('B'));
+  const first = await request('sessions.sync'), base = { epoch: first.epoch, revision: first.revision };
+  const a = first.sessions.find((row: any) => row.title === 'A');
+  expect(await request('health')).toMatchObject({ sessionCatalogSync: 1 });
+  writeFileSync(join(dir, 'a.jsonl'), 'broken\nalso broken\n');
+  writeFileSync(join(dir, 'b.jsonl'), transcript('B changed'));
+  const changed = await request('sessions.sync', { base });
+  const current = changed.kind === 'full' ? changed.sessions : changed.upserts;
+  expect(current.some((row: any) => row.title === 'B changed')).toBe(true);
+  expect(changed.removedKeys ?? []).not.toContain(a.key);
+  const all = await request('sessions.sync');
+  expect(all.sessions).toContainEqual(a);
+  expect((await request('sessions.list')).some((row: any) => row.key === a.key)).toBe(false);
+  unlinkSync(join(dir, 'a.jsonl'));
+  const deleted = await request('sessions.sync');
+  expect(deleted.sessions.some((row: any) => row.key === a.key)).toBe(false);
+});
+it('sync does not advance its revision when native directory enumeration fails', async () => {
+  setup(); const dir = nativePiDirectory(root!, join(root!, 'agent')); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'a.jsonl'), JSON.stringify({ type: 'session', version: 3, cwd: root }) + '\n');
+  const first = await request('sessions.sync'), base = { epoch: first.epoch, revision: first.revision };
+  renameSync(dir, dir + '-saved'); writeFileSync(dir, 'not a directory');
+  await expect(request('sessions.sync', { base })).rejects.toThrow('Conversation catalog could not be refreshed completely');
+  expect(await request('sessions.sync', { page: { ...base, offset: 0 } })).toEqual(first);
+  unlinkSync(dir); renameSync(dir + '-saved', dir);
+  expect(await request('sessions.sync', { base })).toEqual({ kind: 'unchanged', ...base });
+});
+it('sync retains a known native row that slides outside the 200-file read window', async () => {
+  setup(); const dir = nativePiDirectory(root!, join(root!, 'agent')); mkdirSync(dir, { recursive: true });
+  const content = JSON.stringify({ type: 'session', version: 3, cwd: root }) + '\n';
+  writeFileSync(join(dir, '000-known.jsonl'), content);
+  const first = await request('sessions.sync'), native = first.sessions.find((row: any) => row.source === 'native');
+  for (let index = 0; index < 200; index++) writeFileSync(join(dir, `z-${String(index).padStart(3, '0')}.jsonl`), content);
+  let second = await request('sessions.sync');
+  const rows = [...second.sessions];
+  while (second.nextOffset !== null) {
+    second = await request('sessions.sync', { page: { epoch: second.epoch, revision: second.revision, offset: second.nextOffset } });
+    rows.push(...second.sessions);
+  }
+  expect(rows).toContainEqual(native);
+  expect(rows.filter((row: any) => row.source === 'native')).toHaveLength(201);
+  expect((await request('sessions.list')).filter((row: any) => row.source === 'native')).toHaveLength(200);
+});
+it('does not record or dispatch a prompt when an extension starts work during the checkpoint', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  await request('health'); const child = children[0];
+  const nativeRequest = child.request.bind(child);
+  let started = false;
+  vi.spyOn(child, 'request').mockImplementation(async (type: any, params: any, options: any) => {
+    if (type === 'get_entries' && !started) {
+      started = true; child.streaming = true; child.emit('event', { type: 'agent_start' });
+    }
+    return nativeRequest(type, params, options);
+  });
+  const input = { sessionKey: key, text: 'new input', idempotencyKey: 'raced-extension' };
+  await expect(request('chat.send', input)).rejects.toThrow('busy');
+  expect(await request('chat.promptStatus', input)).toEqual({ status: 'unknown' });
+  expect(child.sent.some((row: any) => row.type === 'prompt')).toBe(false);
+  expect((await request('chat.history', { sessionKey: key })).hasActiveRun).toBe(true);
+});
+it('ignores malformed legacy receipt metadata when projecting owned history', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  await service!.stop(); children.length = 0;
+  const indexPath = join(root!, 'bridge', 'sessions.json');
+  const index = JSON.parse(readFileSync(indexPath, 'utf8'));
+  index.sessions[0].keys = { badNull: null, badString: 'bad', badNumber: 1,
+    forgedIdentity: { nativeEntryId: 'user', nativeFile: `${key}.jsonl` } };
+  writeFileSync(indexPath, JSON.stringify(index));
+  appendFileSync(join(root!, 'bridge', `${key}.jsonl`), JSON.stringify({ type: 'message', id: 'user', parentId: null, message: { role: 'user', content: 'existing history' } }) + '\n');
+  service = new PiService({ project: root!, directory: join(root!, 'bridge'), agentDirectory: join(root!, 'agent') });
+  await request('health'); children[0].leafId = 'user';
+  const history = await request('chat.history', { sessionKey: key });
+  expect(history.messages).toHaveLength(1);
+  expect(history.messages[0]).not.toHaveProperty('idempotencyKey');
+  expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'badNull' })).toEqual({ status: 'unknown' });
+});
+it('does not restart a stopped Pi process when an identity checkpoint resolves late', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  await request('chat.send', { sessionKey: key, text: 'pending native receipt', idempotencyKey: 'late' });
+  const child = children[0], nativeRequest = child.request.bind(child);
+  let resolve!: (result: any) => void;
+  vi.spyOn(child, 'request').mockImplementation((type: any, params: any, options: any) => type === 'get_entries'
+    ? new Promise(done => { resolve = done; }) : nativeRequest(type, params, options));
+  child.emit('event', { type: 'message_end', message: { role: 'user', content: 'native' } });
+  await service!.stop();
+  const reads = child.sent.filter((row: any) => row.type === 'get_state').length;
+  resolve({ entries: [{ type: 'message', id: 'native', parentId: null, message: { role: 'user' } }], leafId: 'native' });
+  await Promise.resolve(); await Promise.resolve();
+  expect(child.sent.filter((row: any) => row.type === 'get_state')).toHaveLength(reads);
+});
+it('persists exact native user IDs for owned prompts, including identical text, without copying transcript content', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  const file = join(root!, 'bridge', `${key}.jsonl`);
+  for (let index = 1; index <= 2; index++) {
+    await request('chat.send', { sessionKey: key, text: 'identical input', idempotencyKey: `send-${index}` });
+    const child = children[0];
+    const entry = { type: 'message', id: `native-${index}`, parentId: child.leafId, message: { role: 'user', content: 'extension-transformed input', timestamp: 1 } };
+    child.entries.push(entry); child.leafId = entry.id;
+    appendFileSync(file, JSON.stringify(entry) + '\n');
+    child.emit('event', { type: 'message_end', message: entry.message });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.messages.at(-1)).toMatchObject({ id: entry.id, idempotencyKey: `send-${index}` });
+    child.streaming = false; child.emit('event', { type: 'agent_settled' });
+  }
+  const before = readFileSync(file, 'utf8');
+  const index = JSON.parse(readFileSync(join(root!, 'bridge', 'sessions.json'), 'utf8'));
+  expect(index.sessions[0].keys['send-1']).toMatchObject({ nativeEntryId: 'native-1', nativeFile: `${key}.jsonl` });
+  expect(index.sessions[0].keys['send-1']).not.toHaveProperty('text');
+  await service!.stop(); children.length = 0;
+  service = new PiService({ project: root!, directory: join(root!, 'bridge'), agentDirectory: join(root!, 'agent') });
+  await request('health'); children[0].leafId = 'native-2';
+  const recovered = await request('chat.history', { sessionKey: key });
+  expect(recovered.messages.map((m: any) => m.idempotencyKey)).toEqual(['send-1', 'send-2']);
+  expect(readFileSync(file, 'utf8')).toBe(before);
+  expect(children[0].sent.some((row: any) => row.type === 'prompt')).toBe(false);
+});
+it.each(['preflight-order', 'multiple-users', 'session-changed', 'different-branch'])(
+  'keeps ambiguous Pi native identity unconfirmed: %s', async mode => {
+    setup(); const key = (await request('sessions.list'))[0].key;
+    await request('health'); const child = children[0];
+    if (mode === 'preflight-order') child.acknowledgeFirst = false;
+    await request('chat.send', { sessionKey: key, text: 'same text', idempotencyKey: 'uncertain' });
+    const entry = { type: 'message', id: 'native-user', parentId: mode === 'different-branch' ? 'unknown-parent' : null, message: { role: 'user', content: 'same text', timestamp: 1 } };
+    child.entries.push(entry); child.leafId = entry.id;
+    if (mode === 'multiple-users') { child.entries.push({ ...entry, id: 'other-user', parentId: entry.id }); child.leafId = 'other-user'; }
+    if (mode === 'session-changed') child.sessionId = 'another-session';
+    child.emit('event', { type: 'message_end', message: entry.message });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.messages.every((m: any) => m.idempotencyKey === undefined)).toBe(true);
+    expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'uncertain' })).toMatchObject({ status: 'recorded' });
+  },
+);
+it('answers scoped persisted receipt queries after restart without creating a Pi process or replaying input', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  const input = { sessionKey: key, text: 'receipt', idempotencyKey: '__proto__' };
+  expect(await request('chat.promptStatus', input)).toEqual({ status: 'unknown' });
+  expect(children).toHaveLength(0);
+  const sent = await request('chat.send', input);
+  await service!.stop(); children.length = 0;
+  service = new PiService({ project: root!, directory: join(root!, 'bridge'), agentDirectory: join(root!, 'agent') });
+  expect(await request('chat.promptStatus', input)).toEqual({ status: 'recorded', runId: sent.runId });
+  expect(await request('chat.promptStatus', { ...input, sessionKey: 'other' })).toEqual({ status: 'unknown' });
+  expect(await request('chat.promptStatus', { ...input, idempotencyKey: 'constructor' })).toEqual({ status: 'unknown' });
+  await expect(request('chat.promptStatus', { ...input, idempotencyKey: '' })).rejects.toThrow('Invalid');
+  expect(children).toHaveLength(0);
+});
+it('does not report a receipt or dispatch when acceptance persistence fails', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  const input = { sessionKey: key, text: 'receipt', idempotencyKey: 'save-failed' };
+  const save = vi.spyOn(service as any, 'save').mockImplementationOnce(() => { throw new Error('storage unavailable'); });
+  await expect(request('chat.send', input)).rejects.toThrow('storage unavailable');
+  expect(await request('chat.promptStatus', input)).toEqual({ status: 'unknown' });
+  expect(children[0].sent.some((row: any) => row.type === 'prompt')).toBe(false);
+  save.mockRestore();
+  const sent = await request('chat.send', input);
+  expect(await request('chat.promptStatus', input)).toEqual({ status: 'recorded', runId: sent.runId });
+});
 it('identifies the landing conversation as main so free clients can chat immediately', async () => {
   setup();
   const [agent] = await request('agents.list');

@@ -1,4 +1,6 @@
+import { SessionCatalogSync } from '../session-catalog.js';
 import { InteractionAttention } from '../interaction-attention.js';
+import { readPromptIdentity, recordedPromptStatus } from '../prompt-status.js';
 import { lastVisiblePreview, sessionPreview } from '../session-preview.js';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, lstatSync, realpathSync, existsSync, unlinkSync } from 'node:fs';
@@ -10,15 +12,18 @@ import { resolvePiExecutable } from './executable.js';
 import { nativePiDirectory, piPath } from './paths.js';
 import { PiRpc } from './rpc.js';
 import { piBranch, piMessages, piText, piUsage } from './history.js';
+import { persistedPiCursor, piPromptEntryId } from './prompt-identity.js';
 
 export interface PiRequest { type: 'req'; id: string; method: string; params?: Record<string, unknown> }
 export interface PiOptions { project: string; directory: string; command?: string; agentDirectory?: string; nativeSessionDirectory?: string; args?: string[]; env?: NodeJS.ProcessEnv }
-type RecordEntry = { id: string; file: string; title: string; created: number; activity?: number; model?: string; provider?: string; preview?: string; keys: Record<string, { hash: string; runId: string }> };
-type Running = { rpc: PiRpc; run?: { id: string; text: string; started: number; inputText?: string; agentStarted?: boolean; stop?: 'cancelled' | 'error'; final?: any; visibleReply?: string }; questions: Map<string, AgentQuestion> };
+type RecordEntry = { id: string; file: string; title: string; created: number; activity?: number; model?: string; provider?: string; preview?: string; keys: Record<string, { hash: string; runId: string; nativeEntryId?: string; nativeFile?: string }> };
+type PromptIdentity = { sessionId: string; leafId: string | null; file: string; key: string; acknowledged: boolean; starts: number; users: number; valid: boolean; capturing?: boolean };
+type Running = { rpc: PiRpc; identityCapture?: Promise<void>; run?: { id: string; text: string; started: number; inputText?: string; identity?: PromptIdentity; agentStarted?: boolean; stop?: 'cancelled' | 'error'; final?: any; visibleReply?: string }; questions: Map<string, AgentQuestion> };
 
 /** Owns private Pi sessions. Remote callers can select opaque IDs, never filesystem paths or arbitrary RPC commands. */
 export class PiService extends EventEmitter {
   readonly conversation = this;
+  private readonly catalogSync = new SessionCatalogSync(() => this.listSessions(true));
   private records: RecordEntry[] = [];
   private processes = new Map<string, Running>();
   private native = new Map<string, string>();
@@ -126,36 +131,69 @@ export class PiService extends EventEmitter {
   private descriptor(record: RecordEntry): SessionDescriptor {
     return { connectionId: '', agentId: 'pi', key: record.id, kind: record.id === this.records[0].id ? 'main' : 'direct', title: record.title || basename(this.project), updatedAt: record.activity ?? record.created, lastActivityAt: record.activity ?? null, model: record.model, modelProvider: record.provider, preview: record.preview, hasActiveRun: !!this.processes.get(record.id)?.run, attention: this.attention.get(record.id), source: 'bridge', allowedActions: { rename: true, reset: true, delete: this.records.length > 1, pin: true } };
   }
+  private listSessions(strict = false): SessionDescriptor[] {
+    const sessions = this.records.map(r => this.descriptor(r));
+    const dir = nativePiDirectory(this.project, this.agentDirectory, this.options.nativeSessionDirectory, { ...process.env, ...this.options.env });
+    let files: string[];
+    if (strict) {
+      try { files = readdirSync(dir).filter(file => file.endsWith('.jsonl')); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Pi conversation catalog could not be refreshed completely');
+        files = [];
+      }
+    } else files = existsSync(dir) ? readdirSync(dir).filter(file => file.endsWith('.jsonl')).slice(-200) : [];
+    const cached = new Map(strict ? this.catalogSync.cachedRows().filter(row => row.source === 'native').map(row => [row.key, row]) : []);
+    const readable = new Set(files.slice(-200));
+    this.native.clear();
+    for (const file of files) {
+      const key = `native-${createHash('sha256').update(file).digest('hex').slice(0, 24)}`;
+      const path = join(dir, file), previous = cached.get(key);
+      // A rolling discovery window is not proof of deletion. Keep known, still
+      // enumerated rows until they can be read, without scanning old transcripts.
+      if (!readable.has(file)) {
+        if (previous) { sessions.push(previous); this.native.set(key, path); }
+        continue;
+      }
+      try {
+        const entries = this.readEntries(path), messages = piMessages(piBranch(entries));
+        this.native.set(key, path);
+        const last = lastVisiblePreview(messages);
+        const title = entries.filter(e => e.type === 'session_info').at(-1)?.name || messages.find(m => m.role === 'user')?.text.slice(0, 100) || basename(this.project);
+        sessions.push({ connectionId: '', agentId: 'pi', key, kind: 'direct', title, updatedAt: last?.lastActivityAt ?? null, lastActivityAt: last?.lastActivityAt ?? null, preview: last?.preview, hasActiveRun: false, source: 'native', allowedActions: { rename: false, reset: false, delete: false, pin: true } });
+      } catch {
+        // An active/incompatible transcript cannot erase an already known row.
+        // New unsupported files retain legacy skip semantics.
+        if (previous) { sessions.push(previous); this.native.set(key, path); }
+      }
+    }
+    return sessions;
+  }
   async health(): Promise<object> {
     const live = this.processes.get(this.records[0].id) ?? this.processes.values().next().value ?? await this.process(this.records[0]);
     const state = await live.rpc.request('get_state');
     const catalog = await live.rpc.request('get_available_models');
     const record = this.records.find(item => this.processes.get(item.id) === live);
     if (record) { record.model = state.model?.id; record.provider = state.model?.provider; }
-    return { backend: 'pi', protocol: 1, modelReady: (catalog.models ?? []).some((m: any) => m.provider === state.model?.provider && m.id === state.model?.id), model: state.model?.id ?? '', vision: state.model?.input?.includes('image') === true, project: basename(this.project) };
+    return { backend: 'pi', sessionCatalogSync: 1, promptStatus: true, protocol: 1, modelReady: (catalog.models ?? []).some((m: any) => m.provider === state.model?.provider && m.id === state.model?.id), model: state.model?.id ?? '', vision: state.model?.input?.includes('image') === true, project: basename(this.project) };
   }
   async request(frame: PiRequest): Promise<unknown> {
+    const result = await this.dispatch(frame);
+    if (['sessions.create', 'sessions.rename', 'sessions.reset', 'sessions.delete'].includes(frame.method)) this.catalogSync.invalidate();
+    return result;
+  }
+  private async dispatch(frame: PiRequest): Promise<unknown> {
     if (frame?.type !== 'req' || typeof frame.id !== 'string' || !frame.id || frame.id.length > 200) throw new Error('Invalid request');
     const p = frame.params ?? {};
     switch (frame.method) {
       case 'health': case 'connect': return this.health();
-      case 'agents.list': return [{ connectionId: '', agentId: 'pi', name: `Pi · ${basename(this.project)}`, isMain: true, mainSessionKey: this.records[0].id }];
-      case 'sessions.list': {
-        const sessions = this.records.map(r => this.descriptor(r));
-        this.native.clear();
-        const dir = nativePiDirectory(this.project, this.agentDirectory, this.options.nativeSessionDirectory, { ...process.env, ...this.options.env });
-        if (existsSync(dir)) for (const file of readdirSync(dir).filter(f => f.endsWith('.jsonl')).slice(-200)) {
-          try {
-            const path = join(dir, file), entries = this.readEntries(path), messages = piMessages(piBranch(entries));
-            const key = `native-${createHash('sha256').update(file).digest('hex').slice(0, 24)}`;
-            this.native.set(key, path);
-            const last = lastVisiblePreview(messages);
-            const title = entries.filter(e => e.type === 'session_info').at(-1)?.name || messages.find(m => m.role === 'user')?.text.slice(0, 100) || basename(this.project);
-            sessions.push({ connectionId: '', agentId: 'pi', key, kind: 'direct', title, updatedAt: last?.lastActivityAt ?? null, lastActivityAt: last?.lastActivityAt ?? null, preview: last?.preview, hasActiveRun: false, source: 'native', allowedActions: { rename: false, reset: false, delete: false, pin: true } });
-          } catch { /* An active/incompatible native transcript cannot take the Bridge offline. */ }
-        }
-        return sessions;
+      case 'chat.promptStatus': {
+        const identity = readPromptIdentity(p.idempotencyKey);
+        const record = this.records.find(row => row.id === p.sessionKey);
+        return recordedPromptStatus(record && Object.hasOwn(record.keys, identity) ? record.keys[identity] : undefined);
       }
+      case 'agents.list': return [{ connectionId: '', agentId: 'pi', name: `Pi · ${basename(this.project)}`, isMain: true, mainSessionKey: this.records[0].id }];
+      case 'sessions.list': return this.listSessions();
+      case 'sessions.sync': return this.catalogSync.reply(p);
       case 'sessions.create': {
         if (p.fromSession !== undefined && typeof p.fromSession !== 'string') throw new Error('Invalid source session');
         return this.descriptor(this.create(typeof p.title === 'string' ? p.title : '', p.fromSession as string | undefined));
@@ -192,6 +230,7 @@ export class PiService extends EventEmitter {
       case 'chat.steer': {
         const live = this.processes.get(this.record(p.sessionKey).id);
         if (!live?.run || live.run.id !== p.runId || typeof p.text !== 'string' || p.text.length > 128_000 || !p.text.trim()) throw new Error('Task is no longer running');
+        if (live.run.identity && !live.run.identity.capturing) live.run.identity.valid = false;
         await live.rpc.request('steer', { message: p.text }); return { ok: true };
       }
       case 'questions.list': return [...(this.processes.get(this.record(p.sessionKey).id)?.questions.values() ?? [])];
@@ -231,6 +270,7 @@ export class PiService extends EventEmitter {
     if (native) entries = piBranch(this.readEntries(native));
     else {
       const record = this.record(key); live = await this.process(record);
+      await live.identityCapture;
       // Seed from our private transcript, then ask Pi only for newer/unflushed entries.
       // Replaying the whole RPC history would exceed a JSONL frame after a few image turns.
       const persisted = this.readEntries(join(this.options.directory, record.file), 128 * 1024 * 1024).filter(entry => entry.type !== 'session');
@@ -242,6 +282,21 @@ export class PiService extends EventEmitter {
       entries = ordered.reverse();
     }
     const messages = piMessages(entries);
+    // Native histories stay read-only. Only exact IDs proven in our owned process
+    // may associate a native echo with a phone's optimistic message.
+    if (!native) {
+      const record = this.record(key), identities = new Map<string, string | null>();
+      for (const [identity, receipt] of Object.entries(record.keys)) {
+        if (!identity || identity.length > 200 || recordedPromptStatus(receipt).status !== 'recorded'
+          || receipt.nativeFile !== record.file || typeof receipt.nativeEntryId !== 'string'
+          || !receipt.nativeEntryId || receipt.nativeEntryId.length > 200) continue;
+        identities.set(receipt.nativeEntryId, identities.has(receipt.nativeEntryId) ? null : identity);
+      }
+      for (const message of messages) {
+        const identity = identities.get(message.id);
+        if (message.role === 'user' && identity) message.idempotencyKey = identity;
+      }
+    }
     const run = live?.run;
     // Extension commands may wait for UI without writing a Pi user entry.
     // Restore their current input so recovery cannot attach activity to an older turn.
@@ -267,18 +322,64 @@ export class PiService extends EventEmitter {
       if (images.length && !state.model.input?.includes('image')) throw new Error('This model does not support images');
       if (input.thinkingLevel) await live.rpc.request('set_thinking_level', { level: input.thinkingLevel });
       if (Object.keys(record.keys).length >= 10000) throw new Error('Start a new session to continue');
+      const identity = await this.promptIdentity(record, live, state, input.idempotencyKey);
       if (this.stopped) throw new Error('Pi Bridge stopped');
+      // An extension can start work while native state/checkpoint reads await.
+      // Check again before recording this input or replacing the active run.
+      if (live.run) throw new Error('This session is busy. Stop it or send guidance.');
       const runId = randomUUID();
-      Object.defineProperty(record.keys, input.idempotencyKey, { value: { hash, runId }, enumerable: true, configurable: true, writable: true }); record.activity = Date.now(); record.preview = sessionPreview(input.text, images.length > 0); if (!record.title && input.text.trim()) record.title = input.text.trim().slice(0, 80); record.model = state.model?.id; record.provider = state.model?.provider; this.save();
-      live.run = { id: runId, text: '', inputText: input.text, started: Date.now() };
+      const before = { activity: record.activity, preview: record.preview, title: record.title, model: record.model, provider: record.provider };
+      Object.defineProperty(record.keys, input.idempotencyKey, { value: { hash, runId }, enumerable: true, configurable: true, writable: true }); record.activity = Date.now(); record.preview = sessionPreview(input.text, images.length > 0); if (!record.title && input.text.trim()) record.title = input.text.trim().slice(0, 80); record.model = state.model?.id; record.provider = state.model?.provider;
+      try { this.save(); }
+      catch (error) { delete record.keys[input.idempotencyKey]; Object.assign(record, before); throw error; }
+      live.run = { id: runId, text: '', inputText: input.text, started: Date.now(), identity };
       this.update({ type: 'run_started', sessionKey: record.id, runId });
       // The durable acceptance is our acknowledgement. Pi extension commands may await user input before their RPC response.
-      void live.rpc.request('prompt', { message: input.text, images: images.map(a => ({ type: 'image', mimeType: a.mimeType, data: a.content })) }).then(async () => {
+      void live.rpc.request('prompt', { message: input.text, images: images.map(a => ({ type: 'image', mimeType: a.mimeType, data: a.content })) }, {
+        // This callback runs in JSONL order, before any following event in the
+        // same stdout chunk. Promise callbacks would run too late to prove order.
+        onSuccess: () => { if (identity) identity.acknowledged = true; },
+      }).then(async () => {
+        if (this.stopped || this.processes.get(record.id) !== live || live.run?.id !== runId) return;
         const current = await live.rpc.request('get_state');
         if (live.run?.id === runId && !live.run.agentStarted && !current.isStreaming && !current.isCompacting && !current.pendingMessageCount) this.finish(record, live, live.run.stop ?? 'end_turn');
       }).catch(() => { if (live.run?.id === runId) { this.update({ type: 'error', sessionKey: record.id, runId, code: 'server', message: 'Pi could not complete this request. Check model credentials and project trust on your computer.' }); this.finish(record, live, 'error'); } });
       return { runId };
     });
+  }
+  private async promptIdentity(record: RecordEntry, live: Running, state: any, key: string): Promise<PromptIdentity | undefined> {
+    if (typeof state.sessionId !== 'string' || !state.sessionId || state.sessionId.length > 200
+      || state.isStreaming || state.isCompacting || state.pendingMessageCount) return undefined;
+    const cursor = persistedPiCursor(join(this.options.directory, record.file));
+    if (cursor === undefined) return undefined;
+    try {
+      const result = await live.rpc.request('get_entries', cursor ? { since: cursor } : {}, { timeoutMs: 2000 });
+      if (!(result.leafId === null || (typeof result.leafId === 'string' && result.leafId.length > 0 && result.leafId.length <= 200))) return undefined;
+      return { sessionId: state.sessionId, leafId: result.leafId, file: record.file, key, acknowledged: false, starts: 0, users: 0, valid: true };
+    } catch { return undefined; }
+  }
+  private capturePromptIdentity(record: RecordEntry, live: Running, run: NonNullable<Running['run']>): void {
+    const identity = run.identity;
+    if (!identity || identity.capturing || !identity.valid || !identity.acknowledged || identity.starts !== 1 || identity.users !== 1) return;
+    identity.capturing = true;
+    const isCurrent = () => !this.stopped && this.processes.get(record.id) === live && record.file === identity.file
+      && identity.valid && identity.starts === 1 && identity.users === 1;
+    const capture = (async () => {
+      const result = await live.rpc.request('get_entries', identity.leafId ? { since: identity.leafId } : {}, { timeoutMs: 2000 });
+      // request() may start its child. A late checkpoint must not resurrect an
+      // evicted/stopped Pi process just to read the follow-up state.
+      if (!isCurrent()) return;
+      const state = await live.rpc.request('get_state', {}, { timeoutMs: 2000 });
+      if (!isCurrent() || state.sessionId !== identity.sessionId) return;
+      const entryId = piPromptEntryId(identity.leafId, result);
+      const receipt = Object.hasOwn(record.keys, identity.key) ? record.keys[identity.key] : undefined;
+      if (!entryId || receipt?.runId !== run.id) return;
+      receipt.nativeEntryId = entryId; receipt.nativeFile = identity.file;
+      try { this.save(); }
+      catch { delete receipt.nativeEntryId; delete receipt.nativeFile; }
+    })().catch(() => { /* Missing evidence never changes an uncertain send into success. */ });
+    live.identityCapture = capture;
+    void capture.finally(() => { if (live.identityCapture === capture) live.identityCapture = undefined; });
   }
   private event(record: RecordEntry, live: Running, event: any): void {
     const sessionKey = record.id;
@@ -293,7 +394,16 @@ export class PiService extends EventEmitter {
     if (event.type === 'agent_start' && !live.run) { live.run = { id: randomUUID(), text: '', started: Date.now() }; this.update({ type: 'run_started', sessionKey, runId: live.run.id }); }
     const run = live.run; if (!run) return;
     const runId = run.id;
-    if (event.type === 'agent_start') run.agentStarted = true;
+    if (event.type === 'agent_start') {
+      run.agentStarted = true;
+      if (run.identity) { run.identity.starts++; if (!run.identity.acknowledged || run.identity.starts !== 1) run.identity.valid = false; }
+    }
+    if (event.type === 'message_end' && event.message?.role === 'user' && run.identity) {
+      run.identity.users++;
+      // Pi appends this entry synchronously after emitting message_end. A later
+      // stdin RPC is processed only after that append completes.
+      this.capturePromptIdentity(record, live, run);
+    }
     if (event.type === 'message_start' && event.message?.role === 'assistant') run.text = '';
     if (event.type === 'message_update') {
       const delta = event.assistantMessageEvent;

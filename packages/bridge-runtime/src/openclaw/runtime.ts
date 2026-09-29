@@ -1,6 +1,9 @@
 import { OpenClawSessionFiles } from './session-files.js';
 import { OpenClawSkillDocuments } from './skill-documents.js';
+import { RelayOwnerCadence } from '../relay-owner-cadence.js';
 import { relayNetworkOptions } from '../relay-network.js';
+import { advertiseRelayOwnerPong, RelayOwnerPong } from '../relay-owner-pong.js';
+import { advertiseRelayTransfer } from '../relay-transfer-lease.js';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { PeerCertificate } from 'node:tls';
@@ -150,10 +153,12 @@ export class BridgeRuntime {
   private gatewayConnecting = false;
   private stopped = true;
   private readonly relaySessionState = new RelaySessionState();
+  private ownerPong: RelayOwnerPong | null = null;
+  private relayPingPending = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private gatewayRetryTimer: NodeJS.Timeout | null = null;
   private gatewayRetryAttempt = 0;
-  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private heartbeatTimer: RelayOwnerCadence | null = null;
   private challengeWaitTimer: NodeJS.Timeout | null = null;
   private bootstrapRequestsInFlight = 0;
   private skillDocuments: OpenClawSkillDocuments | null = null;
@@ -263,6 +268,8 @@ export class BridgeRuntime {
     const channelUrl = new URL(buildRelayWsUrl(this.options.config));
     if (this.targetConnectionId) channelUrl.searchParams.set('targetConnectionId', this.targetConnectionId);
     else if (this.options.clientChannels) channelUrl.searchParams.set('capabilities', 'bridge.client-sockets.v1');
+    advertiseRelayOwnerPong(channelUrl);
+    advertiseRelayTransfer(channelUrl);
     const relayUrl = channelUrl.toString();
     const relayHeaders = buildRelayWsHeaders(this.options.config);
     this.log(
@@ -275,6 +282,17 @@ export class BridgeRuntime {
       maxPayload: WEBSOCKET_FRAME_LIMIT_BYTES,
     });
     this.relaySocket = relay;
+    this.ownerPong = new RelayOwnerPong({
+      timeoutMs: this.options.heartbeatTimeoutMs,
+      send: frame => { if (this.relaySocket === relay && !this.stopped) this.sendFrame(relay, frame, 'relay_out'); },
+      onConfirmed: () => {
+        if (this.relaySocket !== relay || this.stopped) return;
+        this.relayPingPending = false;
+        this.relaySessionState.confirmHealth();
+      },
+      onTimeout: () => { if (this.relaySocket === relay && !this.stopped) relay.terminate(); },
+      log: line => this.log(line),
+    });
 
     relay.once('open', () => {
       if (this.stopped || this.relaySocket !== relay) {
@@ -293,11 +311,14 @@ export class BridgeRuntime {
 
     relay.on('message', (data: RawData, isBinary: boolean) => {
       if (this.relaySocket !== relay || this.stopped) return;
+      this.ownerPong?.noteFrameReceived(getWebSocketFrameByteLength(data));
       void this.handleRelayMessage(data, isBinary);
     });
 
-    relay.on('pong', () => {
+    relay.on('pong', (data: Buffer) => {
       if (this.stopped || this.relaySocket !== relay) return;
+      if (this.ownerPong && !this.ownerPong.confirmTransportPong(data?.toString())) return;
+      this.relayPingPending = false;
       if (this.relaySessionState.confirmHealth()) {
         this.log('relay health confirmed; reconnect backoff reset');
       }
@@ -337,7 +358,9 @@ export class BridgeRuntime {
       this.relayConnecting = false;
       void this.stopClientRuntimes();
       this.clientChannelsNegotiated = false;
+      const maximumRetryDelayMs = this.ownerPong?.takeReconnectDelay(Infinity, code);
       this.stopHeartbeat();
+      this.ownerPong?.dispose(); this.ownerPong = null;
       this.clientDemandStartedAtMs = null;
       this.gatewayConnectedAtMs = null;
       this.updateSnapshot({
@@ -348,7 +371,7 @@ export class BridgeRuntime {
       });
       this.log(`relay disconnected code=${code} reason=${reason.toString() || '<none>'}`);
       this.closeGateway();
-      this.scheduleRelayReconnect();
+      this.scheduleRelayReconnect(maximumRetryDelayMs);
     });
   }
 
@@ -391,6 +414,9 @@ export class BridgeRuntime {
     targetClientId?: string;
     count?: number;
   }): Promise<void> {
+    const consumed = this.ownerPong?.handleControl(control);
+    this.heartbeatTimer?.observe(control);
+    if (consumed) return;
     if (control.event === 'client.sockets' && this.options.clientChannels && !this.targetConnectionId) {
       const ids = control.payload?.clients;
       if (!Array.isArray(ids) || ids.length > 128 || ids.some(id => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) return;
@@ -1225,6 +1251,7 @@ export class BridgeRuntime {
   private sendFrame(socket: RuntimeSocket, data: WebSocketFrameData, direction: string): boolean {
     if (this.rejectOversizedFrame(socket, data, direction)) return false;
     socket.send(data as Parameters<RuntimeSocket['send']>[0]);
+    if (socket === this.relaySocket) this.ownerPong?.noteTransfer(getWebSocketFrameByteLength(data));
     return true;
   }
 
@@ -1253,11 +1280,11 @@ export class BridgeRuntime {
     this.inFlightConnectHandshakes.clear();
   }
 
-  private scheduleRelayReconnect(): void {
+  private scheduleRelayReconnect(maximumDelayMs = Infinity): void {
     if (this.stopped || this.reconnectTimer) return;
     const base = this.options.reconnectBaseDelayMs ?? RECONNECT_BASE_DELAY_MS;
     const max = this.options.reconnectMaxDelayMs ?? RECONNECT_MAX_DELAY_MS;
-    const delayMs = this.relaySessionState.reconnectDelayMs(base, max);
+    const delayMs = Math.min(maximumDelayMs, this.relaySessionState.reconnectDelayMs(base, max));
     this.log(`relay reconnect scheduled delayMs=${delayMs}`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -1290,27 +1317,35 @@ export class BridgeRuntime {
   private startHeartbeat(): void {
     this.stopHeartbeat();
     const intervalMs = this.options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
-    let lastTickMs = Date.now();
-    this.heartbeatTimer = setInterval(() => {
-      const nowMs = Date.now();
-      const schedulerDelayMs = Math.max(0, nowMs - lastTickMs - intervalMs);
-      lastTickMs = nowMs;
-      const relay = this.relaySocket;
-      if (!relay || relay.readyState !== WebSocket.OPEN) return;
-      this.logSlowConnectHandshakes();
-      const timeoutMs = this.options.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
-      if (this.relaySessionState.heartbeatTimedOut(timeoutMs)) {
-        this.log(`relay heartbeat timed out idleMs=${this.relaySessionState.activityAgeMs(nowMs)} timeoutMs=${timeoutMs} schedulerDelayMs=${schedulerDelayMs} queued=${this.pendingGatewayMessages.length} socketKind=${this.targetConnectionId ? 'channel' : 'owner'}`);
-        relay.terminate();
-        return;
-      }
-      relay.ping();
-    }, this.options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer = new RelayOwnerCadence({ idleIntervalMs: intervalMs,
+      negotiated: () => this.ownerPong?.negotiated === true,
+      socketList: this.options.clientChannels && !this.targetConnectionId,
+      onTick: schedulerDelayMs => {
+        const nowMs = Date.now();
+        const relay = this.relaySocket;
+        if (!relay || relay.readyState !== WebSocket.OPEN) return;
+        this.logSlowConnectHandshakes();
+        const timeoutMs = this.options.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS;
+        // Presence changes only future cadence. Each ping retains its own deadline;
+        // business traffic cannot clear it. Legacy activity-based liveness is unchanged.
+        if (this.ownerPong?.negotiated) {
+          if (!this.ownerPong.startProtocolPing(Math.min(intervalMs, timeoutMs))) return;
+        } else if (this.relaySessionState.heartbeatTimedOut(timeoutMs)) {
+          this.log(`relay heartbeat timed out idleMs=${this.relaySessionState.activityAgeMs(nowMs)} timeoutMs=${timeoutMs} schedulerDelayMs=${schedulerDelayMs} queued=${this.pendingGatewayMessages.length} socketKind=${this.targetConnectionId ? 'channel' : 'owner'}`);
+          relay.terminate();
+          return;
+        }
+        this.relayPingPending = true;
+        relay.ping(this.ownerPong?.protocolPingPayload);
+      },
+    });
+    this.heartbeatTimer.schedule();
   }
 
   private stopHeartbeat(): void {
+    this.relayPingPending = false;
     if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer.dispose();
       this.heartbeatTimer = null;
     }
   }
@@ -1436,6 +1471,7 @@ export class BridgeRuntime {
   private clearTimers(): void {
     this.clearChallengeWait();
     this.stopHeartbeat();
+    this.ownerPong?.dispose(); this.ownerPong = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

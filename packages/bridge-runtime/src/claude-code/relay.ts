@@ -1,11 +1,14 @@
 import { ClaudeFault } from './errors.js';
+import { RelayOwnerCadence } from '../relay-owner-cadence.js';
 import { relayNetworkOptions } from '../relay-network.js';
+import { advertiseRelayOwnerPong, RelayOwnerPong } from '../relay-owner-pong.js';
+import { advertiseRelayTransfer } from '../relay-transfer-lease.js';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { randomUUID } from 'node:crypto';
 import { createSecurePairingBridgeProof, createSecurePairingClientProof, securePairingProofEquals } from '@clawket/bridge-core';
 import { ClaudeService, type ClaudeRequest } from './service.js';
-import { WEBSOCKET_FRAME_LIMIT_BYTES } from '../frame-limit.js';
+import { getWebSocketFrameByteLength, WEBSOCKET_FRAME_LIMIT_BYTES } from '../frame-limit.js';
 
 const PREFIX = '__clawket_relay_control__:';
 export interface ClaudeInvitation { sessionId: string; codeKeyHex: string; qrPayload: string; expiresAt: string; attempts: number }
@@ -15,7 +18,8 @@ export class ClaudeRelay {
   private readonly relayNetwork = relayNetworkOptions();
   private socket: WebSocket | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
-  private ping: ReturnType<typeof setInterval> | null = null;
+  private ping: RelayOwnerCadence | null = null;
+  private ownerPong: RelayOwnerPong | null = null;
   private readiness: ReturnType<typeof setTimeout> | null = null;
   private stopped = true;
   private attempts = 0;
@@ -50,9 +54,10 @@ export class ClaudeRelay {
   stop(): void {
     this.stopped = true;
     this.ready = false;
+    this.ownerPong?.dispose(); this.ownerPong = null;
     for (const waiter of this.readyWaiters) waiter.reject(new Error('Relay stopped'));
     if (this.retry) clearTimeout(this.retry);
-    if (this.ping) clearInterval(this.ping);
+    this.ping?.dispose();
     if (this.readiness) clearTimeout(this.readiness);
     this.retry = null; this.ping = null; this.readiness = null;
     const socket = this.socket; this.socket = null; socket?.terminate();
@@ -66,12 +71,23 @@ export class ClaudeRelay {
     url.searchParams.set('gatewayId', this.config.gatewayId);
     url.searchParams.set('role', 'gateway');
     url.searchParams.set('clientId', this.instanceId);
+    advertiseRelayOwnerPong(url);
+    advertiseRelayTransfer(url);
     const socket = new WebSocket(url, { ...this.relayNetwork, headers: { Authorization: `Bearer ${this.config.relaySecret}` }, maxPayload: WEBSOCKET_FRAME_LIMIT_BYTES, handshakeTimeout: 15_000 });
     this.socket = socket;
     let alive = true;
     let missedPongs = 0;
     let lastPongAt = 0;
-    let lastPingCheckAt = 0;
+    const ownerPong = new RelayOwnerPong({
+      send: frame => { if (this.socket === socket && !this.stopped) this.send(frame); },
+      onConfirmed: () => {
+        if (this.socket !== socket || this.stopped) return;
+        alive = true; missedPongs = 0; lastPongAt = Date.now();
+      },
+      onTimeout: () => { if (this.socket === socket && !this.stopped) socket.terminate(); },
+      log: line => this.log('claude-code ' + line),
+    });
+    this.ownerPong = ownerPong;
     let ownerLeasePending = false;
     socket.on('open', () => {
       if (this.socket !== socket || this.stopped) { socket.terminate(); return; }
@@ -81,31 +97,43 @@ export class ClaudeRelay {
           this.log('claude-code relay readiness timeout'); socket.terminate();
         }
       }, 15_000);
-      lastPongAt = lastPingCheckAt = Date.now();
-      this.ping = setInterval(() => {
-        const now = Date.now();
-        const schedulerDelayMs = Math.max(0, now - lastPingCheckAt - 15_000);
-        lastPingCheckAt = now;
-        if (!alive) missedPongs++;
-        if (missedPongs >= 3) {
-          this.log(`claude-code relay heartbeat timeout idleMs=${Math.max(0, now - lastPongAt)} schedulerDelayMs=${schedulerDelayMs} queuedBytes=${socket.bufferedAmount}`);
-          socket.terminate(); return;
-        }
-        if (!alive) this.log(`claude-code relay heartbeat delayed missedPongs=${missedPongs}`);
-        alive = false; socket.ping();
-      }, 15_000);
+      lastPongAt = Date.now();
+      this.ping = new RelayOwnerCadence({ idleIntervalMs: 15_000, negotiated: () => ownerPong.negotiated,
+        onTick: schedulerDelayMs => {
+          if (this.socket !== socket || this.stopped) return;
+          const now = Date.now();
+          if (ownerPong.negotiated) {
+            if (!ownerPong.startProtocolPing()) return;
+            alive = false; socket.ping(ownerPong.protocolPingPayload);
+            return;
+          }
+          if (!alive) missedPongs++;
+          if (missedPongs >= 3) {
+            this.log(`claude-code relay heartbeat timeout idleMs=${Math.max(0, now - lastPongAt)} schedulerDelayMs=${schedulerDelayMs} queuedBytes=${socket.bufferedAmount}`);
+            socket.terminate(); return;
+          }
+          if (!alive) this.log(`claude-code relay heartbeat delayed missedPongs=${missedPongs}`);
+          alive = false; socket.ping();
+        },
+      });
+      this.ping.schedule();
     });
-    socket.on('pong', () => {
-      if (this.socket !== socket) return;
+    socket.on('pong', (data: Buffer) => {
+      if (this.socket !== socket || this.stopped) return;
+      if (!ownerPong.confirmTransportPong(data?.toString())) return;
       if (missedPongs) this.log(`claude-code relay heartbeat recovered missedPongs=${missedPongs}`);
       alive = true; missedPongs = 0; lastPongAt = Date.now();
     });
     socket.on('message', raw => {
       if (this.socket !== socket || this.stopped) return;
       const text = raw.toString();
+      ownerPong.noteFrameReceived(getWebSocketFrameByteLength(raw));
       if (text.startsWith(PREFIX)) {
         try {
           const control = JSON.parse(text.slice(PREFIX.length));
+          const consumed = ownerPong.handleControl(control);
+          this.ping?.observe(control);
+          if (consumed) return;
           if (control.event === 'relay.ready') {
             if (this.readiness) clearTimeout(this.readiness); this.readiness = null;
             this.attempts = 0; this.ready = true;
@@ -152,7 +180,10 @@ export class ClaudeRelay {
       this.log(`claude-code relay closed code=${code}`);
       this.socket = null;
       this.ready = false;
-      if (this.ping) clearInterval(this.ping);
+      const fastRetryDelayMs = ownerPong.takeReconnectDelay(30_000, code);
+      ownerPong.dispose();
+      if (this.ownerPong === ownerPong) this.ownerPong = null;
+      this.ping?.dispose();
       if (this.readiness) clearTimeout(this.readiness);
       this.ping = null; this.readiness = null;
       if (code === 4010 || code === 4001) { this.stop(); return; }
@@ -160,7 +191,7 @@ export class ClaudeRelay {
         if (!ownerLeasePending) this.attempts++;
         // A previous process can hold the 20s owner lease after abrupt shutdown.
         // Do not let exponential delays push the next attempt past startup readiness.
-        const delayMs = ownerLeasePending ? 2000 : Math.min(30_000, 1000 * 2 ** Math.min(this.attempts, 5));
+        const delayMs = ownerLeasePending ? 2000 : Math.min(fastRetryDelayMs, 1000 * 2 ** Math.min(this.attempts, 5));
         this.log(`claude-code relay retry attempt=${this.attempts} delayMs=${delayMs}`);
         this.retry = setTimeout(() => { this.retry = null; this.connect(); }, delayMs);
       }
@@ -172,6 +203,7 @@ export class ClaudeRelay {
     if (socket?.readyState !== WebSocket.OPEN) return;
     if (Buffer.byteLength(data) > WEBSOCKET_FRAME_LIMIT_BYTES || socket.bufferedAmount > WEBSOCKET_FRAME_LIMIT_BYTES) { socket.terminate(); return; }
     socket.send(data);
+    this.ownerPong?.noteTransfer(Buffer.byteLength(data));
   }
 
   private pair(control: { requestId?: string; sourceClientId?: string; payload?: Record<string, unknown> }): void {

@@ -1,4 +1,6 @@
+import { SessionCatalogSync } from '../session-catalog.js';
 import { InteractionAttention } from '../interaction-attention.js';
+import { readPromptIdentity, recordedPromptStatus } from '../prompt-status.js';
 import { sessionPreview } from '../session-preview.js';
 import { ClaudeFault } from './errors.js';
 import { EventEmitter } from 'node:events';
@@ -84,14 +86,31 @@ export class ClaudeService extends EventEmitter {
       allowedActions: { rename: !record.imported, reset: !record.imported, delete: !record.imported, pin: true } };
   }
 
+  private readonly catalogSync = new SessionCatalogSync(() => this.listSessions(true));
+  private async listSessions(strict = false): Promise<SessionDescriptor[]> {
+    const roster = await this.owners.snapshot();
+    const native = await this.discover(roster, strict);
+    const recentOwned = [...this.store.records].filter(record => record.materialized && !!record.nativeId && !this.catalog.hasNativeEntry(record.nativeId))
+      .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)).slice(0, 8);
+    for (let index = 0; index < recentOwned.length; index += 2) await Promise.all(recentOwned.slice(index, index + 2).map(record =>
+      this.catalog.loadPreview(record.nativeId!, record.cwd, record.lastActivityAt ?? record.createdAt)));
+    const owned = [];
+    for (const record of this.store.records) owned.push(await this.descriptor(record, roster));
+    return [...owned, ...native];
+  }
   async health(): Promise<object> {
     if (this.stopped) throw new ClaudeFault('Claude Bridge is stopped');
     // Viewing projects/history remains useful when model authentication needs attention.
-    return { backend: 'claude-code', projects: true, vision: true,
+    return { backend: 'claude-code', sessionCatalogSync: 1, promptStatus: true, projects: true, vision: true,
       capabilities: { steer: false, thinkingLevels: false, skills: false, sessionBranch: true } };
   }
 
   async request(frame: ClaudeRequest): Promise<unknown> {
+    const result = await this.dispatch(frame);
+    if (['sessions.create', 'sessions.rename', 'sessions.reset', 'sessions.delete'].includes(frame.method)) this.catalogSync.invalidate();
+    return result;
+  }
+  private async dispatch(frame: ClaudeRequest): Promise<unknown> {
     if (this.stopped || !frame || frame.type !== 'req' || typeof frame.id !== 'string'
       || frame.id.length > 200 || !frame.id || typeof frame.method !== 'string'
       || frame.params !== undefined && (!frame.params || typeof frame.params !== 'object' || Array.isArray(frame.params))) {
@@ -100,19 +119,15 @@ export class ClaudeService extends EventEmitter {
     const p = frame.params ?? {};
     switch (frame.method) {
       case 'health': return this.health();
+      case 'chat.promptStatus': {
+        const identity = hash(readPromptIdentity(p.idempotencyKey));
+        const record = this.store.records.find(row => row.key === p.sessionKey);
+        return recordedPromptStatus(record && Object.hasOwn(record.fingerprints, identity) ? record.fingerprints[identity] : undefined);
+      }
       case 'agents.list': return [{ connectionId: '', agentId: 'claude-code', name: 'Claude Code', isMain: true, entryMode: 'sessions', mainSessionKey: '' }];
       case 'projects.list': await this.discover({ known: false, owners: [] }); return this.catalog.listProjects();
-      case 'sessions.list': {
-        const roster = await this.owners.snapshot();
-        const native = await this.discover(roster);
-        const recentOwned = [...this.store.records].filter(record => record.materialized && !!record.nativeId && !this.catalog.hasNativeEntry(record.nativeId))
-          .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)).slice(0, 8);
-        for (let index = 0; index < recentOwned.length; index += 2) await Promise.all(recentOwned.slice(index, index + 2).map(record =>
-          this.catalog.loadPreview(record.nativeId!, record.cwd, record.lastActivityAt ?? record.createdAt)));
-        const owned = [];
-        for (const record of this.store.records) owned.push(await this.descriptor(record, roster));
-        return [...owned, ...native];
-      }
+      case 'sessions.list': return this.listSessions();
+      case 'sessions.sync': return this.catalogSync.reply(p);
       case 'sessions.create': return this.serial(async () => {
         if (this.store.records.length >= 500) throw new ClaudeFault('Claude conversation limit reached');
         await this.discover();
@@ -257,9 +272,10 @@ export class ClaudeService extends EventEmitter {
     this.locks.get(key)?.close(); this.locks.delete(key);
   }
 
-  private async discover(roster?: ClaudeOwnerSnapshot): Promise<SessionDescriptor[]> {
+  private async discover(roster?: ClaudeOwnerSnapshot, strict = false): Promise<SessionDescriptor[]> {
     try {
       const result = await this.catalog.discover();
+      if (strict && !result.complete) throw new ClaudeFault('Claude conversation catalog could not be refreshed completely');
       if (result.truncated) this.update({ type: 'error', code: 'unsupported', message: 'Claude history discovery reached its safety limit. Some older conversations are not shown.' });
       const ownedKeys = new Set(this.store.records.flatMap(record => record.nativeId ? [`native:${hash(record.nativeId).slice(0, 32)}`] : []));
       const snapshot = roster ?? await this.owners.snapshot();
@@ -268,6 +284,7 @@ export class ClaudeService extends EventEmitter {
       }));
     }
     catch {
+      if (strict) throw new ClaudeFault('Claude conversation catalog could not be refreshed completely');
       this.update({ type: 'error', code: 'server', message: 'Claude native history could not be refreshed. Existing Clawket chats remain available.' });
       await this.catalog.addProject(this.project);
       return [];
