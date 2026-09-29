@@ -700,6 +700,27 @@ describe('AgentSettings functional sections', () => {
     expect(view.queryByTestId('agent-cron-failed')).toBeNull();
   });
 
+  it('keeps an empty run history in place when the Runs tab re-reads or is revisited', async () => {
+    const adapter = cronAdapter();
+    const runs = adapter.management?.cron?.runs as jest.Mock;
+    runs.mockResolvedValue({ entries: [], total: 0, offset: 0, limit: 100, hasMore: false, nextOffset: null });
+    const view = render(<CronSection adapter={adapter} agent={agent} online onCreate={jest.fn()} onEdit={jest.fn()} />);
+    await waitFor(() => expect(view.getByTestId('agent-cron-runs-empty')).toBeTruthy());
+    runs.mockImplementation(() => new Promise(() => undefined));
+    fireEvent.press(view.getByTestId('agent-cron-tabs-jobs'));
+    fireEvent.press(view.getByTestId('agent-cron-tabs-runs'));
+    await waitFor(() => expect(runs).toHaveBeenCalledTimes(2));
+    expect(view.getByTestId('agent-cron-runs-empty')).toBeTruthy();
+    expect(view.queryByTestId('agent-cron-loading')).toBeNull();
+    view.unmount();
+
+    // A later visit starts from the answer this adapter already gave.
+    const revisit = render(<CronSection adapter={adapter} agent={agent} online onCreate={jest.fn()} onEdit={jest.fn()} />);
+    await waitFor(() => expect(revisit.getByTestId('agent-cron-tabs-runs')).toBeTruthy());
+    expect(revisit.getByTestId('agent-cron-runs-empty')).toBeTruthy();
+    expect(revisit.queryByTestId('agent-cron-loading')).toBeNull();
+  });
+
   it('opens a full task editor, toggles inline, and retains heartbeat editing', async () => {
     const adapter = cronAdapter();
     const onEdit = jest.fn();

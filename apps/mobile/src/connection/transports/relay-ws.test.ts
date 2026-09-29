@@ -5,6 +5,7 @@ import {
   WebSocketFrameTooLargeError,
 } from './frame-limit';
 import { RELAY_CLIENT_PONG_CAPABILITY, RelayWsTransport } from './relay-ws';
+import { RELAY_CLIENT_PING_CAPABILITY } from '../protocol/relay-control';
 import type { WebSocketCloseEventLike, WebSocketLike } from './types';
 
 class FakeWebSocket implements WebSocketLike {
@@ -40,6 +41,22 @@ class FakeWebSocket implements WebSocketLike {
   }
 }
 
+// Mirrors Android RN: close while native Upgrade is pending is not cancellation.
+class DeferredNativeSocket extends FakeWebSocket {
+  nativeCloses = 0;
+  throwOnOpenedClose = false;
+
+  override close(code?: number, reason?: string): void {
+    this.closeCalls.push([code, reason]);
+    if (this.readyState === 0) { this.readyState = 2; return; }
+    if (this.readyState === 1) {
+      if (this.throwOnOpenedClose) throw new Error('private native failure');
+      this.nativeCloses += 1;
+      this.readyState = 3;
+    }
+  }
+}
+
 describe('RelayWsTransport', () => {
   beforeEach(() => {
     jest.useFakeTimers();
@@ -48,6 +65,91 @@ describe('RelayWsTransport', () => {
   afterEach(() => {
     jest.useRealTimers();
   });
+
+  it.each(['disconnect', 'reconnect', 'open-timeout'] as const)(
+    'closes only a retired connecting native socket if Upgrade arrives after %s', (retire) => {
+      const sockets: DeferredNativeSocket[] = [];
+      const transport = new RelayWsTransport({
+        url: 'wss://relay.example/ws', reconnectJitter: false, openTimeoutMs: 25,
+        webSocketFactory: () => { const socket = new DeferredNativeSocket(); sockets.push(socket); return socket; },
+      });
+      const opened = jest.fn(); const retired = jest.fn(); const messages = jest.fn();
+      transport.onOpen(opened); transport.onSocketRetired(retired); transport.onMessage(messages);
+      transport.connect();
+      const old = sockets[0];
+      if (retire === 'disconnect') transport.disconnect();
+      else if (retire === 'reconnect') transport.reconnect();
+      else { jest.advanceTimersByTime(25); jest.advanceTimersByTime(800); }
+      expect(old.readyState).toBe(2);
+      expect(old.nativeCloses).toBe(0);
+      const cleanup = old.onopen;
+      const replacement = sockets[1];
+      if (replacement) { replacement.open(); transport.markReady(); }
+      const state = transport.state; const attempt = transport.reconnectAttempt;
+      const openCount = opened.mock.calls.length;
+      const retiredCount = retired.mock.calls.length;
+      const factoryCount = sockets.length;
+      old.open();
+      expect(old.nativeCloses).toBe(1);
+      expect(old.closeCalls).toHaveLength(2);
+      expect(old.onopen).toBeNull();
+      old.receive('retired-payload'); old.serverClose({ code: 1006 }); cleanup?.();
+      expect(old.closeCalls).toHaveLength(2);
+      expect(messages).not.toHaveBeenCalled();
+      expect(transport.state).toBe(state);
+      expect(transport.reconnectAttempt).toBe(attempt);
+      expect(opened).toHaveBeenCalledTimes(openCount);
+      expect(retired).toHaveBeenCalledTimes(retiredCount);
+      expect(sockets).toHaveLength(factoryCount);
+      if (replacement) {
+        expect(replacement.readyState).toBe(1);
+        expect(replacement.closeCalls).toHaveLength(0);
+        expect(replacement.sent).toEqual([]);
+        transport.send('current-payload');
+        expect(replacement.sent).toEqual(['current-payload']);
+      }
+      transport.disconnect();
+    },
+  );
+
+  it('isolates a throwing late-open disposal from the current ready connection', () => {
+    const sockets: DeferredNativeSocket[] = [];
+    const transport = new RelayWsTransport({ url: 'wss://relay.example/ws',
+      webSocketFactory: () => { const socket = new DeferredNativeSocket(); sockets.push(socket); return socket; },
+    });
+    transport.connect(); const old = sockets[0]; transport.reconnect();
+    sockets[1].open(); transport.markReady(); old.throwOnOpenedClose = true;
+    expect(() => old.open()).not.toThrow();
+    expect(old.onopen).toBeNull();
+    expect(transport.state).toBe('ready');
+    expect(sockets[1].closeCalls).toEqual([]);
+    transport.disconnect();
+  });
+
+  it.each(['manual', 'remote', 'handshake', 'heartbeat'] as const)(
+    'retires each socket once on %s replacement, including callbacks arriving late', (cause) => {
+      const sockets: FakeWebSocket[] = [];
+      const transport = new RelayWsTransport({
+        url: 'wss://relay.example/ws', handshakeTimeoutMs: 25,
+        tickIntervalMs: 10, missedTickTolerance: 3, reconnectJitter: false,
+        webSocketFactory: () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket; },
+      });
+      const retired = jest.fn();
+      transport.onSocketRetired(retired);
+      transport.connect();
+      const socket = sockets[0];
+      const lateClose = socket.onclose;
+      socket.open();
+      if (cause !== 'handshake') transport.markReady();
+      if (cause === 'manual') transport.reconnect();
+      else if (cause === 'remote') socket.serverClose({ code: 1012 });
+      else jest.advanceTimersByTime(cause === 'handshake' ? 25 : 30);
+      expect(retired).toHaveBeenCalledTimes(1);
+      lateClose?.({ code: 1006 });
+      expect(retired).toHaveBeenCalledTimes(1);
+      transport.disconnect();
+    },
+  );
 
   it('does not reset reconnect backoff until the adapter confirms ready', () => {
     const sockets: FakeWebSocket[] = [];
@@ -106,7 +208,7 @@ describe('RelayWsTransport', () => {
 
     expect(socket.sent).toEqual([JSON.stringify({ type: 'pong', ts: 13 })]);
     expect(received).toHaveLength(3);
-    expect(transport.advertisedCapabilities).toEqual([RELAY_CLIENT_PONG_CAPABILITY]);
+    expect(transport.advertisedCapabilities).toEqual([RELAY_CLIENT_PONG_CAPABILITY, RELAY_CLIENT_PING_CAPABILITY, 'relay.transfer-hint.v1']);
   });
 
   it('accepts exactly 8 MiB outbound and rejects a larger frame before send', () => {

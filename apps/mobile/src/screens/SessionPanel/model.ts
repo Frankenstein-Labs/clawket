@@ -13,7 +13,7 @@ import {
   type SessionBoardStatus,
 } from './list-model';
 
-export type SessionPanelAction = keyof SessionActions | 'export';
+export type SessionPanelAction = keyof SessionActions | 'export' | 'copy_id';
 export type SessionPanelRenamePayload = Readonly<{
   title: string;
 }>;
@@ -27,6 +27,8 @@ export type SessionPanelPageState =
 
 export type SessionPanelRow = SessionBoardRow & Readonly<{
   project?: SessionDescriptor['project'];
+  sessionId?: string;
+  archived?: boolean;
   id: string;
   connectionId: string;
   agentId: string;
@@ -129,6 +131,8 @@ export function buildSessionPanelRows(
       return [{
         ...board,
         project: session.project,
+        sessionId: session.sessionId,
+        archived: session.archived,
         id: `${session.connectionId}:${session.agentId}:${session.key}`,
         connectionId: session.connectionId,
         agentId: session.agentId,
@@ -244,13 +248,16 @@ export function availableSessionActions(
   capabilities: Pick<
     Capabilities,
     'sessionRename' | 'sessionReset' | 'sessionDelete'
-  >,
+  > & Partial<Pick<Capabilities, 'sessionArchive'>>,
 ): ReadonlyArray<SessionPanelAction> {
-  const actions: SessionPanelAction[] = row.hasActiveRun ? [] : ['export'];
+  const actions: SessionPanelAction[] = row.hasActiveRun || row.archived ? [] : ['export'];
+  if (row.sessionId) actions.push('copy_id');
+  if (!row.hasActiveRun && row.allowedActions.archive && capabilities.sessionArchive) actions.push('archive');
+  if (row.archived) return actions;
   if (row.allowedActions.pin) actions.push('pin');
   if (row.allowedActions.rename && capabilities.sessionRename) actions.push('rename');
   if (row.allowedActions.reset && capabilities.sessionReset) actions.push('reset');
-  if (row.allowedActions.delete && capabilities.sessionDelete) actions.push('delete');
+  if (row.allowedActions.delete && capabilities.sessionDelete && !(row.allowedActions.archive && capabilities.sessionArchive)) actions.push('delete');
   return actions;
 }
 

@@ -11,8 +11,10 @@ import { SettingsGroup, SettingsRow, SettingsDivider } from '../../components/ui
 import { Space } from '../../theme/tokens';
 
 const SNAP_POINTS = ['62%', '92%'];
-export function ModelHealthSheet({ visible, adapter, online, onClose }: Readonly<{
-  visible: boolean; adapter: AgentAdapter; online: boolean; onClose: () => void;
+export function ModelHealthSheet({ visible, adapter, online, reconnecting = false, onClose }: Readonly<{
+  visible: boolean; adapter: AgentAdapter; online: boolean;
+  /** The foreground grace window: the page header says Reconnecting…, so no offline notice is inserted. */
+  reconnecting?: boolean; onClose: () => void;
 }>): React.JSX.Element {
   const { t } = useTranslation(['settings', 'common']);
   const [report, setReport] = useState<ModelHealthReport | null>(null);
@@ -52,7 +54,7 @@ export function ModelHealthSheet({ visible, adapter, online, onClose }: Readonly
     closeAccessibilityLabel={t('Close', { ns: 'common' })} testID="model-health">
     <BottomSheetScrollView contentContainerStyle={[styles.content, !report && busy ? styles.loading : null]}>
       {failed ? <Banner message={t('Failed to load models')} actionLabel={t('Retry', { ns: 'common' })} onAction={() => void load(false)} /> : null}
-      {!online ? <Banner message={t('Offline', { ns: 'common' })} /> : null}
+      {!online && !reconnecting ? <Banner message={t('Offline', { ns: 'common' })} /> : null}
       {busy && !report ? <LoadingState size="compact" /> : null}
       {report ? <>
         <SettingsRow title={report.model || t('Unknown model')} subtitle={t('Global model')} subtitleLines={1} />

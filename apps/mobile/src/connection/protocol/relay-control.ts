@@ -4,6 +4,9 @@ import { normalizeWsUrl } from '../../services/gateway-auth';
 export const RELAY_CONTROL_PREFIX = '__clawket_relay_control__:';
 export const OPENCLAW_MOBILE_SETUP_CAPABILITY = 'openclaw.bootstrap.mobile-setup.v1';
 export const RELAY_CLIENT_PONG_CAPABILITY = 'relay.client-pong.v1';
+export const RELAY_CLIENT_PING_CAPABILITY = 'relay.client-ping.v1';
+export const RELAY_TRANSFER_HINT_CAPABILITY = 'relay.transfer-hint.v1';
+export const RELAY_CLIENT_CAPABILITIES = `${RELAY_CLIENT_PONG_CAPABILITY},${RELAY_CLIENT_PING_CAPABILITY},${RELAY_TRANSFER_HINT_CAPABILITY}`;
 
 export type RelayBootstrapStrategy = 'mobile-setup' | 'legacy-bound';
 
@@ -37,6 +40,7 @@ export function buildRelayClientWsUrl(input: {
   token: string;
   clientId: string;
   relayIdQueryParam: 'gatewayId' | 'bridgeId';
+  capabilities?: string;
 }): string {
   const url = new URL(normalizeWsUrl(input.relayUrl));
   if (!url.pathname || url.pathname === '/') url.pathname = '/ws';
@@ -44,7 +48,8 @@ export function buildRelayClientWsUrl(input: {
   url.searchParams.set('role', 'client');
   url.searchParams.set('clientId', input.clientId);
   url.searchParams.set('token', input.token);
-  url.searchParams.set('capabilities', RELAY_CLIENT_PONG_CAPABILITY);
+  // Raw node sockets only implement server-initiated pong. Full transports opt in.
+  url.searchParams.set('capabilities', input.capabilities ?? RELAY_CLIENT_PONG_CAPABILITY);
   return url.toString();
 }
 

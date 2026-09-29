@@ -46,6 +46,11 @@ export class ConnectionRecoveryWindow {
   }
 }
 
-export function requiresConnectionAction(reason?: string): boolean {
-  return /pairing[_ ]required|auth[_ ]rejected|invalid[_ ]token|token[_ ]revoked|permission[_ ]denied/i.test(reason ?? '');
+export function requiresConnectionAction(reason?: unknown): boolean {
+  const actionable = /pairing[_ ]required|auth[_ ](?:rejected|required)|unauthorized|invalid[_ ]token|token[_ ]revoked|permission[_ ]denied/i;
+  if (typeof reason === 'string') return actionable.test(reason);
+  if (!reason || typeof reason !== 'object') return false;
+  const error = reason as { code?: unknown; message?: unknown };
+  return (typeof error.code === 'string' && actionable.test(error.code))
+    || (typeof error.message === 'string' && actionable.test(error.message));
 }

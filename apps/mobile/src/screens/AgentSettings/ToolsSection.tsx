@@ -51,6 +51,8 @@ export type ToolsSectionProps = Readonly<{
   adapter: AgentAdapter;
   agent: AgentDescriptor;
   online: boolean;
+  /** The foreground grace window: keep the loaded tools (read-only) instead of the offline notice. */
+  reconnecting?: boolean;
   /** Bumped by the host each time its header Save is pressed; opens the confirmation. */
   saveRequest?: number;
   /** Reports the draft state so the host can drive the header Save and its leave guard. */
@@ -61,6 +63,7 @@ export function ToolsSection({
   adapter,
   agent,
   online,
+  reconnecting = false,
   saveRequest = 0,
   onEditorChange,
 }: ToolsSectionProps): React.JSX.Element {
@@ -201,7 +204,9 @@ export function ToolsSection({
       />
     );
   }
-  if (!online) {
+  // A short reconnect keeps the list in place (the header says Reconnecting…); replacing it with the
+  // offline notice and back flashed the page on every return to the app (owner rule 2026-09-29).
+  if (!online && !reconnecting) {
     return (
       <Banner
         testID="agent-tools-offline"
@@ -209,7 +214,7 @@ export function ToolsSection({
       />
     );
   }
-  if (loading && !catalog) return <ToolsLoading />;
+  if ((loading || !online) && !catalog) return <ToolsLoading />;
 
   return (
     <>

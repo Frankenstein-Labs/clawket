@@ -181,6 +181,7 @@ function normalizeSession(value: unknown, connectionId: string): SessionDescript
   const channel = readString(record.channel);
   const preview = readString(record.preview);
   const model = readString(record.model);
+  const sessionId = readString(record.sessionId);
   const parentSessionKey = readString(record.parentSessionKey);
   const candidateProject = record.project as Record<string, unknown> | undefined;
   const project = candidateProject && typeof candidateProject === 'object' && !Array.isArray(candidateProject)
@@ -204,6 +205,8 @@ function normalizeSession(value: unknown, connectionId: string): SessionDescript
     ...(lastActivityAt !== undefined ? { lastActivityAt: lastActivityAt as number | null } : {}),
     ...(preview ? { preview } : {}),
     ...(model ? { model } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(typeof record.archived === 'boolean' ? { archived: record.archived } : {}),
     hasActiveRun: record.hasActiveRun,
     attention,
     ...(parentSessionKey ? { parentSessionKey } : {}),
@@ -217,6 +220,7 @@ function normalizeSession(value: unknown, connectionId: string): SessionDescript
       reset: allowedActions.reset,
       delete: allowedActions.delete,
       pin: allowedActions.pin,
+      ...(typeof allowedActions.archive === 'boolean' ? { archive: allowedActions.archive } : {}),
     },
   };
 }

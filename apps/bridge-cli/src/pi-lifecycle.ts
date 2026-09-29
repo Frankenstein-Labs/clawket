@@ -8,18 +8,19 @@ export function piControl(config: { port: number; token: string }, method = 'hea
     const socket = new WebSocket(`ws://127.0.0.1:${config.port}/v1/pi/ws`, { handshakeTimeout: 3000 });
     const timer = setTimeout(() => finish(new Error('Pi Bridge did not answer')), 5000);
     let settled = false;
+    let expectedResponse = 'auth';
     const finish = (error?: Error, value?: unknown) => { if (settled) return; settled = true; clearTimeout(timer); socket.terminate(); error ? reject(error) : resolve(value); };
-    socket.on('error', () => finish(new Error('Pi Bridge is not reachable')));
+    socket.on('error', error => finish(Object.assign(new Error('Pi Bridge is not reachable'), { code: (error as NodeJS.ErrnoException).code })));
     socket.on('close', () => finish(new Error('Pi Bridge closed the connection')));
     socket.on('open', () => socket.send(JSON.stringify({ type: 'req', id: 'auth', method: 'connect', params: { token: config.token } })));
     socket.on('message', raw => {
       let frame: any; try { frame = JSON.parse(raw.toString()); } catch { return; }
-      if (frame.type !== 'res') return;
+      if (frame.type !== 'res' || frame.id !== expectedResponse) return;
       if (!frame.ok) { finish(new Error('Pi Bridge rejected the control request')); return; }
       if (frame.id === 'auth') {
         if (frame.payload?.backend !== 'pi') { finish(new Error('Endpoint is not a Pi Bridge')); return; }
         if (method === 'health') finish(undefined, frame.payload);
-        else socket.send(JSON.stringify({ type: 'req', id: 'control', method }));
+        else { expectedResponse = 'control'; socket.send(JSON.stringify({ type: 'req', id: 'control', method })); }
       } else if (frame.id === 'control') finish(undefined, frame.payload);
     });
   });

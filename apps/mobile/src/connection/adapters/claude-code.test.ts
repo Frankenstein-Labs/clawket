@@ -150,3 +150,14 @@ it('restores pending native approvals with the session envelope required by the 
   expect(request.params.sessionKey).toBe('restored-session');
   expect(await result).toEqual([{ sessionKey: 'restored-session', approval }]);
 });
+
+it('uses the latest local connection name even when an Agent reply was already in flight', async () => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const pending = adapter.listAgents();
+  adapter.connection.label = 'Work laptop';
+  const request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true,
+    payload: [{ agentId: 'main', name: 'Fixed backend name', isMain: true, mainSessionKey: '' }] }) });
+  expect(await pending).toEqual([expect.objectContaining({ connectionId: record.id, name: 'Work laptop' })]);
+  expect(adapter.state).toBe('ready');
+});

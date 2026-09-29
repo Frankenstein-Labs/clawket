@@ -18,7 +18,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {
-  Folder,
   Check,
   ChevronDown,
   House,
@@ -34,7 +33,7 @@ import { getConnectionRuntime, useConnections, useRoster } from '../../connectio
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
 import type { PlatformKind } from '../../components/ui/PlatformMark';
 import { Banner } from '../../components/ui/Banner';
-import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
+import { CONNECTION_STATUS_FLOATING_CLEARANCE, ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
 import { Button } from '../../components/ui/Button';
 import { FormTextInput } from '../../components/ui/FormTextInput';
 import { SearchInput } from '../../components/ui/SearchInput';
@@ -95,7 +94,8 @@ const MUTATION_CAPABILITIES_OFF = Object.freeze({
   sessionRename: false,
   sessionReset: false,
   sessionDelete: false,
-}) satisfies Pick<Capabilities, 'sessionRename' | 'sessionReset' | 'sessionDelete'>;
+  sessionArchive: false,
+}) satisfies Pick<Capabilities, 'sessionRename' | 'sessionReset' | 'sessionDelete' | 'sessionArchive'>;
 
 const PANEL_SKELETON_ROWS = Object.freeze(['one', 'two', 'three', 'four', 'five']);
 const PANEL_SEARCH_ANALYTICS_DEBOUNCE_MS = 400;
@@ -114,7 +114,9 @@ export type SessionPanelViewProps = Readonly<{
   capabilities: Pick<
     Capabilities,
     'sessionRename' | 'sessionReset' | 'sessionDelete'
-  >;
+  > & Partial<Pick<Capabilities, 'sessionArchive'>>;
+  onLoadArchived?: () => Promise<ReadonlyArray<SessionPanelRow>>;
+  archiveScope?: string;
   bridgeOutdated?: boolean;
   /** The runtime's foreground grace window is open: show quiet reconnecting instead of offline. */
   reconnecting?: boolean;
@@ -397,6 +399,60 @@ function FilterChip({
   );
 }
 
+/** Narrows the whole list (a project or the archive), so it turns ink while that scope is on. */
+function ScopeChip({
+  testID,
+  label,
+  accessibilityLabel,
+  selected,
+  dropdown = false,
+  onPress,
+}: Readonly<{
+  testID: string;
+  label: string;
+  accessibilityLabel?: string;
+  selected: boolean;
+  /** Opens a picker instead of toggling in place. */
+  dropdown?: boolean;
+  onPress: () => void;
+}>): React.JSX.Element {
+  const { theme } = useAppTheme();
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ selected }}
+      hitSlop={CHIP_HIT_SLOP}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.chip,
+        dropdown ? styles.dropdownChip : styles.toggleChip,
+        { backgroundColor: selected ? theme.colors.ink : theme.colors.surface },
+        pressed ? styles.pressed : null,
+      ]}
+    >
+      <Text
+        maxFontSizeMultiplier={1.2}
+        style={[
+          styles.chipLabel,
+          styles.scopeChipLabel,
+          {
+            color: selected ? theme.colors.canvas : theme.colors.ink,
+            fontWeight: selected ? FontWeight.semibold : FontWeight.regular,
+          },
+        ]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+      {dropdown ? (
+        <ChevronDown size={IconSize.sm} color={selected ? theme.colors.canvas : theme.colors.inkSecondary} />
+      ) : null}
+    </Pressable>
+  );
+}
+
 function AgentPill({
   agent,
   switchable,
@@ -553,7 +609,10 @@ function actionLabel(
   action: SessionPanelAction,
   pinned: boolean,
   t: Translate,
+  archived?: boolean,
 ): string {
+  if (action === 'copy_id') return t('Copy conversation ID', { ns: 'chat' });
+  if (action === 'archive') return t(archived ? 'Restore conversation' : 'Archive conversation', { ns: 'chat' });
   if (action === 'export') return t('Export conversation', { ns: 'chat' });
   if (action === 'pin') return pinned ? t('Hide from home') : t('Show on home');
   if (action === 'rename') return t('Rename');
@@ -600,7 +659,7 @@ function SessionActionSheet({
               styles.actionText,
               { color: action === 'delete' ? theme.colors.bad : theme.colors.ink },
             ]}>
-              {actionLabel(action, row?.pinned === true, t)}
+              {actionLabel(action, row?.pinned === true, t, row?.archived)}
             </Text>
           </Pressable>
         ))}
@@ -658,9 +717,11 @@ function RenameSessionSheet({
   const { t } = useTranslation('common');
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     setDraft(row ? sessionPanelRowName(row) : '');
+    setFailed(false);
     setSubmitting(false);
   }, [row]);
 
@@ -671,12 +732,13 @@ function RenameSessionSheet({
   const submit = useCallback(() => {
     if (!row || !title || submitting) return;
     setSubmitting(true);
+    setFailed(false);
     void Promise.resolve(onConfirm(row, title)).then(
       () => {
         setSubmitting(false);
         onClose();
       },
-      () => setSubmitting(false),
+      () => { setSubmitting(false); setFailed(true); },
     );
   }, [onClose, onConfirm, row, submitting, title]);
 
@@ -691,6 +753,7 @@ function RenameSessionSheet({
       onClose={close}
     >
       <View style={styles.renameContent}>
+        {failed ? <Banner message={t('Save Failed')} /> : null}
         <FormTextInput
           testID="session-panel-rename-input"
           bottomSheet
@@ -726,6 +789,8 @@ function RenameSessionSheet({
 
 export function SessionPanelView({
   projects,
+  onLoadArchived,
+  archiveScope,
   visible,
   state,
   rows,
@@ -751,6 +816,41 @@ export function SessionPanelView({
   const [viewAgentId, setViewAgentId] = useState(currentAgentId);
   const [filter, setFilter] = useState<SessionPanelFilter>('all');
   const [query, setQuery] = useState('');
+  const [archivedRows, setArchivedRows] = useState<ReadonlyArray<SessionPanelRow>>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState(false);
+  const [actionError, setActionError] = useState(false);
+  const archiveRequest = useRef(0);
+  const actionContext = useRef({ archiveScope, visible });
+  actionContext.current = { archiveScope, visible };
+  useEffect(() => { archiveRequest.current += 1; setShowArchived(false); setArchivedRows([]); setArchiveLoading(false); setArchiveError(false); setActionError(false); }, [archiveScope, visible]);
+  const displayRows = showArchived ? archivedRows : rows;
+  const loadArchived = useCallback(() => {
+    if (!onLoadArchived) return;
+    const request = ++archiveRequest.current;
+    setActionError(false);
+    setArchiveError(false);
+    setArchiveLoading(true);
+    void onLoadArchived().then((value) => {
+      if (request !== archiveRequest.current) return;
+      setArchivedRows(value);
+      setShowArchived(true);
+    }).catch(() => { if (request === archiveRequest.current) setArchiveError(true); })
+      .finally(() => { if (request === archiveRequest.current) setArchiveLoading(false); });
+  }, [onLoadArchived]);
+  // The archive chip is a switch: pressing it while the archive loads or shows returns to the live list.
+  const toggleArchived = useCallback(() => {
+    if (!showArchived && !archiveLoading) {
+      loadArchived();
+      return;
+    }
+    archiveRequest.current += 1;
+    setShowArchived(false);
+    setArchiveLoading(false);
+    setArchiveError(false);
+    setActionError(false);
+  }, [archiveLoading, loadArchived, showArchived]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectPicker, setProjectPicker] = useState<'filter' | 'create' | null>(null);
   const [creating, setCreating] = useState(false);
@@ -796,12 +896,12 @@ export function SessionPanelView({
   );
   const chips = useMemo(() => projects ? [] : buildSessionPanelChips(agentRows), [agentRows, projects]);
   const activeFilter: SessionPanelFilter = chips.some((chip) => chip.key === filter) ? filter : 'all';
-  const filteredRows = useMemo(() => filterSessionPanelRows(projects && projectId ? rows.filter(r => r.project?.id === projectId) : rows, {
+  const filteredRows = useMemo(() => filterSessionPanelRows(projects && projectId ? displayRows.filter(r => r.project?.id === projectId) : displayRows, {
     agentId: viewAgentIdResolved,
     filter: activeFilter,
     query,
     displayTitle: (row) => rowTitle(row, t),
-  }), [activeFilter, query, rows, t, viewAgentIdResolved, projects, projectId]);
+  }), [activeFilter, query, displayRows, t, viewAgentIdResolved, projects, projectId]);
   const createInProject = (id?: string) => {
     if (createBusy.current || !viewAgent || !onCreateSession) return;
     createBusy.current = true; setCreating(true); setCreateError(false);
@@ -842,6 +942,7 @@ export function SessionPanelView({
     setFilter('all');
   }, [viewAgentIdResolved]);
   const select = useCallback((row: SessionPanelRow) => {
+    if (row.archived) { setActionRow(row); return; }
     analyticsEvents.chatSessionSelected({
       source: 'panel',
       session_kind: row.kind,
@@ -855,6 +956,12 @@ export function SessionPanelView({
     pendingSessionAction.current = null;
     if (visible) action?.();
   }, [visible]);
+  useEffect(() => {
+    pendingSessionAction.current = null;
+    setActionRow(null);
+    setRenameRow(null);
+    setConfirmation(null);
+  }, [archiveScope]);
   useEffect(() => {
     if (visible) return;
     pendingSessionAction.current = null;
@@ -875,11 +982,18 @@ export function SessionPanelView({
       }
       if (onSessionAction) {
         analyticsEvents.sessionAction({ action });
-        void Promise.resolve(onSessionAction(actionRow, action)).catch(() => undefined);
+        setActionError(false);
+        const request = archiveRequest.current;
+        const isCurrent = () => request === archiveRequest.current && actionContext.current.visible
+          && actionContext.current.archiveScope === archiveScope;
+        void Promise.resolve(onSessionAction(actionRow, action)).then(() => {
+          if (!isCurrent()) return;
+          if (action === 'archive' && actionRow.archived) setArchivedRows(previous => previous.filter(row => row.id !== actionRow.id));
+        }).catch(() => { if (isCurrent()) setActionError(true); });
       }
     };
     setActionRow(null);
-  }, [actionRow, onSessionAction]);
+  }, [actionRow, onSessionAction, archiveScope]);
   const confirmAction = useCallback(() => {
     if (!confirmation) return;
     const pending = confirmation;
@@ -918,6 +1032,49 @@ export function SessionPanelView({
 
   const showList = state !== 'permission';
   const switchable = agentOptions.length > 1;
+  const archiveAvailable = capabilities.sessionArchive === true && onLoadArchived !== undefined;
+  const archiveActive = showArchived || archiveLoading;
+  const channelStrip = showList && chips.length > 0;
+  const projectCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of displayRows) {
+      if (row.agentId !== viewAgentIdResolved || !row.project) continue;
+      counts[row.project.id] = (counts[row.project.id] ?? 0) + 1;
+    }
+    return counts;
+  }, [displayRows, viewAgentIdResolved]);
+  const projectCountTotal = useMemo(
+    () => displayRows.filter((row) => row.agentId === viewAgentIdResolved).length,
+    [displayRows, viewAgentIdResolved],
+  );
+  const archiveChip = archiveAvailable ? (
+    <ScopeChip
+      testID="session-panel-archived"
+      label={t('Archived', { ns: 'chat' })}
+      accessibilityLabel={t('Archived conversations', { ns: 'chat' })}
+      selected={archiveActive}
+      onPress={toggleArchived}
+    />
+  ) : null;
+  const projectName = projectId
+    ? projects?.find((project) => project.id === projectId)?.name
+      ?? displayRows.find((row) => row.project?.id === projectId)?.project?.name
+    : undefined;
+  // Project backends have no channel chips; their row holds the project filter and the archive switch.
+  const scopeRow = showList && !channelStrip && (projects || archiveChip) ? (
+    <View testID="session-panel-scope" style={styles.chipRow}>
+      {projects ? (
+        <ScopeChip
+          testID="codex-project-filter"
+          dropdown
+          label={projectName ?? t('All projects')}
+          selected={projectId !== null}
+          onPress={() => { Keyboard.dismiss(); setProjectPicker('filter'); }}
+        />
+      ) : null}
+      {archiveChip}
+    </View>
+  ) : null;
 
   return (
     <SessionPanelPlatform.Provider value={platform}>
@@ -942,7 +1099,7 @@ export function SessionPanelView({
         onClose={onClose}
         onAfterClose={onAfterClose}
         contentStyle={styles.sheetContent}
-        headerRight={onCreateSession && viewAgent && (state === 'ready' || state === 'empty' || state === 'error') ? (
+        headerRight={!archiveActive && onCreateSession && viewAgent && (state === 'ready' || state === 'empty' || state === 'error') ? (
           <SheetHeaderButton
             testID="session-panel-create"
             icon={SquarePen}
@@ -957,9 +1114,23 @@ export function SessionPanelView({
       >
         <SessionPanelPlatform.Provider value={platform}>
         <View style={styles.body}>
-          {projects ? <View style={[styles.searchWrap, { alignItems: 'flex-start' }]}><Button variant="text" size="sm" icon={Folder} label={projects.find(p => p.id === projectId)?.name ?? t('All projects')} onPress={() => { Keyboard.dismiss(); setProjectPicker('filter'); }} testID="codex-project-filter" /></View> : null}
-          {createError ? <Banner message={t('Save Failed')} /> : null}
-          {showList && chips.length > 0 ? (
+          {scopeRow}
+          {createError || actionError ? (
+            <View style={styles.searchWrap}>
+              <Banner message={t('Save Failed')} />
+            </View>
+          ) : null}
+          {archiveError ? (
+            <View style={styles.searchWrap}>
+              <Banner
+                testID="session-panel-archive-error"
+                message={t('Could not load archived conversations', { ns: 'chat' })}
+                actionLabel={t('Retry')}
+                onAction={loadArchived}
+              />
+            </View>
+          ) : null}
+          {channelStrip ? (
             <ScrollView
               testID="session-panel-chips"
               horizontal
@@ -976,6 +1147,7 @@ export function SessionPanelView({
                   onPress={() => chooseFilter(chip.key)}
                 />
               ))}
+              {archiveChip}
             </ScrollView>
           ) : null}
           {showList ? (
@@ -992,82 +1164,82 @@ export function SessionPanelView({
             </View>
           ) : null}
 
-          {state === 'loading' ? <PanelLoading /> : (
-            <BottomSheetFlatList
-              // Recreate native row measurements when system text size changes while open.
-              // The panel, query, filter and in-flight actions stay mounted.
-              key={`session-list-${fontScale}`}
-              testID="session-panel-scroll"
-              style={styles.list}
-              data={showList ? listItems : []}
-              keyExtractor={keyExtractor}
-              renderItem={renderItem}
-              initialNumToRender={12}
-              maxToRenderPerBatch={12}
-              windowSize={5}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-              ListHeaderComponent={(
-                <View>
-                  {/* The sheet title slot belongs to the Agent switcher, so the capsule leads the list. */}
-                  {state === 'offline' && reconnecting ? (
-                    <ConnectionStatusPill
-                      testID="session-panel-reconnecting"
-                      placement="inline"
-                      status="reconnecting"
-                      message={t('Reconnecting…')}
-                      style={styles.statusPill}
-                    />
-                  ) : state === 'offline' ? (
-                    <ConnectionStatusPill
-                      testID="session-panel-offline"
-                      placement="inline"
-                      status="offline"
-                      message={t('Offline · reconnecting')}
-                      actionLabel={onRetry ? t('Reconnect') : undefined}
-                      onAction={onRetry ? () => { void onRetry(); } : undefined}
-                      style={styles.statusPill}
-                    />
-                  ) : null}
-                  {state === 'error' ? (
-                    <ConnectionStatusPill
-                      testID="session-panel-error"
-                      placement="inline"
-                      status="error"
-                      message={t(rows.length ? 'Could not refresh sessions' : 'Sessions unavailable')}
-                      actionLabel={onRetry ? t('Retry') : undefined}
-                      onAction={onRetry ? () => { void onRetry(); } : undefined}
-                      style={styles.statusPill}
-                    />
-                  ) : null}
-                  {state === 'permission' ? (
-                    <Banner
-                      testID="session-panel-permission"
-                      message={t('Sessions require permission')}
-                      actionLabel={onOpenPermission ? t('View Pro') : undefined}
-                      onAction={onOpenPermission}
-                    />
-                  ) : null}
-                  {bridgeOutdated ? (
-                    <Banner
-                      testID="session-panel-bridge-outdated"
-                      message={t('Update bridge to 3.0 for more sessions')}
-                      actionLabel={onOpenBridgeHelp ? t('Update') : undefined}
-                      onAction={onOpenBridgeHelp}
-                    />
-                  ) : null}
-                  {showList && listItems.length === 0 ? (
-                    <View testID="session-panel-empty" style={styles.emptyState}>
-                      <Text style={[styles.emptyText, { color: theme.colors.inkSecondary }]}>
-                        {rows.length ? t('No matching sessions') : t('No sessions yet')}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-              )}
-            />
-          )}
+          <View style={styles.list}>
+            {state === 'loading' || archiveLoading ? <PanelLoading /> : (
+              <BottomSheetFlatList
+                // Recreate native row measurements when system text size changes while open.
+                // The panel, query, filter and in-flight actions stay mounted.
+                key={`session-list-${fontScale}`}
+                testID="session-panel-scroll"
+                style={styles.list}
+                data={showList ? listItems : []}
+                keyExtractor={keyExtractor}
+                renderItem={renderItem}
+                initialNumToRender={12}
+                maxToRenderPerBatch={12}
+                windowSize={5}
+                keyboardShouldPersistTaps="handled"
+                // While a status floats over the bottom, the last row can still scroll above it.
+                contentContainerStyle={[styles.scrollContent, state === 'offline' || state === 'error' ? styles.scrollContentUnderStatus : null]}
+                showsVerticalScrollIndicator={false}
+                ListHeaderComponent={(
+                  <View>
+                    {state === 'permission' ? (
+                      <Banner
+                        testID="session-panel-permission"
+                        message={t('Sessions require permission')}
+                        actionLabel={onOpenPermission ? t('View Pro') : undefined}
+                        onAction={onOpenPermission}
+                      />
+                    ) : null}
+                    {bridgeOutdated ? (
+                      <Banner
+                        testID="session-panel-bridge-outdated"
+                        message={t('Update bridge to 3.0 for more sessions')}
+                        actionLabel={onOpenBridgeHelp ? t('Update') : undefined}
+                        onAction={onOpenBridgeHelp}
+                      />
+                    ) : null}
+                    {showList && listItems.length === 0 ? (
+                      <View testID="session-panel-empty" style={styles.emptyState}>
+                        <Text style={[styles.emptyText, { color: theme.colors.inkSecondary }]}>
+                          {showArchived ? t('No archived conversations', { ns: 'chat' }) : rows.length ? t('No matching sessions') : t('No sessions yet')}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+              />
+            )}
+            {/* The title slot belongs to the Agent switcher, so connection state floats over the bottom of the
+                list, the edge it needs least; leading the list pushed every row down (owner request 2026-09-29). */}
+            {state === 'offline' && reconnecting ? (
+              <ConnectionStatusPill
+                testID="session-panel-reconnecting"
+                edge="bottom"
+                status="reconnecting"
+                message={t('Reconnecting…')}
+              />
+            ) : state === 'offline' ? (
+              <ConnectionStatusPill
+                testID="session-panel-offline"
+                edge="bottom"
+                status="offline"
+                message={t('Offline · reconnecting')}
+                actionLabel={onRetry ? t('Reconnect') : undefined}
+                onAction={onRetry ? () => { void onRetry(); } : undefined}
+              />
+            ) : state === 'error' ? (
+              <ConnectionStatusPill
+                testID="session-panel-error"
+                edge="bottom"
+                status="error"
+                message={t(rows.length ? 'Could not refresh sessions' : 'Sessions unavailable')}
+                actionLabel={onRetry ? t('Retry') : undefined}
+                onAction={onRetry ? () => { void onRetry(); } : undefined}
+              />
+            ) : null}
+          </View>
 
           {agentMenuOpen && switchable ? (
             <AgentMenu
@@ -1081,7 +1253,7 @@ export function SessionPanelView({
         </SessionPanelPlatform.Provider>
       </Sheet>
 
-      {projects ? <ProjectPicker visible={projectPicker !== null && visible} projects={projects} selected={projectId} creating={projectPicker === 'create'} onClose={() => setProjectPicker(null)} onSelect={id => { const create = projectPicker === 'create'; setProjectPicker(null); if (create && id) createInProject(id); else setProjectId(id); }} /> : null}
+      {projects ? <ProjectPicker visible={projectPicker !== null && visible} projects={projects} counts={projectCounts} totalCount={projectCountTotal} selected={projectId} creating={projectPicker === 'create'} onClose={() => setProjectPicker(null)} onSelect={id => { const create = projectPicker === 'create'; setProjectPicker(null); if (create && id) createInProject(id); else setProjectId(id); }} /> : null}
       <SessionActionSheet
         row={actionRow}
         capabilities={capabilities}
@@ -1169,6 +1341,13 @@ export function SessionPanel({
   return (
     <SessionPanelView
       projects={adapter?.capabilities.projects ? projects ?? [] : undefined}
+      archiveScope={adapter?.connection.id}
+      onLoadArchived={adapter?.capabilities.sessionArchive && adapter.listArchivedSessions && group ? async () => {
+        const sessions = await adapter.listArchivedSessions!(currentAgentId);
+        return buildSessionPanelRows({ ...group, agents: group.agents.map(summary => ({ ...summary,
+          sessions: sessions.filter(session => session.agentId === summary.agent.agentId),
+        })) }, { recentFirst: true });
+      } : undefined}
       visible={visible}
       state={state}
       rows={rows}
@@ -1233,6 +1412,18 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.regular,
     fontVariant: ['tabular-nums'],
   },
+  // A long project name gives way first, so the archive switch always stays on screen.
+  dropdownChip: {
+    flexShrink: 1,
+    paddingRight: Space.sm,
+    gap: Space.xs,
+  },
+  toggleChip: {
+    flexShrink: 0,
+  },
+  scopeChipLabel: {
+    flexShrink: 1,
+  },
   searchWrap: {
     paddingHorizontal: Space.lg,
     paddingBottom: Space.sm,
@@ -1286,8 +1477,8 @@ const styles = StyleSheet.create({
     paddingBottom: Space.xxl,
     gap: Space.xs,
   },
-  statusPill: {
-    paddingVertical: Space.xs,
+  scrollContentUnderStatus: {
+    paddingBottom: Space.xxl + CONNECTION_STATUS_FLOATING_CLEARANCE,
   },
   sessionRow: {
     minHeight: ControlSize.settingsRow,

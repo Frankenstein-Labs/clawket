@@ -52,6 +52,19 @@ describe('composition-safe input components', () => {
     expect(view.getByTestId('input').props.defaultValue).toBeUndefined();
   });
 
+  it.each([CompositionSafeTextInput, PasteCapableTextInput])('keeps a restored iOS draft as the native host baseline without remounting (%#)', Input => {
+    Platform.OS = 'ios';
+    const view = render(<Input testID="restored-input" value="" onChangeText={jest.fn()} />);
+    const input = view.getByTestId('restored-input');
+    view.rerender(<Input testID="restored-input" value="saved conversation draft" onChangeText={jest.fn()} />);
+    expect(view.getByTestId('restored-input')).toBe(input);
+    expect(input.props.defaultValue).toBe('saved conversation draft');
+    expect(input.props.value).toBeUndefined();
+    view.rerender(<Input testID="restored-input" value="saved conversation draft" placeholder="Message" onChangeText={jest.fn()} />);
+    expect(input.props.defaultValue).toBe('saved conversation draft');
+    expect(input.props.value).toBeUndefined();
+  });
+
   it('routes file paste success and native failure separately', () => {
     Platform.OS = 'ios';
     const onPasteFiles = jest.fn();

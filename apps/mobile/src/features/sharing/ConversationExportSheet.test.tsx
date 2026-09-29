@@ -20,7 +20,11 @@ jest.mock('../../components/ui/SettingsGroup', () => ({
   SettingsRow: (props: any) => require('react').createElement(require('react-native').Pressable, props),
 }));
 jest.mock('../../components/ui/Banner', () => ({ Banner: ({ message }: any) => require('react').createElement(require('react-native').Text, null, message) }));
-jest.mock('../../components/ui/LoadingState', () => ({ LoadingState: ({ testID, message }: any) => testID ? require('react').createElement(require('react-native').Text, { testID }, message) : null }));
+const mockLoaderMounts = jest.fn();
+jest.mock('../../components/ui/LoadingState', () => ({ LoadingState: ({ testID, message }: any) => {
+  require('react').useEffect(() => { mockLoaderMounts(); }, []);
+  return testID ? require('react').createElement(require('react-native').Text, { testID }, message) : null;
+} }));
 jest.mock('../../services/conversation-export', () => ({ loadConversationExport: jest.fn(), formatConversationExport: () => '# Example' }));
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn().mockResolvedValue(true), shareAsync: jest.fn().mockResolvedValue(undefined) }));
 const mockWrite = jest.fn(); const mockDelete = jest.fn();
@@ -93,4 +97,14 @@ test('saves an explicitly chosen snapshot under its exact owner without opening 
   expect(save).toHaveBeenCalledWith({ connectionId: 'one', agentId: 'agent', sessionKey: 'main' }, data);
   expect(Sharing.shareAsync).not.toHaveBeenCalled();
   save.mockRestore();
+});
+
+test('hands Connecting to Loading history within one loader instead of restarting it', () => {
+  jest.mocked(loadConversationExport).mockImplementation(() => new Promise(() => undefined));
+  const view = render(<ConversationExportSheet target={target} adapter={{ state: 'handshaking' } as AgentAdapter} onClose={jest.fn()} />);
+  expect(view.getByTestId('conversation-export-connecting')).toBeTruthy();
+  view.rerender(<ConversationExportSheet target={target} adapter={adapter} onClose={jest.fn()} />);
+  expect(view.getByText('Loading history')).toBeTruthy();
+  expect(view.queryByTestId('conversation-export-connecting')).toBeNull();
+  expect(mockLoaderMounts).toHaveBeenCalledTimes(1);
 });

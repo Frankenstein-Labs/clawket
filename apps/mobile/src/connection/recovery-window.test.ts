@@ -46,6 +46,9 @@ describe('connection recovery presentation deadline', () => {
   it('keeps actionable authentication failures distinct from transient health timeouts', () => {
     expect(requiresConnectionAction('pairing_required')).toBe(true);
     expect(requiresConnectionAction('auth_rejected')).toBe(true);
+    expect(requiresConnectionAction('Unauthorized')).toBe(true);
+    expect(requiresConnectionAction({ code: 'unauthorized', message: 'Credentials need attention' })).toBe(true);
+    expect(requiresConnectionAction({ code: 'timeout', message: 'No response' })).toBe(false);
     expect(requiresConnectionAction('Hermes health frame timed out')).toBe(false);
     const recovery = new ConnectionRecoveryWindow(jest.fn());
     recovery.begin();

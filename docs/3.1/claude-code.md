@@ -47,3 +47,7 @@ Claude model rows retain the native alias as the write identity and expose SDK `
 Native model-switch records and interruption markers are excluded from displayed human turns; ordinary text discussing commands remains intact. Device and native evidence, with remaining coverage limits, is recorded in [candidate QA](claude-code-qa-2026-09-26.md).
 
 Device pairing preserves its scope across background launch and supplements SDK session directories with saved project keys from the standard `~/.claude.json`. Unavailable paths remain visible but cannot host a new chat. Custom `CLAUDE_CONFIG_DIR` installations currently use SDK discovery only, avoiding accidental import from the default Claude account. New chat reuses the shared project picker; this selects an existing local project, not an arbitrary new filesystem directory.
+
+### Local display names
+
+Connection labels default to the product name (`Codex` / `Claude Code`). The sole device Agent follows the saved local label across the roster, Agent lists, profile and chat identity, including cached/offline reloads. Renaming updates presentation without reconnecting or renaming native sessions. Mobile normalizes the exact legacy `· Computer` default during new pairing while retaining custom names. Existing saved labels remain user-controlled.

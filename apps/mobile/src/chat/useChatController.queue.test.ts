@@ -1,12 +1,16 @@
 import { act, renderHook } from '@testing-library/react-native';
+import { AppState, type AppStateStatus } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import * as Network from 'expo-network';
 import { resolveCapabilities, type BackendKind } from '@clawket/agent-protocol';
 import { analyticsEvents } from '../services/analytics/events';
 import { getMessageQueueStore, messageQueueScopeKey, MESSAGE_QUEUE_LIMIT, resetMessageQueueStore } from './messageQueue';
+import { clearUncertainSends } from './sendRecovery';
+import { notifyAdapterPathRecovered } from '../connection/adapter-recovery';
 import * as imagePreparation from './preparePendingImagesForSend';
 import { mapAdapterSessionUpdate, useAdapterChatEvents } from './useAdapterChatEvents';
 import { useChatController } from './useChatController';
+import { useChatHistoryState } from './useChatHistoryState';
 import { useChatModelPicker } from './useChatModelPicker';
 
 const SESSION_KEY = 'agent:main:main';
@@ -170,6 +174,9 @@ jest.mock('./useChatVoiceInput', () => ({
 
 jest.mock('./useChatModelPicker', () => ({
   useChatModelPicker: jest.fn(() => ({
+    runtimeSettingsBusy: false,
+    runtimeSettingsPendingRef: { current: false },
+    runtimeSettingsUnconfirmedRef: { current: false },
     availableModels: [],
     modelPickerError: null,
     modelPickerLoading: false,
@@ -400,6 +407,178 @@ describe('useChatController message queue', () => {
     expect(result.current.listData).toEqual(before);
   });
 
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'] as const)(
+    '%s reconciles same-socket network recovery once without changing drafts or resending', async backend => {
+      const previousState = AppState.currentState; AppState.currentState = 'active';
+      const pending = deferred<void>();
+      historyMock.refreshCurrentSessionHistory.mockReturnValueOnce(pending.promise);
+      const h = renderController(backend);
+      try {
+        await flush();
+        act(() => { h.result.current.setInput('Unsent draft'); });
+        const scrollRequest = h.result.current.scrollToBottomRequestAt;
+        const before = h.result.current.listData;
+        act(() => { notifyAdapterPathRecovered(h.adapter as any, 1); notifyAdapterPathRecovered(h.adapter as any, 1); });
+        h.rerender(undefined);
+        expect(historyMock.refreshCurrentSessionHistory).toHaveBeenCalledTimes(1);
+        expect(historyMock.refreshCurrentSessionHistory).toHaveBeenCalledWith({
+          afterInFlight: true, isCurrent: expect.any(Function),
+        });
+        await act(async () => { pending.resolve(); });
+        expect(h.result.current.input).toBe('Unsent draft');
+        expect(h.result.current.listData).toEqual(before);
+        expect(h.result.current.scrollToBottomRequestAt).toBe(scrollRequest);
+        expect(h.adapter.prompt).not.toHaveBeenCalled();
+        expect(h.adapter.disconnect).not.toHaveBeenCalled();
+      } finally { h.unmount(); AppState.currentState = previousState; }
+    },
+  );
+
+  it('retains one newer path recovery during a slow history read, without parallel reads or duplicate-generation retries', async () => {
+    const previousState = AppState.currentState; AppState.currentState = 'active';
+    const first = deferred<void>(); const trailing = deferred<void>();
+    historyMock.refreshCurrentSessionHistory.mockReturnValueOnce(first.promise).mockReturnValueOnce(trailing.promise);
+    const h = renderController('hermes');
+    try {
+      act(() => { notifyAdapterPathRecovered(h.adapter as any, 1); });
+      act(() => {
+        notifyAdapterPathRecovered(h.adapter as any, 2);
+        notifyAdapterPathRecovered(h.adapter as any, 2);
+        notifyAdapterPathRecovered(h.adapter as any, 3);
+      });
+      expect(historyMock.refreshCurrentSessionHistory).toHaveBeenCalledTimes(1);
+      await act(async () => { first.resolve(); });
+      expect(historyMock.refreshCurrentSessionHistory).toHaveBeenCalledTimes(2);
+      act(() => { notifyAdapterPathRecovered(h.adapter as any, 3); });
+      await act(async () => { trailing.resolve(); });
+      expect(historyMock.refreshCurrentSessionHistory).toHaveBeenCalledTimes(2);
+      expect(h.adapter.prompt).not.toHaveBeenCalled();
+    } finally { h.unmount(); AppState.currentState = previousState; }
+  });
+
+  it.each(['session', 'adapter', 'unfocused', 'unmount'] as const)(
+    'cancels a delayed same-socket history read when %s changes', async change => {
+      const previousState = AppState.currentState; AppState.currentState = 'active';
+      const pending = deferred<void>();
+      historyMock.refreshCurrentSessionHistory.mockReturnValueOnce(pending.promise);
+      const adapter = createAdapter('codex');
+      const h = renderHook<ReturnType<typeof useChatController>, { activeAdapter: ReturnType<typeof createAdapter> }>(({ activeAdapter }) => useChatController({
+        adapter: activeAdapter as any, debugMode: false, showAgentAvatar: false,
+      }), { initialProps: { activeAdapter: adapter } });
+      try {
+        act(() => { notifyAdapterPathRecovered(adapter as any, 1); });
+        const options = historyMock.refreshCurrentSessionHistory.mock.calls.at(-1)?.[0] as unknown as { isCurrent: () => boolean };
+        expect(options.isCurrent()).toBe(true);
+        if (change === 'session') { historyMock.sessionKey = 'agent:main:other'; h.rerender({ activeAdapter: adapter }); }
+        if (change === 'adapter') h.rerender({ activeAdapter: createAdapter('codex') });
+        if (change === 'unfocused') { jest.mocked(useIsFocused).mockReturnValue(false); h.rerender({ activeAdapter: adapter }); }
+        if (change === 'unmount') h.unmount();
+        expect(options.isCurrent()).toBe(false);
+        await act(async () => { pending.resolve(); });
+        expect(adapter.prompt).not.toHaveBeenCalled();
+      } finally { h.unmount(); AppState.currentState = previousState; }
+    },
+  );
+
+  it.each(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'] as const)(
+    '%s refreshes foreground history through renders before and during its health probe', async backend => {
+      const subscribers = new Set<(state: AppStateStatus) => void>();
+      const previousState = AppState.currentState;
+      AppState.currentState = 'active';
+      jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+        subscribers.add(listener);
+        return { remove: () => { subscribers.delete(listener); } };
+      });
+      const emit = (state: AppStateStatus) => act(() => {
+        AppState.currentState = state;
+        for (const listener of [...subscribers]) listener(state);
+      });
+      const historyHook = jest.mocked(useChatHistoryState);
+      const original = historyHook.getMockImplementation()!;
+      const firstRefresh = jest.fn().mockResolvedValue(undefined);
+      const latestRefresh = jest.fn().mockResolvedValue(undefined);
+      let refresh = firstRefresh;
+      // Real history hooks return a fresh object, and callbacks can change as
+      // cache/session state updates. A stable singleton mock hid this defect.
+      historyHook.mockImplementation(() => ({ ...historyMock, onRefresh: refresh }) as any);
+      let unmount: (() => void) | undefined;
+      try {
+        const health = deferred<boolean>();
+        const adapter = createAdapter(backend);
+        adapter.probe.mockReturnValue(health.promise);
+        const rendered = renderController(backend, adapter);
+        unmount = rendered.unmount;
+        await flush();
+        emit('background');
+        act(() => { jest.advanceTimersByTime(5_000); });
+        emit('active');
+        act(() => { rendered.result.current.setInput('Keep this draft'); });
+        rendered.rerender(undefined);
+        await act(async () => { jest.advanceTimersByTime(800); await Promise.resolve(); });
+        expect(adapter.probe).toHaveBeenCalledTimes(1);
+        expect(firstRefresh).not.toHaveBeenCalled();
+        refresh = latestRefresh;
+        rendered.rerender(undefined);
+        await act(async () => { health.resolve(true); await Promise.resolve(); });
+        await flush();
+        expect(latestRefresh).toHaveBeenCalledTimes(1);
+        expect(firstRefresh).not.toHaveBeenCalled();
+        expect(rendered.result.current.input).toBe('Keep this draft');
+        expect(adapter.prompt).not.toHaveBeenCalled();
+      } finally {
+        unmount?.();
+        historyHook.mockImplementation(original);
+        AppState.currentState = previousState;
+      }
+    },
+  );
+
+  it.each(['session', 'adapter', 'background', 'unmount', 'failed-health'] as const)(
+    'does not commit a pending foreground refresh after %s changes', async change => {
+      const subscribers = new Set<(state: AppStateStatus) => void>();
+      const previousState = AppState.currentState;
+      AppState.currentState = 'active';
+      jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+        subscribers.add(listener);
+        return { remove: () => { subscribers.delete(listener); } };
+      });
+      const emit = (state: AppStateStatus) => act(() => {
+        AppState.currentState = state;
+        for (const listener of [...subscribers]) listener(state);
+      });
+      const health = deferred<boolean>();
+      const adapter = createAdapter('codex');
+      adapter.probe.mockReturnValue(health.promise);
+      const { rerender, unmount } = renderHook<ReturnType<typeof useChatController>, { activeAdapter: ReturnType<typeof createAdapter> }>(({ activeAdapter }) => useChatController({
+        adapter: activeAdapter as any, debugMode: false, showAgentAvatar: false,
+      }), { initialProps: { activeAdapter: adapter } });
+      try {
+        act(() => { latestAdapterHandlers().onState?.('ready'); });
+        await flush();
+        emit('background');
+        act(() => { jest.advanceTimersByTime(5_000); });
+        emit('active');
+        await act(async () => { jest.advanceTimersByTime(800); await Promise.resolve(); });
+        expect(adapter.probe).toHaveBeenCalledTimes(1);
+        historyMock.onRefresh.mockClear();
+        if (change === 'session') {
+          historyMock.sessionKey = 'agent:main:other';
+          rerender({ activeAdapter: adapter });
+        } else if (change === 'adapter') rerender({ activeAdapter: createAdapter('codex') });
+        else if (change === 'background') emit('background');
+        else if (change === 'unmount') unmount();
+        else rerender({ activeAdapter: adapter });
+        await act(async () => { health.resolve(change !== 'failed-health'); await Promise.resolve(); });
+        await flush();
+        expect(historyMock.onRefresh).not.toHaveBeenCalled();
+        expect(adapter.prompt).not.toHaveBeenCalled();
+      } finally {
+        unmount();
+        AppState.currentState = previousState;
+      }
+    },
+  );
+
   it.each(['openclaw', 'hermes'] as const)('keeps the current %s turn after a user echo followed by stale history', async (backend) => {
     const { result, handlers, rerender } = renderController(backend);
     const older = [
@@ -502,6 +681,36 @@ describe('useChatController message queue', () => {
     expect(adapter.disconnect).not.toHaveBeenCalled();
   });
 
+  it.each((['openclaw', 'hermes', 'pi', 'codex', 'claude-code'] as const).flatMap(backend =>
+    (['pending', 'failed', 'unknown'] as const).map(outcome => [backend, outcome] as const),
+  ))('preserves %s live text and tools when quiet-run verification is %s', async (backend, outcome) => {
+    const { result, adapter, handlers } = renderController(backend);
+    if (outcome === 'pending') adapter.loadSession.mockImplementation(() => new Promise(() => {}));
+    else if (outcome === 'failed') adapter.loadSession.mockRejectedValue(new Error('Connection unavailable'));
+    else adapter.loadSession.mockResolvedValue({ key: SESSION_KEY, messages: [] } as any);
+    await typeAndSend(result, 'Run the long task once');
+    act(() => {
+      handlers().onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: SESSION_KEY, runId: 'run-1',
+        text: 'The task is running.', textMode: backend === 'openclaw' ? 'snapshot' : 'delta' } as any));
+      handlers().onUpdate?.(mapAdapterSessionUpdate({ type: 'tool_call', sessionKey: SESSION_KEY, runId: 'run-1',
+        toolCallId: 'long-task', title: 'bash', kind: 'bash' }));
+    });
+    const rows = result.current.listData.map(row => [row.renderKey ?? row.id, row.text, row.streaming, row.toolStatus]);
+    for (let tick = 0; tick < 30; tick++) {
+      await act(async () => { jest.advanceTimersByTime(4000); await Promise.resolve(); });
+      expect(result.current.isSending).toBe(true);
+      expect(result.current.activeRunId).toBe('run-1');
+      expect(result.current.listData.map(row => [row.renderKey ?? row.id, row.text, row.streaming, row.toolStatus])).toEqual(rows);
+    }
+    expect(adapter.loadSession).toHaveBeenCalled();
+    // Recovery must never re-execute a task whose dispatch already succeeded.
+    expect(adapter.prompt).toHaveBeenCalledTimes(1);
+    finishRun(handlers, 'run-1');
+    expect(result.current.isSending).toBe(false);
+    await act(async () => { jest.advanceTimersByTime(24_000); await Promise.resolve(); });
+    expect(result.current.isSending).toBe(false);
+  });
+
   it('still ends a silent sent run that the backend no longer reports', async () => {
     const { result, adapter } = renderController('hermes');
     adapter.loadSession.mockResolvedValue({ key: SESSION_KEY, messages: [], hasActiveRun: false });
@@ -511,6 +720,22 @@ describe('useChatController message queue', () => {
       await act(async () => { jest.advanceTimersByTime(4000); await Promise.resolve(); });
     }
     expect(result.current.isSending).toBe(false);
+  });
+
+  it('does not restart quiet-run verification when a pending read resolves after unmount', async () => {
+    const { result, adapter, unmount } = renderController('codex');
+    const read = deferred<any>();
+    adapter.loadSession.mockReturnValue(read.promise);
+    await typeAndSend(result, 'Run once');
+    await act(async () => { jest.advanceTimersByTime(20_000); await Promise.resolve(); });
+    expect(adapter.loadSession).toHaveBeenCalled();
+    unmount();
+    const timers = jest.spyOn(global, 'setTimeout');
+    const calls = adapter.loadSession.mock.calls.length;
+    await act(async () => { read.resolve({ key: SESSION_KEY, messages: [], hasActiveRun: true }); await Promise.resolve(); });
+    expect(timers.mock.calls.some(([, delay]) => delay === 22_000)).toBe(false);
+    await act(async () => { jest.advanceTimersByTime(60_000); await Promise.resolve(); });
+    expect(adapter.loadSession).toHaveBeenCalledTimes(calls);
   });
 
   it.each(['openclaw', 'hermes'] as const)('keeps %s text/tool boundaries through a batched final event and history refresh', async (backend) => {
@@ -801,6 +1026,51 @@ describe('useChatController message queue', () => {
     expect(result.current.listData.filter((message) => message.text === 'receipt may be lost')).toHaveLength(1);
     expect(result.current.listData.find((message) => message.id === id)).toMatchObject({ sendUncertain: true });
     expect(result.current.queuedMessages).toHaveLength(0);
+  });
+
+  it.each(['codex', 'claude-code', 'pi'] as const)('explains a durable %s receipt without claiming native execution or replaying it', async backend => {
+    const adapter = Object.assign(createAdapter(backend), {
+      getPromptStatus: jest.fn().mockResolvedValue({ status: 'recorded', runId: 'recorded-only' }),
+    });
+    const { result } = renderController(backend, adapter);
+    const acknowledgement = deferred<{ runId: string }>();
+    adapter.prompt.mockReturnValueOnce(acknowledgement.promise);
+    await typeAndSend(result, 'receipt uncertainty');
+    await typeAndSend(result, 'hold this next message');
+    await act(async () => { acknowledgement.reject(new Error('acknowledgement lost')); });
+    await flush();
+    const sent = historyMock.messages.find(message => message.role === 'user')!;
+    expect(adapter.getPromptStatus).toHaveBeenCalledWith(SESSION_KEY, sent.idempotencyKey);
+    expect(result.current.sendFailure).toBe('Your computer received the message, but execution is unconfirmed. Check the conversation before retrying.');
+    expect(result.current.listData.find(message => message.id === sent.id)).toMatchObject({ sendUncertain: true, bridgeRecordedRunId: 'recorded-only' });
+    expect(getMessageQueueStore().read(messageQueueScopeKey(adapter.connection.id, SESSION_KEY)).held).toBe(true);
+    expect(result.current.queuedMessages).toHaveLength(1);
+    expect(adapter.prompt).toHaveBeenCalledTimes(1);
+    expect(result.current.isSending).toBe(false);
+  });
+
+  it('reconciles a cold-start uncertain cache row without replay, and clears it only on an exact native echo', async () => {
+    clearUncertainSends('pi-connection');
+    const cached = { id: 'cached-cold-send', role: 'user', text: 'cold uncertainty', idempotencyKey: 'cold-key', sendUncertain: true };
+    historyMock.messages = [cached];
+    const adapter = Object.assign(createAdapter('pi'), {
+      getPromptStatus: jest.fn().mockResolvedValue({ status: 'recorded', runId: 'cold-receipt' }),
+    });
+    const { result, rerender } = renderController('pi', adapter);
+    await flush(); rerender(undefined); await flush();
+    expect(adapter.getPromptStatus).toHaveBeenCalledWith(SESSION_KEY, 'cold-key');
+    expect(historyMock.messages[0]).toMatchObject({ sendUncertain: true, bridgeRecordedRunId: 'cold-receipt' });
+    expect(result.current.sendFailure).toBe('Your computer received the message, but execution is unconfirmed. Check the conversation before retrying.');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    act(() => result.current.clearSendFailure());
+    rerender(undefined); await flush();
+    expect(result.current.sendFailure).toBeNull();
+    expect(adapter.getPromptStatus).toHaveBeenCalledTimes(1);
+    historyMock.messages = [historyMock.messages[0], { ...cached, id: 'native-exact', sendUncertain: undefined }];
+    rerender(undefined); await flush();
+    expect(result.current.listData.filter(message => message.text === 'cold uncertainty')).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'cold uncertainty')?.sendUncertain).toBeFalsy();
+    expect(adapter.prompt).not.toHaveBeenCalled();
   });
 
   it('holds the pending message if recovery discovers an existing remote run', async () => {

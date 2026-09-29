@@ -119,6 +119,7 @@ jest.mock('react-native', () => {
     );
   };
   return {
+    ActivityIndicator: host('ActivityIndicator'),
     FlatList,
     ScrollView: host('ScrollView'),
     Image: host('Image'),
@@ -910,6 +911,27 @@ describe('RosterScreen', () => {
     mockConnections = snapshot({ recovering: true, activeState: 'reconnecting', roster: [] });
     view.rerender(<RosterScreen {...props()} />);
     expect(view.queryByTestId('roster-connection-unavailable')).toBeNull();
+  });
+
+  it('keeps the unavailable card and the rows under it in place while a pressed retry runs', async () => {
+    mockConnections = snapshot({ activeState: 'offline' });
+    let finish!: () => void;
+    mockReconnectConnection.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const view = render(<RosterScreen {...props()} />);
+    expect(view.getByTestId('roster-connection-unavailable')).toBeTruthy();
+    await act(async () => { fireEvent.press(view.getByTestId('roster-connection-unavailable-retry')); });
+    expect(mockReconnectConnection).toHaveBeenCalledWith('live');
+    // The runtime reports the fresh attempt; nothing reads as unavailable, yet the card holds its place.
+    mockConnections = snapshot({ activeState: 'connecting', switching: true });
+    view.rerender(<RosterScreen {...props()} />);
+    expect(view.getByTestId('roster-connection-unavailable')).toBeTruthy();
+    expect(view.getByTestId('roster-connection-unavailable-retry').props.accessibilityState).toMatchObject({ busy: true });
+    expect(view.getByTestId('roster-row-agent:live:main')).toBeTruthy();
+    mockConnections = snapshot({ activeState: 'ready' });
+    view.rerender(<RosterScreen {...props()} />);
+    await act(async () => { finish(); });
+    expect(view.queryByTestId('roster-connection-unavailable')).toBeNull();
+    expect(view.getByTestId('roster-row-agent:live:main')).toBeTruthy();
   });
 
   it('covers accessible companion loading and empty states', () => {

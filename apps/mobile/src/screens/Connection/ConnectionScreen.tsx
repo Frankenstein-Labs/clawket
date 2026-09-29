@@ -96,12 +96,13 @@ export function ConnectionScreen({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const inFlight = useRef(false);
+  // A failure notice stays in place while the next attempt runs and changes only with its outcome:
+  // clearing it first pulled Reconnect up under the finger and back down (owner rule 2026-09-29).
   const run = async (action: () => Promise<unknown>) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
-    setFailed(false);
-    try { await action(); } catch { setFailed(true); }
+    try { await action(); setFailed(false); } catch { setFailed(true); }
     finally { inFlight.current = false; setBusy(false); }
   };
   const presence = resolveConnectionPresence({ active, paused, state });

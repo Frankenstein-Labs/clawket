@@ -84,12 +84,16 @@ describe('CompositionSafeBottomSheetTextInput', () => {
     view.rerender(
       <CompositionSafeBottomSheetTextInput testID="input" value="拼音" onChangeText={jest.fn()} />,
     );
-    expect(mockSetNativeProps).toHaveBeenCalledWith({ text: '拼音' });
+    expect(view.getByTestId('input').props.defaultValue).toBe('拼音');
+    expect(view.getByTestId('input').props.value).toBeUndefined();
 
     view.rerender(
       <CompositionSafeBottomSheetTextInput testID="input" value="" onChangeText={jest.fn()} />,
     );
-    expect(mockClear).toHaveBeenCalledTimes(1);
+    expect(view.getByTestId('input').props.defaultValue).toBe('');
+    expect(view.getByTestId('input').props.value).toBeUndefined();
+    expect(mockClear).not.toHaveBeenCalled();
+    expect(mockSetNativeProps).not.toHaveBeenCalled();
   });
 
   it('remains controlled on Android', () => {

@@ -1,4 +1,5 @@
 import { normalizeMessageAttribution } from './messageAttribution';
+import { localizeAgentSystemNotice } from './agentSystemNotice';
 import {
   useEffect,
   useRef,
@@ -158,6 +159,7 @@ export type UseAdapterChatEventsOptions = AdapterChatEventHandlers & {
 type MappingOptions = {
   now?: () => number;
   translate?: (key: string) => string;
+  cancelledRunNotice?: string;
 };
 
 function mapUsage(usage: Usage | undefined): MessageUsage | undefined {
@@ -189,7 +191,10 @@ function stringifyUnknown(value: unknown): string | undefined {
 }
 
 /** Convert the rendering-neutral protocol message into the current RN message model. */
-export function mapAdapterChatMessage(message: ChatMessage): UiMessage | null {
+export function mapAdapterChatMessage(
+  message: ChatMessage,
+  translate: (key: string) => string = translateChatEvent,
+): UiMessage | null {
   if (
     message.role === 'assistant'
     && (isAssistantDeliveryMirrorMessage(message) || isAssistantSilentReplyMessage(message))
@@ -225,7 +230,7 @@ export function mapAdapterChatMessage(message: ChatMessage): UiMessage | null {
     role: message.role,
     ...(message.attribution ? { attribution: normalizeMessageAttribution(message.attribution) } : {}),
     ...(message.sentLocally ? { sentLocally: true as const } : {}),
-    text: message.text,
+    text: message.role === 'system' ? localizeAgentSystemNotice(message.text, translate) : message.text,
     userSkill: message.skill,
     idempotencyKey: message.idempotencyKey,
     timestampMs: message.timestampMs,
@@ -244,6 +249,14 @@ export function mapAdapterChatMessage(message: ChatMessage): UiMessage | null {
     ...(tool?.startedAtMs !== undefined ? { toolStartedAt: tool.startedAtMs } : {}),
     ...(tool?.finishedAtMs !== undefined ? { toolFinishedAt: tool.finishedAtMs } : {}),
   };
+}
+
+function translateChatEvent(key: string): string {
+  switch (key) {
+    case 'Run aborted by user.': return i18n.t('Run aborted by user.', { ns: 'chat' });
+    case 'Compacting context...': return i18n.t('Compacting context...', { ns: 'chat' });
+    default: return localizeAgentSystemNotice(key, i18n.t);
+  }
 }
 
 function mapApprovalStatus(decision: string): ApprovalStatus {
@@ -297,18 +310,14 @@ export function mapAdapterSessionUpdate(
   options: MappingOptions = {},
 ): AdapterChatUpdate {
   const now = options.now ?? Date.now;
-  const translate = options.translate ?? ((key: string) => (
-    key === 'Run aborted by user.'
-      ? i18n.t('Run aborted by user.', { ns: 'chat' })
-      : i18n.t('Compacting context...', { ns: 'chat' })
-  ));
+  const translate = options.translate ?? translateChatEvent;
 
   switch (update.type) {
     case 'question_requested':
     case 'question_resolved': return update;
     case 'history_reconciled': {
       const messages = update.history.messages
-        .map(mapAdapterChatMessage)
+        .map((message) => mapAdapterChatMessage(message, translate))
         .filter((message): message is UiMessage => message !== null);
       return {
         type: update.type,
@@ -401,19 +410,31 @@ export function mapAdapterSessionUpdate(
             usage,
           }
         : undefined;
-      const systemMessage = update.stopReason === 'cancelled'
+      const terminal = update.stopReason === 'error' ? update.terminalMessage : undefined;
+      const failedMessage = terminal?.role === 'system'
+        && typeof terminal.id === 'string' && terminal.id.length > 0 && terminal.id.length <= 256
+        && typeof terminal.text === 'string' && terminal.text.trim().length > 0
+        ? {
+            id: terminal.id,
+            role: 'system' as const,
+            text: localizeAgentSystemNotice(terminal.text, translate),
+            timestampMs: typeof terminal.timestampMs === 'number' && Number.isFinite(terminal.timestampMs)
+              ? terminal.timestampMs : timestampMs,
+          }
+        : undefined;
+      const systemMessage = failedMessage ?? (update.stopReason === 'cancelled'
         ? {
             id: `sys_abort_${update.runId}`,
             role: 'system' as const,
-            text: translate('Run aborted by user.'),
+            text: options.cancelledRunNotice ?? translate('Run aborted by user.'),
             timestampMs,
           }
-        : undefined;
+        : undefined);
       return {
         ...update,
         activeRunId: null,
         isSending: false,
-        finalMessage,
+        finalMessage: failedMessage && update.message?.content === terminal?.text ? undefined : finalMessage,
         systemMessage,
         usage,
         rawUsage: update.usage,
@@ -494,7 +515,13 @@ export function useAdapterChatEvents(options: UseAdapterChatEventsOptions): void
       handlersRef.current.onSessions?.(sessions);
     });
     const offUpdate = adapter.on('update', (update) => {
-      handlersRef.current.onUpdate?.(mapAdapterSessionUpdate(update, { now: nowRef.current }));
+      handlersRef.current.onUpdate?.(mapAdapterSessionUpdate(update, {
+        now: nowRef.current,
+        cancelledRunNotice: adapter.connection.backendKind === 'codex'
+          && update.type === 'run_finished' && update.stopReason === 'cancelled'
+          ? i18n.t('Reply stopped. Commands already running may continue.', { ns: 'chat' })
+          : undefined,
+      }));
     });
 
     handlersRef.current.onState?.(adapter.state);

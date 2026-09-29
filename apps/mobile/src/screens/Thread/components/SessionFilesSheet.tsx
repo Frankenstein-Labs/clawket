@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import type { AgentAdapter, SessionFile } from '@clawket/agent-protocol';
 import { Sheet } from '../../../components/ui/Sheet';
 import { SheetHeaderButton } from '../../../components/ui/SheetHeaderButton';
+import { SheetHeaderSpinner } from '../../../components/ui/SheetHeaderSpinner';
 import { SettingsDivider, SettingsRow } from '../../../components/ui/SettingsGroup';
 import { Banner } from '../../../components/ui/Banner';
 import { ListSkeleton } from '../../../components/ui/ListSkeleton';
@@ -28,6 +29,8 @@ export function SessionFilesSheet({ visible, adapter, sessionKey, online, onClos
   const [fetched, setFetched] = useState(false);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
+  // A refresh the person asked for spins at once in the Refresh button's place; opening refreshes quietly.
+  const [manualRefresh, setManualRefresh] = useState(false);
   const [transfer, setTransfer] = useState<{ id: string; fraction: number } | null>(null);
   const operation = useRef<AbortController | null>(null);
   const pending = useRef<{ directory: Directory; file: File; mimeType: string; adapter: AgentAdapter; key: string } | null>(null);
@@ -36,19 +39,21 @@ export function SessionFilesSheet({ visible, adapter, sessionKey, online, onClos
   useEffect(() => {
     operation.current?.abort();
     if (pending.current) { remove(pending.current.directory); pending.current = null; }
-    setFiles([]); setTransfer(null); setFetched(false);
+    setFiles([]); setTransfer(null); setFetched(false); setError(false); setManualRefresh(false);
     return () => { operation.current?.abort(); if (pending.current) { remove(pending.current.directory); pending.current = null; } };
   }, [adapter, sessionKey, online]);
   useEffect(() => {
     let active = true;
-    if (!visible || !online || !adapter?.sessionFiles) { operation.current?.abort(); return; }
-    setLoading(true); setError(false); setFiles([]);
-    void adapter.sessionFiles.list(sessionKey).then(value => { if (active) setFiles(validateSessionFiles(value)); })
-      .catch(() => { if (active) setError(true); }).finally(() => { if (active) { setLoading(false); setFetched(true); } });
+    if (!visible || !online || !adapter?.sessionFiles) { operation.current?.abort(); setLoading(false); setManualRefresh(false); return; }
+    // A reopen keeps the last list (and any failure notice) on screen until this answer replaces it.
+    setLoading(true);
+    void adapter.sessionFiles.list(sessionKey).then(value => { if (active) { setFiles(validateSessionFiles(value)); setError(false); } })
+      .catch(() => { if (active) setError(true); }).finally(() => { if (active) { setLoading(false); setFetched(true); setManualRefresh(false); } });
     return () => { active = false; operation.current?.abort(); };
   }, [visible, adapter, sessionKey, online, retry]);
-  // Until the first answer lands the list is loading, never "no files".
-  const waiting = !error && (loading || (online && Boolean(adapter?.sessionFiles) && !fetched));
+  // Until the first answer lands the list is loading, never "no files"; later reads refresh it in place.
+  const waiting = !error && !fetched && (loading || (online && Boolean(adapter?.sessionFiles)));
+  const refresh = () => { setManualRefresh(true); setRetry(value => value + 1); };
   const download = async (item: SessionFile) => {
     if (!adapter?.sessionFiles || !online || operation.current) return;
     const controller = new AbortController(); operation.current = controller;
@@ -88,8 +93,9 @@ export function SessionFilesSheet({ visible, adapter, sessionKey, online, onClos
   };
   return <Sheet visible={visible} onClose={onClose} onAfterClose={afterClose} title={t('Session files')}
     closeAccessibilityLabel={t('Close', { ns: 'common' })} snapPoints={SNAP_POINTS} testID="session-files"
-    headerRight={<SheetHeaderButton icon={RotateCw} accessibilityLabel={t('Refresh', { ns: 'common' })} disabled={loading || Boolean(transfer) || !online} onPress={() => setRetry(value => value + 1)} />}>
-    {error ? <Banner message={t('Could not retrieve files')} actionLabel={t('Retry', { ns: 'common' })} onAction={() => setRetry(value => value + 1)} /> : null}
+    headerRight={loading && manualRefresh ? <SheetHeaderSpinner immediate accessibilityLabel={t('Loading...', { ns: 'common' })} testID="session-files-refreshing" />
+      : <SheetHeaderButton icon={RotateCw} accessibilityLabel={t('Refresh', { ns: 'common' })} disabled={Boolean(transfer) || !online} onPress={refresh} testID="session-files-refresh" />}>
+    {error ? <Banner message={t('Could not retrieve files')} actionLabel={t('Retry', { ns: 'common' })} onAction={refresh} /> : null}
     <BottomSheetScrollView contentContainerStyle={styles.content}>
       {waiting ? <ListSkeleton testID="session-files-loading" accessibilityLabel={t('Loading...', { ns: 'common' })} icon detail /> : files.map((file, index) => <React.Fragment key={file.id}>
         {index ? <SettingsDivider inset="content" /> : null}

@@ -1,4 +1,5 @@
 import {
+  AdapterError,
   createMockAdapter,
   type AgentAdapter,
   type AgentDescriptor,
@@ -22,8 +23,10 @@ import {
   type ConnectionTelemetry,
 } from './index';
 import { createConnectionAdapter } from './adapters';
+import { SessionCatalogSupersededError } from './adapters/session-catalog';
 import { enqueueMessage, getMessageQueueStore, messageQueueScopeKey } from '../chat/messageQueue';
 import { ownConnectionRuntime } from './runtime-owner';
+import { onAdapterPathRecovered, recoverAdapterConnection } from './adapter-recovery';
 
 class MemorySecureStorage implements SecureConnectionStorage {
   private readonly values = new Map<string, string>();
@@ -535,6 +538,7 @@ describe('ConnectionCoordinator', () => {
       expect(reconnect).toHaveBeenLastCalledWith(
         expect.objectContaining({ backendKind }),
         'socket_close',
+        { origin: 'transport', cause: 'socket_close' },
       );
 
       now = 300;
@@ -551,6 +555,7 @@ describe('ConnectionCoordinator', () => {
       expect(reconnect).toHaveBeenLastCalledWith(
         expect.objectContaining({ backendKind }),
         'tick_timeout',
+        { origin: 'transport', cause: 'heartbeat_timeout' },
       );
       await coordinator.stop();
     },
@@ -672,6 +677,38 @@ describe('ConnectionCoordinator', () => {
     expect(agentName('beta')).toBe('Lab');
     expect(await cache.get('beta')).toMatchObject({ savedAt: 50, connectionStateAtSave: 'idle', agents: [{ name: 'Lab' }] });
     expect(JSON.stringify(await secureStorage.getItemAsync('clawket.connectionRegistry.v1'))).toContain('Lab');
+    await coordinator.stop();
+  });
+
+  it.each(['codex', 'claude-code'] as const)('keeps %s device names local across rename, refresh and cached restart', async (backendKind) => {
+    const { store } = await createStoreHarness();
+    await store.update('alpha', { backendKind, label: 'First computer' });
+    await store.update('beta', { backendKind, label: 'Second computer' });
+    const storage = new MemoryDashboardStorage();
+    const cache = new RosterCache({ storage, now: () => 50 });
+    await cache.set('beta', [{ ...agent('beta'), name: 'Fixed backend name' }], [session('beta', 30)], 'idle');
+    const events: string[] = [];
+    const coordinator = new ConnectionCoordinator({
+      store, cache,
+      watermarks: new UnreadWatermarks({ storage, now: () => 50 }),
+      adapterFactory: (_record, descriptor) => instrumentAdapter(descriptor, events),
+      now: () => 50,
+    });
+    const names = () => ['alpha', 'beta'].map(id => coordinator.getSnapshot().roster.find(group => group.connection.id === id)?.agents[0]?.agent.name);
+    await coordinator.start();
+    expect(names()).toEqual(['First computer', 'Second computer']);
+    events.length = 0;
+    await coordinator.renameConnection('alpha', 'Studio');
+    await coordinator.renameConnection('beta', 'Travel');
+    expect(names()).toEqual(['Studio', 'Travel']);
+    expect(coordinator.getSnapshot().activeAdapter?.connection.label).toBe('Studio');
+    expect(events).toEqual([]);
+    await coordinator.refreshRoster();
+    expect(names()).toEqual(['Studio', 'Travel']);
+    expect(await cache.get('beta')).toMatchObject({ agents: [{ name: 'Travel' }] });
+    await coordinator.stop();
+    await coordinator.start();
+    expect(names()).toEqual(['Studio', 'Travel']);
     await coordinator.stop();
   });
 
@@ -1479,13 +1516,14 @@ describe('ConnectionCoordinator', () => {
     await harness.coordinator.start();
     jest.spyOn(harness.adapters[0], 'probe').mockResolvedValueOnce(false);
 
-    await expect(harness.coordinator.probeActive(undefined, 'foreground')).resolves.toBe(false);
+    await expect(harness.coordinator.probeActive(undefined, 'foreground')).resolves.toBe(true);
     await flushMaintenance();
 
     expect(reconnect).toHaveBeenCalledTimes(1);
     expect(reconnect).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'alpha' }),
       'foreground',
+      { origin: 'foreground', cause: 'health_failed' },
     );
     await harness.coordinator.stop();
   });
@@ -1533,11 +1571,98 @@ describe('ConnectionCoordinator', () => {
     expect(reconnect).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'alpha' }),
       'foreground',
+      { origin: 'foreground', cause: 'unknown' },
     );
     await coordinator.stop();
   });
 
   describe.each(['openclaw', 'hermes', 'claude-code', 'codex', 'pi'] as const)('%s probe ownership', (backendKind) => {
+    it.each([true, false])('does not wait for or trust a pre-background probe (late health=%s)', async (lateHealth) => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const old = deferred<boolean>();
+        const fresh = deferred<boolean>();
+        const adapter = harness.getAdapter();
+        const probe = jest.spyOn(adapter, 'probe').mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+        const disconnect = jest.spyOn(adapter, 'disconnect');
+        const previous = harness.coordinator.probeActive();
+        await flushMaintenance();
+        harness.coordinator.setAppActive(false);
+        harness.coordinator.setAppActive(true);
+        const resumed = harness.coordinator.probeActive(2_000, 'foreground');
+        await flushMaintenance();
+        expect(probe).toHaveBeenCalledTimes(2);
+        fresh.resolve(true);
+        await expect(resumed).resolves.toBe(true);
+        old.resolve(lateHealth);
+        await expect(previous).resolves.toBe(false);
+        expect(disconnect).not.toHaveBeenCalled();
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it('does not reuse foreground health after another brief background gap', async () => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const probe = jest.spyOn(harness.getAdapter(), 'probe').mockResolvedValue(true);
+        await harness.coordinator.probeActive(2_000, 'foreground');
+        await harness.coordinator.probeActive(2_000, 'foreground');
+        expect(probe).toHaveBeenCalledTimes(1);
+        harness.coordinator.setAppActive(false);
+        harness.coordinator.setAppActive(true);
+        await harness.coordinator.probeActive(2_000, 'foreground');
+        expect(probe).toHaveBeenCalledTimes(2);
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it('recovers ahead of a stalled catalog request and ignores its retired result', async () => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter();
+        const stale = deferred<SessionDescriptor[]>();
+        const list = jest.spyOn(adapter, 'listSessions').mockReturnValueOnce(stale.promise);
+        const oldRefresh = harness.coordinator.refreshRoster();
+        await flushMaintenance();
+        expect(list).toHaveBeenCalledTimes(1);
+        const probe = jest.spyOn(adapter, 'probe').mockResolvedValueOnce(false);
+        const connect = jest.spyOn(adapter, 'connect');
+
+        await expect(harness.coordinator.probeActive(2_000, 'foreground')).resolves.toBe(true);
+        await flushMaintenance();
+        expect(probe).toHaveBeenCalledWith(2_000);
+        expect(connect).toHaveBeenCalledTimes(1);
+        expect(list).toHaveBeenCalledTimes(2);
+        expect(harness.coordinator.getSnapshot()).toMatchObject({ activeState: 'ready', error: null });
+        const recoveredRoster = harness.coordinator.getSnapshot().roster;
+        stale.resolve([]);
+        await oldRefresh;
+        expect(harness.coordinator.getSnapshot().roster).toEqual(recoveredRoster);
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it('shares foreground and send recovery and refuses recovery from a retired adapter', async () => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter();
+        const health = deferred<boolean>();
+        const probe = jest.spyOn(adapter, 'probe').mockReturnValueOnce(health.promise);
+        const connect = jest.spyOn(adapter, 'connect');
+        const foreground = harness.coordinator.probeActive(2_000, 'foreground');
+        const send = recoverAdapterConnection(adapter, 1_500);
+        await flushMaintenance();
+        expect(probe).toHaveBeenCalledTimes(1);
+        health.resolve(false);
+        await expect(Promise.all([foreground, send])).resolves.toEqual([true, true]);
+        expect(connect).toHaveBeenCalledTimes(1);
+        await harness.coordinator.stop();
+        await expect(recoverAdapterConnection(adapter)).resolves.toBe(false);
+        expect(connect).toHaveBeenCalledTimes(1);
+      } finally { await harness.coordinator.stop(); }
+    });
+
     it('retains a failure from the reconnect started by this probe', async () => {
       jest.useFakeTimers();
       const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
@@ -1551,6 +1676,111 @@ describe('ConnectionCoordinator', () => {
         expect(harness.coordinator.getSnapshot()).toMatchObject({ recoveryFailed: true,
           error: { operation: 'probe', message: 'reconnect rejected' } });
       } finally { await harness.coordinator.stop(); jest.useRealTimers(); }
+    });
+
+    it('replaces an explicitly superseded catalog with one awaited trailing read', async () => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter(), previousRoster = harness.coordinator.getSnapshot().roster;
+        const stale = deferred<SessionDescriptor[]>(), fresh = deferred<SessionDescriptor[]>();
+        const list = jest.spyOn(adapter, 'listSessions')
+          .mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
+        const probe = jest.spyOn(adapter, 'probe'), disconnect = jest.spyOn(adapter, 'disconnect');
+        let settled = false;
+        const refresh = harness.coordinator.refreshRoster().then(() => { settled = true; });
+        await flushMaintenance();
+        expect(list).toHaveBeenCalledTimes(1);
+        stale.reject(new SessionCatalogSupersededError());
+        await flushMaintenance();
+        expect(list).toHaveBeenCalledTimes(2);
+        expect(settled).toBe(false);
+        expect(harness.coordinator.getSnapshot().roster).toEqual(previousRoster);
+        fresh.resolve([{ ...session('alpha', 40), title: 'Renamed after management' }]);
+        await refresh;
+        expect(probe).not.toHaveBeenCalled(); expect(disconnect).not.toHaveBeenCalled();
+        expect(harness.coordinator.getSnapshot()).toMatchObject({ activeState: 'ready', error: null });
+        expect(harness.coordinator.getSnapshot().roster[0].agents[0].sessions[0].title)
+          .toBe('Renamed after management');
+        expect(list).toHaveBeenCalledTimes(2);
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it('bounds consecutive superseded catalogs and releases the flight for the next explicit refresh', async () => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter();
+        const list = jest.spyOn(adapter, 'listSessions')
+          .mockRejectedValueOnce(new SessionCatalogSupersededError())
+          .mockRejectedValueOnce(new SessionCatalogSupersededError());
+        const probe = jest.spyOn(adapter, 'probe');
+        await harness.coordinator.refreshRoster(); await flushMaintenance();
+        expect(list).toHaveBeenCalledTimes(2);
+        expect(probe).not.toHaveBeenCalled();
+        expect(harness.coordinator.getSnapshot().error).toBeNull();
+        await harness.coordinator.refreshRoster();
+        expect(list).toHaveBeenCalledTimes(3);
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it.each(['background', 'stop', 'retire'] as const)('does not trail a superseded catalog after %s', async boundary => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter(), stale = deferred<SessionDescriptor[]>();
+        const list = jest.spyOn(adapter, 'listSessions').mockReturnValueOnce(stale.promise);
+        const probe = jest.spyOn(adapter, 'probe');
+        const refresh = harness.coordinator.refreshRoster();
+        await flushMaintenance();
+        if (boundary === 'background') harness.coordinator.setAppActive(false);
+        else if (boundary === 'stop') void harness.coordinator.stop();
+        else adapter.disconnect();
+        stale.reject(new SessionCatalogSupersededError());
+        await refresh; await flushMaintenance();
+        expect(list).toHaveBeenCalledTimes(1);
+        expect(probe).not.toHaveBeenCalled();
+        expect(harness.coordinator.getSnapshot().error).toBeNull();
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it('does not let an old superseded catalog trail or clear a newer ready flight', async () => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter(), stale = deferred<SessionDescriptor[]>(), fresh = deferred<SessionDescriptor[]>();
+        const list = jest.spyOn(adapter, 'listSessions')
+          .mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
+        const oldRefresh = harness.coordinator.refreshRoster();
+        await flushMaintenance();
+        jest.spyOn(adapter, 'probe').mockResolvedValueOnce(false);
+        const recovery = harness.coordinator.probeActive(2_000, 'foreground');
+        await flushMaintenance();
+        expect(list).toHaveBeenCalledTimes(2);
+        stale.reject(new SessionCatalogSupersededError());
+        await oldRefresh;
+        const joined = harness.coordinator.refreshRoster();
+        await flushMaintenance();
+        expect(list).toHaveBeenCalledTimes(2);
+        fresh.resolve([{ ...session('alpha', 50), title: 'Current ready catalog' }]);
+        await recovery; await joined;
+        expect(harness.coordinator.getSnapshot().roster[0].agents[0].sessions[0].title)
+          .toBe('Current ready catalog');
+        expect(list).toHaveBeenCalledTimes(2);
+      } finally { await harness.coordinator.stop(); }
+    });
+
+    it.each(['network', 'server'] as const)('keeps ordinary catalog %s failures even with identical cancellation prose', async code => {
+      const harness = await createMaintenanceHarness(backendKind, { rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0 });
+      try {
+        await harness.coordinator.start();
+        const adapter = harness.getAdapter();
+        jest.spyOn(adapter, 'listSessions').mockRejectedValueOnce(new AdapterError(code, 'Session catalog read was superseded'));
+        const probe = jest.spyOn(adapter, 'probe').mockResolvedValueOnce(true);
+        await harness.coordinator.refreshRoster(); await flushMaintenance();
+        expect(probe).toHaveBeenCalledWith(5_000);
+        expect(harness.coordinator.getSnapshot().error).toMatchObject({ operation: 'roster' });
+      } finally { await harness.coordinator.stop(); }
     });
 
     it.each([true, false])('checks health after a roster failure before deciding recovery (healthy=%s)', async (healthy) => {
@@ -1657,7 +1887,7 @@ describe('ConnectionCoordinator', () => {
     }
   });
 
-  it('runs Hermes request probes every interval without overlapping probe or roster work', async () => {
+  it('coalesces Hermes probes and defers optional roster work until health is confirmed', async () => {
     jest.useFakeTimers();
     try {
       const harness = await createMaintenanceHarness('hermes', {
@@ -1802,5 +2032,274 @@ describe('foreground recovery presentation for both backends', () => {
       await harness.coordinator.stop();
       jest.useRealTimers();
     }
+  });
+});
+
+it.each(['openclaw', 'hermes'] as const)('retains the reached %s handshake stage and does not label unknown failures as network', async backendKind => {
+  const store = new ConnectionStore({ secureStorage: new MemorySecureStorage(), legacyStorage });
+  await store.load(); await store.add({ ...connectionInput('alpha'), backendKind });
+  const storage = new MemoryDashboardStorage();
+  const failed = jest.fn();
+  const coordinator = new ConnectionCoordinator({
+    store, cache: new RosterCache({ storage }), watermarks: new UnreadWatermarks({ storage }),
+    rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0,
+    telemetry: { attempt: jest.fn(), ready: jest.fn(), failed, reconnect: jest.fn() },
+    adapterFactory: (_record, descriptor) => controllableAdapter(descriptor, async emitState => {
+      emitState('connecting'); emitState('handshaking'); emitState('offline');
+      throw new Error('Unclassified failure with private details');
+    }).adapter,
+  });
+  await coordinator.start();
+  expect(failed).toHaveBeenCalledWith(expect.objectContaining({ backendKind }), 'unknown', 'handshake', 1);
+  await coordinator.stop();
+});
+
+describe('network restoration uses shared recovery without replaying sends', () => {
+  const wifi = { type: 'WIFI', isConnected: true, isInternetReachable: true };
+  const offline = { type: 'NONE', isConnected: false, isInternetReachable: false };
+  const backends = ['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const;
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  async function setup(backendKind: ConnectionDescriptor['backendKind']) {
+    const store = new ConnectionStore({ secureStorage: new MemorySecureStorage(), legacyStorage });
+    await store.load(); await store.add({ ...connectionInput('alpha'), backendKind });
+    const storage = new MemoryDashboardStorage();
+    let control!: ReturnType<typeof controllableAdapter>;
+    const coordinator = new ConnectionCoordinator({
+      store, cache: new RosterCache({ storage }), watermarks: new UnreadWatermarks({ storage }),
+      rosterRefreshIntervalMs: 0, hermesProbeIntervalMs: 0,
+      adapterFactory: (_record, descriptor) => {
+        control = controllableAdapter(descriptor, async emitState => { emitState('connecting'); emitState('ready'); });
+        return control.adapter;
+      },
+    });
+    await coordinator.start();
+    const probe = jest.spyOn(control.adapter, 'probe').mockResolvedValue(true);
+    const connect = jest.spyOn(control.adapter, 'connect');
+    const disconnect = jest.spyOn(control.adapter, 'disconnect');
+    const prompt = jest.spyOn(control.adapter, 'prompt');
+    coordinator.observeNetworkState(wifi);
+    return { coordinator, control, probe, connect, disconnect, prompt };
+  }
+
+  it.each(backends)('checks %s ready health on the new path without reconnecting or sending', async backend => {
+    const h = await setup(backend);
+    const recovered = jest.fn(); const unsubscribe = onAdapterPathRecovered(h.control.adapter, recovered);
+    try {
+      await h.coordinator.probeActive(undefined, 'foreground'); h.probe.mockClear();
+      h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      await jest.advanceTimersByTimeAsync(300);
+      expect(h.probe).toHaveBeenCalledTimes(1);
+      expect(h.connect).not.toHaveBeenCalled(); expect(h.disconnect).not.toHaveBeenCalled();
+      expect(h.prompt).not.toHaveBeenCalled();
+      expect(h.coordinator.getSnapshot().activeState).toBe('ready');
+      expect(recovered).toHaveBeenCalledTimes(1);
+    } finally { unsubscribe(); await h.coordinator.stop(); }
+  });
+
+  it.each(backends)('advances one pending %s reconnect after restoration and waits for actual ready', async backend => {
+    const h = await setup(backend);
+    const recovered = jest.fn(); const unsubscribe = onAdapterPathRecovered(h.control.adapter, recovered);
+    try {
+      h.coordinator.observeNetworkState(offline); h.control.emitState('reconnecting');
+      const handshake = deferred<void>();
+      h.connect.mockImplementation(() => { h.control.emitState('handshaking'); return handshake.promise; });
+      h.coordinator.observeNetworkState(wifi); await jest.advanceTimersByTimeAsync(300);
+      expect(h.probe).not.toHaveBeenCalled(); expect(h.connect).toHaveBeenCalledTimes(1);
+      expect(h.coordinator.getSnapshot().activeState).toBe('handshaking');
+      expect(h.prompt).not.toHaveBeenCalled();
+      h.coordinator.observeNetworkState(wifi); await jest.advanceTimersByTimeAsync(1_000);
+      expect(h.connect).toHaveBeenCalledTimes(1);
+      h.control.emitState('ready'); handshake.resolve(); await jest.advanceTimersByTimeAsync(0);
+      expect(h.coordinator.getSnapshot().activeState).toBe('ready');
+      expect(recovered).not.toHaveBeenCalled(); // Native ready already owns this path.
+    } finally { unsubscribe(); await h.coordinator.stop(); }
+  });
+
+  it.each(['connecting', 'handshaking'] as const)('does not tear down %s on a network hint', async state => {
+    const h = await setup('openclaw');
+    try {
+      h.control.emitState(state); h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      await jest.advanceTimersByTimeAsync(300);
+      expect(h.connect).not.toHaveBeenCalled(); expect(h.disconnect).not.toHaveBeenCalled();
+      expect(h.probe).not.toHaveBeenCalled();
+    } finally { await h.coordinator.stop(); }
+  });
+
+  it.each(backends.flatMap(backend => (['connecting', 'handshaking'] as const).map(state => ({ backend, state }))))(
+    'joins the existing $backend $state attempt after foreground without retiring its socket',
+    async ({ backend, state }) => {
+      const h = await setup(backend);
+      const handshake = deferred<void>();
+      try {
+        h.coordinator.setAppActive(false);
+        h.control.emitState('reconnecting');
+        h.control.emitState(state);
+        h.connect.mockReturnValue(handshake.promise);
+        h.coordinator.setAppActive(true);
+        const resumed = h.coordinator.probeActive(2_000, 'foreground');
+        const sendPreflight = recoverAdapterConnection(h.control.adapter, 1_500);
+        await jest.advanceTimersByTimeAsync(2_001);
+
+        expect(h.connect).toHaveBeenCalledTimes(1);
+        expect(h.probe).not.toHaveBeenCalled();
+        expect(h.disconnect).not.toHaveBeenCalled();
+        expect(h.prompt).not.toHaveBeenCalled();
+        expect(h.coordinator.getSnapshot().activeState).toBe(state);
+        h.control.emitState('ready');
+        handshake.resolve();
+        await expect(Promise.all([resumed, sendPreflight])).resolves.toEqual([true, true]);
+        expect(h.coordinator.getSnapshot()).toMatchObject({ activeState: 'ready', recovering: false, error: null });
+      } finally { handshake.resolve(); await h.coordinator.stop(); }
+    },
+  );
+
+  it('surfaces the joined handshake deadline without starting a second attempt', async () => {
+    const h = await setup('openclaw');
+    try {
+      h.control.emitState('handshaking');
+      h.connect.mockImplementation(() => new Promise<void>((_resolve, reject) => {
+        setTimeout(() => {
+          h.control.emitState('offline', 'Connection handshake timed out');
+          reject(new Error('Connection handshake timed out'));
+        }, 30_000);
+      }));
+      const resumed = h.coordinator.probeActive(2_000, 'foreground');
+      await jest.advanceTimersByTimeAsync(30_000);
+      await expect(resumed).resolves.toBe(false);
+      expect(h.connect).toHaveBeenCalledTimes(1);
+      expect(h.disconnect).not.toHaveBeenCalled();
+      expect(h.probe).not.toHaveBeenCalled();
+      expect(h.coordinator.getSnapshot()).toMatchObject({
+        activeState: 'offline', error: { operation: 'probe', message: 'Connection handshake timed out' },
+      });
+    } finally { await h.coordinator.stop(); }
+  });
+
+  it('does not certify an earlier foreground after another background gap while joining the same handshake', async () => {
+    const h = await setup('codex');
+    const handshake = deferred<void>();
+    try {
+      h.control.emitState('handshaking');
+      h.connect.mockReturnValue(handshake.promise);
+      const previous = h.coordinator.probeActive(2_000, 'foreground');
+      await jest.advanceTimersByTimeAsync(0);
+      h.coordinator.setAppActive(false);
+      h.coordinator.setAppActive(true);
+      const current = h.coordinator.probeActive(2_000, 'foreground');
+      await jest.advanceTimersByTimeAsync(0);
+      h.control.emitState('ready');
+      handshake.resolve();
+      await expect(Promise.all([previous, current])).resolves.toEqual([false, true]);
+      expect(h.disconnect).not.toHaveBeenCalled();
+      expect(h.probe).not.toHaveBeenCalled();
+      expect(h.prompt).not.toHaveBeenCalled();
+      expect(h.coordinator.getSnapshot()).toMatchObject({ activeState: 'ready', recovering: false, error: null });
+    } finally { handshake.resolve(); await h.coordinator.stop(); }
+  });
+
+  it('ignores readiness from a joined attempt after its coordinator is stopped', async () => {
+    const h = await setup('hermes');
+    const handshake = deferred<void>();
+    try {
+      h.control.emitState('handshaking');
+      h.connect.mockReturnValue(handshake.promise);
+      const resumed = h.coordinator.probeActive(2_000, 'foreground');
+      await jest.advanceTimersByTimeAsync(0);
+      await h.coordinator.stop();
+      h.control.emitState('ready');
+      handshake.resolve();
+      await expect(resumed).resolves.toBe(false);
+      expect(h.coordinator.getSnapshot().activeAdapter).toBeNull();
+      expect(h.prompt).not.toHaveBeenCalled();
+    } finally { handshake.resolve(); await h.coordinator.stop(); }
+  });
+
+  it('fences old path probes and never makes the stale response tear down a healthy successor', async () => {
+    const h = await setup('hermes');
+    try {
+      const old = deferred<boolean>(); h.probe.mockReturnValueOnce(old.promise);
+      const pending = h.coordinator.probeActive(undefined, 'foreground'); await Promise.resolve();
+      h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      await jest.advanceTimersByTimeAsync(300); expect(h.probe).toHaveBeenCalledTimes(2);
+      old.resolve(false); await pending;
+      expect(h.disconnect).not.toHaveBeenCalled(); expect(h.coordinator.getSnapshot().activeState).toBe('ready');
+    } finally { await h.coordinator.stop(); }
+  });
+
+  it('cancels network work on background or coordinator shutdown', async () => {
+    const h = await setup('codex');
+    try {
+      h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      h.coordinator.setAppActive(false); await jest.advanceTimersByTimeAsync(1_000);
+      h.coordinator.setAppActive(true); await jest.advanceTimersByTimeAsync(1_000);
+      expect(h.probe).not.toHaveBeenCalled();
+      h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      await h.coordinator.stop(); await jest.advanceTimersByTimeAsync(1_000);
+      expect(h.probe).not.toHaveBeenCalled(); expect(h.connect).not.toHaveBeenCalled();
+    } finally { await h.coordinator.stop(); }
+  });
+
+  it.each(['background', 'stop', 'new-path', 'failed-health'] as const)('does not notify current history when network probe outlives %s', async change => {
+    const h = await setup('claude-code');
+    const recovered = jest.fn(); const unsubscribe = onAdapterPathRecovered(h.control.adapter, recovered);
+    const pending = deferred<boolean>(); h.probe.mockReturnValueOnce(pending.promise);
+    try {
+      h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      await jest.advanceTimersByTimeAsync(300);
+      if (change === 'background') h.coordinator.setAppActive(false);
+      if (change === 'stop') await h.coordinator.stop();
+      if (change === 'new-path') h.coordinator.observeNetworkState(offline);
+      if (change === 'failed-health') h.connect.mockRejectedValueOnce(new Error('still offline'));
+      pending.resolve(change !== 'failed-health'); await jest.advanceTimersByTimeAsync(0);
+      expect(recovered).not.toHaveBeenCalled();
+    } finally { unsubscribe(); await h.coordinator.stop(); }
+  });
+
+  it.each(backends)('halts automatic %s retries on explicit auth failure until manual reconnect', async backend => {
+    const h = await setup(backend);
+    try {
+      h.control.emitState('error', 'auth_rejected');
+      await jest.advanceTimersByTimeAsync(0);
+      expect(h.disconnect).toHaveBeenCalledTimes(1);
+      h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      h.coordinator.setAppActive(false); h.coordinator.setAppActive(true);
+      await jest.advanceTimersByTimeAsync(30_000);
+      await expect(h.coordinator.probeActive(undefined, 'foreground')).resolves.toBe(false);
+      await expect(recoverAdapterConnection(h.control.adapter)).resolves.toBe(false);
+      expect(h.probe).not.toHaveBeenCalled(); expect(h.connect).not.toHaveBeenCalled();
+      expect(h.coordinator.getSnapshot().recoveryFailed).toBe(true);
+      await h.coordinator.reconnectConnection('alpha');
+      expect(h.coordinator.getSnapshot().activeAdapter).not.toBe(h.control.adapter);
+      expect(h.coordinator.getSnapshot().activeState).toBe('ready');
+      expect(h.coordinator.getSnapshot().recoveryFailed).toBe(false);
+    } finally { await h.coordinator.stop(); }
+  });
+
+  it('uses a structured unauthorized code even if the native message has no recognizable keyword', async () => {
+    const h = await setup('claude-code');
+    try {
+      h.control.emitState('offline');
+      h.connect.mockRejectedValueOnce(Object.assign(new Error('Credentials need attention'), { code: 'unauthorized' }));
+      await expect(h.coordinator.probeActive()).resolves.toBe(false);
+      h.connect.mockClear(); h.probe.mockClear();
+      h.coordinator.observeNetworkState(offline); h.coordinator.observeNetworkState(wifi);
+      await jest.advanceTimersByTimeAsync(1_000);
+      await expect(h.coordinator.probeActive()).resolves.toBe(false);
+      expect(h.connect).not.toHaveBeenCalled(); expect(h.probe).not.toHaveBeenCalled();
+    } finally { await h.coordinator.stop(); }
+  });
+
+  it('does not reconnect when a ready health probe reports a structured auth rejection', async () => {
+    const h = await setup('codex');
+    try {
+      h.probe.mockRejectedValueOnce(Object.assign(new Error('Credentials need attention'), { code: 'unauthorized' }));
+      await expect(h.coordinator.probeActive()).resolves.toBe(false);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(h.connect).not.toHaveBeenCalled(); expect(h.disconnect).toHaveBeenCalledTimes(1);
+      await expect(h.coordinator.probeActive()).resolves.toBe(false);
+      expect(h.probe).toHaveBeenCalledTimes(1);
+    } finally { await h.coordinator.stop(); }
   });
 });

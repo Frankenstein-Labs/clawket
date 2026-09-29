@@ -5,6 +5,8 @@ export interface Capabilities {
   agentQuestions?: boolean;
   sessionBranch?: boolean;
   chat: boolean;
+  /** Read-only lookup of durable Bridge receipt; requires positive runtime negotiation. */
+  promptStatus?: boolean;
   abort: boolean;
   /** Exact active-run guidance; missing means unsupported. */
   steer?: boolean;
@@ -20,6 +22,10 @@ export interface Capabilities {
   sessionRename: boolean;
   sessionReset: boolean;
   sessionDelete: boolean;
+  /** Native reversible archive, with a separate archived-session listing. */
+  sessionArchive?: boolean;
+  /** Native session-scoped execution permissions, independently of config diagnostics. */
+  sessionPermissions?: boolean;
   agents: boolean;
   agentEdit: boolean;
   agentCreate: boolean;
@@ -32,6 +38,8 @@ export interface Capabilities {
    */
   modelManage?: boolean;
   modelHealth?: boolean;
+  /** Native session speed setting; requires positive runtime negotiation. */
+  fastMode?: boolean;
   thinkingLevels: boolean;
   /**
    * Backend interprets the full `/command` catalog, so the App may offer it as
@@ -82,6 +90,7 @@ export const CAPABILITY_KEYS = [
   'agentQuestions',
   'sessionBranch',
   'chat',
+  'promptStatus',
   'abort',
   'steer',
   'history',
@@ -93,6 +102,8 @@ export const CAPABILITY_KEYS = [
   'sessionRename',
   'sessionReset',
   'sessionDelete',
+  'sessionArchive',
+  'sessionPermissions',
   'agents',
   'agentEdit',
   'agentCreate',
@@ -100,6 +111,7 @@ export const CAPABILITY_KEYS = [
   'modelPerSession',
   'modelManage',
   'modelHealth',
+  'fastMode',
   'thinkingLevels',
   'slashCommands',
   'skills',
@@ -270,13 +282,13 @@ const YOUMIND_CAPABILITIES: Capabilities = {
 };
 
 export const CAPABILITY_MATRIX: Record<BackendKind, Capabilities> = {
-  'claude-code': { ...YOUMIND_CAPABILITIES, steer: false, sessionBranch: true, projects: true, chat: true, abort: true, history: true, attachments: true,
+  'claude-code': { ...YOUMIND_CAPABILITIES, promptStatus: true, steer: false, sessionBranch: true, projects: true, chat: true, abort: true, history: true, attachments: true,
     sessions: true, sessionCreate: true, sessionRename: true, sessionReset: true, sessionDelete: true,
     models: true, modelPerSession: true, agentQuestions: true, execApproval: true },
-  codex: { ...YOUMIND_CAPABILITIES, projects: true, chat: true, abort: true, steer: true, history: true, attachments: true,
-    sessions: true, sessionCreate: true, sessionRename: true, sessionReset: true, sessionDelete: true,
-    models: true, modelPerSession: true, thinkingLevels: true, skills: true, agentQuestions: true, sessionBranch: true, execApproval: true },
-  pi: { ...YOUMIND_CAPABILITIES, chat: true, abort: true, steer: true, history: true, attachments: true,
+  codex: { ...YOUMIND_CAPABILITIES, promptStatus: true, projects: true, chat: true, abort: true, steer: true, history: true, attachments: true,
+    sessions: true, sessionCreate: true, sessionRename: true, sessionReset: true, sessionDelete: true, sessionArchive: true, sessionPermissions: true,
+    models: true, modelPerSession: true, fastMode: true, thinkingLevels: true, skills: true, agentQuestions: true, sessionBranch: true, execApproval: true },
+  pi: { ...YOUMIND_CAPABILITIES, promptStatus: true, chat: true, abort: true, steer: true, history: true, attachments: true,
     sessions: true, sessionCreate: true, sessionRename: true, sessionReset: true, sessionDelete: true,
     models: true, modelPerSession: true, thinkingLevels: true, skills: true, agentQuestions: true, sessionBranch: true },
   openclaw: OPENCLAW_CAPABILITIES,

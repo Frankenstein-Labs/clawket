@@ -208,7 +208,8 @@ export class OpenClawAdapter extends GatewayAdapterBase {
       const payload = await this.invoke(() => this.gateway.request<{ runId?: string }>('chat.send', {
         sessionKey: key,
         message: input.text,
-        thinking: input.thinkingLevel ?? 'off',
+        // Omission inherits Gateway session/model defaults; 'off' is an explicit override.
+        ...(input.thinkingLevel !== undefined ? { thinking: input.thinkingLevel } : {}),
         deliver: false,
         idempotencyKey: input.idempotencyKey,
         ...(input.skillId ? { skillId: input.skillId } : {}),

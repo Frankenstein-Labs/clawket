@@ -4,7 +4,7 @@
 
 ## 交互与恢复
 
-- 2026-09-26 负责人授权启动提速：麦克风按钮按下即开始采集，松手时再区分点击（持续听写）与按住（松手发送）；空白/未聚焦紧凑输入区长按 200 ms 开始，打字不开麦克风。取消“正在开启麦克风”状态：权限已知时按下即进入聆听态（波形展开），原生采集随后补上；手指未离开麦克风前不显示停止按钮。权限已授予时使用本页预检结果；预检绝不弹权限框或打开麦克风，返回前台重新检查。未授权只在明确开始录音时请求，此时先等授权再进入聆听态。
+- 2026-09-26 负责人授权启动提速：麦克风按钮按下即开始采集，松手时再区分点击（持续听写）与按住（松手发送）；空白且未聚焦的紧凑输入区长按 200 ms 开始，打字不开麦克风。取消“正在开启麦克风”状态：权限已知时按下即进入聆听态（波形展开），原生采集随后补上；手指未离开麦克风前不显示停止按钮。权限已授予时使用本页预检结果；预检绝不弹权限框或打开麦克风，返回前台重新检查。未授权只在明确开始录音时请求，此时先等授权再进入聆听态。
 - 采集由本地 `apps/mobile/modules/clawket-voice-capture` 模块负责（Expo Audio 只保留权限接口）：会话切换与引擎启停在独立串行队列上执行，不与 Expo 全局异步队列互相排队。2026-09-27 负责人反馈进入聊天会暂停音乐：iOS 页面进入、切 Agent 和回前台只读权限、不预热音频；`voiceCapture.hold` 只保留清理所有权，原生 `prepare` 对旧 JS 调用也不触及音频会话/引擎/输入节点。用户明确开始录音后才配置 `.playAndRecord` + `.measurement` + `.defaultToSpeaker` + `.mixWithOthers` + `.allowBluetoothA2DP`，不压低音乐、不启用 HFP 蓝牙输入，录音期间允许触感反馈。停止、取消或启动失败立即停用会话，取消原 30 秒保持激活策略；已停用引擎可在下次明确录音时复用。不强制 16 kHz 硬件采样率，由原生转换器转为 16 kHz。Android 保留预先创建并复用 `AudioRecord`（MIC 音源不变），读块 40 ms。按下之前麦克风不运行。
 - 停止回填草稿；按住松手或录音中发送键提交最终文本。上滑取消、录音中的显式 Cancel 丢弃当前录音；原生输入框和常驻模型工具栏始终保持挂载。短按住不发送，减少动态效果时波形静止。
 - 单次最多十分钟，到时自动停止并回填草稿。网络或上游失败只暂停转录，继续本机录音；提示“正在本机录音 · 转录已暂停”。录音本身不依赖 Agent 是否在线，Agent 离线时不自动发送。
@@ -54,3 +54,9 @@ Provider WebSocket 握手有独立 10 秒超时，fetch 返回或失败立即清
 2026-09-26 负责人授权上线占位清理修复：Production `491efc20-7a1c-4f49-9ad8-9706f500dad7`、Preview `a47225c3-a39d-4775-ab1f-e4d3a7bbe6f3` 均为 100%。两端导出的 `index.js` SHA-256 均为 `2cc0ba29057e5042af3060413da3ae7b702fc4effee5312453ccf3297174966a`，与本地候选包一致；原有独立 DO namespace、secret、Provider endpoint 和域名保留。回滚锚点分别为 `76e3c31f-6a78-4920-a681-9170342b0672` / `ddeaf1b0-cb86-44e7-a639-f920347d2df4`。真实阿里云合成音频验证两端 v1、v2 30 秒、连续录音、准备阶段取消/强断后的首次重连成功，以及活动录音不能被抢占；未声称完整十分钟真机/全运营商验收。证据在本地 `evidence/speech-busy-0926/verified-deployment.json`。客户端自动等待/冷却提示修改仍须安装包含改动的 3.1.0 构建。
 
 音频共存依据：[Apple playAndRecord](https://developer.apple.com/documentation/avfaudio/avaudiosession/category-swift.struct/playandrecord) 默认不可混播；[mixWithOthers](https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions-swift.struct/mixwithothers) 允许与其他 App 同时播放。音频会话/路由的实际行为必须以真机验收为准，JS mock 或 Swift 语法检查不能替代。
+
+## 文本编辑手势修复 — 2026-09-28
+
+输入区快捷语音仅限空白且未聚焦；轻点进入编辑后，即使没有文字，也必须撤去语音触摸拦截，让原生输入框处理长按粘贴、双击选词和光标移动。有草稿时未聚焦也不拦截。麦克风按钮仍支持点击听写、按住松手发送；录音中的遮罩保留以接收原手势的松手/取消。收键盘下拖只在工具栏接管，避免抢走向下拖动的选择手柄。两端共用此规则，不自行读取剪贴板或绘制替代菜单。
+
+参考：[Apple 文本编辑](https://support.apple.com/en-jo/guide/iphone/iph1a9cae52c/ios) 使用双击选词与原生编辑菜单；[Messages 音频](https://support.apple.com/en-gb/guide/iphone/iph2e42d3117/ios) 将录音放在明确的音频按钮上；[Android 编辑](https://support.google.com/docs/answer/161768?co=GENIE.Platform%3DAndroid&hl=en) 使用长按插入位置后粘贴。Clawket 保留既有空白未编辑态的语音快捷手势，进入编辑后遵循平台行为。

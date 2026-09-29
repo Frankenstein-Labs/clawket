@@ -20,6 +20,22 @@ function row(cwd: string, index: number): SDKSessionInfo {
 }
 
 describe('Claude project and native session discovery', () => {
+  it('preserves known history through incomplete scans while admitting only bounded positive same-scope entries', async () => {
+    const { project, other, sdk } = await fixture();
+    const catalog = new ClaudeCatalog({ project, device: false }, sdk, async () => []);
+    sdk.listSessions.mockResolvedValue([row(project, 1)]);
+    const first = await catalog.discover(), knownKey = first.sessions[0].key;
+    sdk.listSessions.mockResolvedValue([row(project, 2), row(other, 3), { sessionId: 'invalid' } as SDKSessionInfo]);
+    const incomplete = await catalog.discover();
+    expect(incomplete.complete).toBe(false); expect(incomplete.sessions).toHaveLength(1);
+    await expect(catalog.history(knownKey)).resolves.toMatchObject({ messages: [] });
+    await expect(catalog.history(incomplete.sessions[0].key)).resolves.toMatchObject({ messages: [] });
+    expect(sdk.getSessionMessages.mock.calls.every(call => call[1].dir !== other)).toBe(true);
+    sdk.listSessions.mockResolvedValue([]);
+    expect(await catalog.discover()).toMatchObject({ complete: true, sessions: [] });
+    await expect(catalog.history(knownKey)).rejects.toThrow('Unknown');
+    await expect(catalog.history(incomplete.sessions[0].key)).rejects.toThrow('Unknown');
+  });
   it('enforces project scope even if native discovery returns an unrelated path', async () => {
     const { project, other, sdk } = await fixture();
     sdk.listSessions.mockResolvedValue([row(project, 1), row(other, 2)]);

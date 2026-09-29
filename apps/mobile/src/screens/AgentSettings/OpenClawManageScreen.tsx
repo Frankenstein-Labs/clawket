@@ -19,6 +19,7 @@ import { createNativeStackNavigator, type NativeStackNavigationProp } from '@rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Banner } from '../../components/ui/Banner';
+import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
 import { Button } from '../../components/ui/Button';
 import { ScreenHeader } from '../../components/ui/ScreenHeader';
 import { HeaderTextAction } from '../../components/ui/HeaderTextAction';
@@ -103,6 +104,8 @@ export type OpenClawManageScreenProps = Readonly<{
   isPro: boolean;
   permissionDenied?: boolean;
   initialTab?: OpenClawManageTab;
+  /** The runtime's foreground grace window: a quiet header capsule instead of the offline notice. */
+  reconnecting?: boolean;
   onBack: () => void;
   onOpenPaywall: (
     reason: 'configManage' | 'openclawPermissions' | 'openclawDiagnostics' | 'configBackups',
@@ -126,6 +129,7 @@ export function OpenClawManageScreen({
   isPro,
   permissionDenied = false,
   initialTab,
+  reconnecting = false,
   onBack,
   onOpenPaywall,
 }: OpenClawManageScreenProps): React.JSX.Element {
@@ -240,7 +244,7 @@ export function OpenClawManageScreen({
       && tabLoadIds.current[tab] === loadId;
     const config = adapter.management?.config;
     setLoading((current) => ({ ...current, [tab]: true }));
-    setErrors((current) => ({ ...current, [tab]: null }));
+    // A failure notice stays until this read answers; clearing it first moved the section up and back.
     try {
       if (tab === 'configuration' && support.configuration && config?.view) {
         const next = await config.view();
@@ -263,6 +267,7 @@ export function OpenClawManageScreen({
       }
       if (!isCurrentLoad()) return;
       setLoaded((current) => ({ ...current, [tab]: true }));
+      setErrors((current) => ({ ...current, [tab]: null }));
     } catch (error: unknown) {
       if (!isCurrentLoad()) return;
       const fallback = tab === 'configuration'
@@ -340,7 +345,6 @@ export function OpenClawManageScreen({
 
 
   const retry = useCallback(async () => {
-    setErrors((current) => ({ ...current, [activeTab]: null }));
     setNotice(null);
     if (online) {
       await loadTab(activeTab);
@@ -523,6 +527,11 @@ export function OpenClawManageScreen({
     }
   }, [adapter.management?.config?.backups?.restore, backups?.length, online, support.backupRestore, t, translateError]);
 
+  const sectionHasContent = activeTab === 'configuration' ? configuration !== null
+    : activeTab === 'permissions' ? permissions !== null
+      : activeTab === 'diagnostics' ? diagnostics !== null : backups !== null;
+  const sectionLoading = loading[activeTab] === true && !sectionHasContent;
+
   const renderSection = (): React.ReactNode => {
     const supported = isOpenClawManageTabSupported(support, activeTab);
     if (!supported) {
@@ -533,8 +542,10 @@ export function OpenClawManageScreen({
         />
       );
     }
-    if (loading[activeTab]) return <ManageSectionLoading diagnostics={activeTab === 'diagnostics'} />;
-    if (!loaded[activeTab]) {
+    // What the tab already shows stays while it re-reads (after Save, Fix, Retry or Run again): the
+    // Companion covers only a tab with nothing to show yet (owner rule 2026-09-29).
+    if (sectionLoading) return <ManageSectionLoading diagnostics={activeTab === 'diagnostics'} />;
+    if (!loaded[activeTab] && !sectionHasContent) {
       return online || errors[activeTab]
         ? null
         : <SectionEmpty testID="openclaw-manage-offline-empty" message={t('Offline', { ns: 'common' })} />;
@@ -544,7 +555,8 @@ export function OpenClawManageScreen({
         <ConfigurationSection
           view={configuration}
           canEdit={support.configurationWrite}
-          online={online}
+          // Edit waits for the re-read that returns the config hash a save needs.
+          online={online && !loading.configuration}
           gate={gateFor('configuration')}
           query={configurationQuery}
           onQueryChange={setConfigurationQuery}
@@ -587,6 +599,7 @@ export function OpenClawManageScreen({
           online={online}
           repairing={busy === 'repair'}
           gate={gateFor('diagnostics')}
+          diagnosing={loading.diagnostics === true}
           onDiagnose={() => { void loadTab('diagnostics'); }}
           onRepair={() => {
             setSheetError(null);
@@ -632,6 +645,9 @@ export function OpenClawManageScreen({
         testID="openclaw-manage-header"
         backTestID="openclaw-manage-back"
         title={(showMenu ? t('OpenClaw management', { ns: 'common' }) : tabs.find(tab => tab.key === activeTab)?.label) ?? ''}
+        // A short reconnect is said in the title slot; the offline notice is kept for a sustained outage.
+        status={!online && reconnecting ? <ConnectionStatusPill testID="openclaw-manage-reconnecting" placement="inline" status="reconnecting"
+          message={t('Reconnecting…', { ns: 'common' })} /> : undefined}
         topInset={insets.top}
         onBack={() => {
           if (showMenu) onBack();
@@ -655,7 +671,7 @@ export function OpenClawManageScreen({
         contentContainerStyle={[
           styles.content,
           // A section still loading owns the whole viewport so the Companion sits centred.
-          !showMenu && support.root && loading[activeTab] ? styles.contentFill : null,
+          !showMenu && support.root && sectionLoading ? styles.contentFill : null,
           { paddingBottom: insets.bottom + Space.xl },
         ]}
         keyboardShouldPersistTaps="handled"
@@ -716,7 +732,7 @@ export function OpenClawManageScreen({
                 actionLabel={t('View Pro', { ns: 'common' })}
                 onAction={() => onOpenPaywall(paywallFeatureForTab(activeTab))}
               />
-            ) : !online ? (
+            ) : !online && !reconnecting ? (
               <Banner
                 testID="openclaw-manage-offline"
                 message={t('Offline · showing cached settings', { ns: 'config' })}

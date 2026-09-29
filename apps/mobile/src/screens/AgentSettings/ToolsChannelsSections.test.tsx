@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  act,
   fireEvent,
   render,
   waitFor,
@@ -9,6 +10,7 @@ import {
   type AgentAdapter,
   type AgentDescriptor,
   type ChannelsStatusResult,
+  type DevicePairListResult,
   type ToolCatalog,
 } from '@clawket/agent-protocol';
 import { analyticsEvents } from '../../services/analytics/events';
@@ -406,6 +408,34 @@ describe('ToolsSection', () => {
     await waitFor(() => expect(failed.getByTestId('agent-tools-empty')).toBeTruthy());
   });
 
+  it('keeps loaded tools and channel lists through a short reconnect and yields only to a sustained outage', async () => {
+    const tools = adapterWith({
+      management: {
+        tools: { catalog: jest.fn(async () => catalog), save: jest.fn() },
+        config: { view: jest.fn(async () => ({ config: { agents: { list: [{ id: 'main', tools: { profile: 'coding' } }] } }, hash: 'hash' })) },
+      },
+    });
+    const toolsView = render(<ToolsSection adapter={tools} agent={agent} online />);
+    await waitFor(() => expect(toolsView.getByTestId('agent-tools-toggle-weather')).toBeTruthy());
+    toolsView.rerender(<ToolsSection adapter={tools} agent={agent} online={false} reconnecting />);
+    expect(toolsView.queryByTestId('agent-tools-offline')).toBeNull();
+    expect(toolsView.getByTestId('agent-tools-toggle-weather').props.disabled).toBe(true);
+    toolsView.rerender(<ToolsSection adapter={tools} agent={agent} online={false} />);
+    expect(toolsView.getByTestId('agent-tools-offline')).toBeTruthy();
+    toolsView.unmount();
+
+    const channelsAdapter = adapterWith({ management: { channels: { status: jest.fn(async () => channels) } } });
+    const channelsView = render(<ChannelsDevicesSection adapter={channelsAdapter} online />);
+    await waitFor(() => expect(channelsView.getByTestId('agent-channel-row-telegram')).toBeTruthy());
+    channelsView.rerender(<ChannelsDevicesSection adapter={channelsAdapter} online={false} reconnecting />);
+    expect(channelsView.queryByTestId('agent-channels-devices-offline')).toBeNull();
+    expect(channelsView.queryByTestId('agent-channels-devices-loading')).toBeNull();
+    expect(channelsView.getByTestId('agent-channel-row-telegram')).toBeTruthy();
+    channelsView.rerender(<ChannelsDevicesSection adapter={channelsAdapter} online={false} />);
+    expect(channelsView.getByTestId('agent-channels-devices-offline')).toBeTruthy();
+    expect(channelsView.queryByTestId('agent-channel-row-telegram')).toBeNull();
+  });
+
   it('edits and confirms agent tool policy through adapter management', async () => {
     const save = jest.fn(async () => undefined);
     const adapter = adapterWith({
@@ -600,6 +630,42 @@ describe('ChannelsDevicesSection', () => {
     fireEvent.press(view.getByTestId('agent-device-remove-confirm-action'));
     await waitFor(() => expect(remove).toHaveBeenCalledWith('laptop'));
     await waitFor(() => expect(view.queryByTestId('agent-device-row-laptop')).toBeNull());
+  });
+
+  it('refreshes a tab it already shows in place after a pairing decision and on returning to it', async () => {
+    const devicesRefresh = deferred<DevicePairListResult>();
+    const channelsRefresh = deferred<ChannelsStatusResult>();
+    const status = jest.fn()
+      .mockResolvedValueOnce(channels)
+      .mockImplementationOnce(() => channelsRefresh.promise);
+    const listDevices = jest.fn()
+      .mockResolvedValueOnce({
+        pending: [{ requestId: 'pair-1', deviceId: 'phone', displayName: 'Phone', platform: 'ios' }],
+        paired: [{ deviceId: 'laptop', displayName: 'Laptop', platform: 'darwin' }],
+      })
+      .mockImplementationOnce(() => devicesRefresh.promise);
+    const adapter = adapterWith({
+      management: {
+        channels: { status },
+        devices: { list: listDevices, approve: jest.fn(async () => undefined), reject: jest.fn(), remove: jest.fn() },
+        nodes: { list: jest.fn(async () => EMPTY_NODES) },
+      },
+    });
+    const view = render(<ChannelsDevicesSection adapter={adapter} online />);
+    await waitFor(() => expect(view.getByTestId('agent-channel-row-telegram')).toBeTruthy());
+    fireEvent.press(view.getByTestId('agent-channels-devices-tabs-devices'));
+    await waitFor(() => expect(view.getByTestId('agent-device-request-pair-1')).toBeTruthy());
+    fireEvent.press(view.getByTestId('agent-device-request-pair-1-approve'));
+    await waitFor(() => expect(listDevices).toHaveBeenCalledTimes(2));
+    expect(view.queryByTestId('agent-channels-devices-loading')).toBeNull();
+    expect(view.getByTestId('agent-device-row-laptop')).toBeTruthy();
+    await act(async () => devicesRefresh.resolve({ pending: [], paired: [{ deviceId: 'laptop', displayName: 'Laptop', platform: 'darwin' }] }));
+
+    fireEvent.press(view.getByTestId('agent-channels-devices-tabs-channels'));
+    await waitFor(() => expect(status).toHaveBeenCalledTimes(2));
+    expect(view.queryByTestId('agent-channels-devices-loading')).toBeNull();
+    expect(view.getByTestId('agent-channel-row-telegram')).toBeTruthy();
+    await act(async () => channelsRefresh.resolve(channels));
   });
 
   it('changes the direct message scope only after the restart confirmation', async () => {

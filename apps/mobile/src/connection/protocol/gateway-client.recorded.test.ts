@@ -297,7 +297,7 @@ describe('GatewayProtocolClient recorded protocol', () => {
     expect(parsedUrl.pathname).toBe('/ws');
     expect(parsedUrl.searchParams.get('gatewayId')).toBe('gateway-id');
     expect(parsedUrl.searchParams.get('clientId')).toBe(identity.deviceId);
-    expect(parsedUrl.searchParams.get('capabilities')).toBe('relay.client-pong.v1');
+    expect(parsedUrl.searchParams.get('capabilities')?.split(',')).toEqual(['relay.client-pong.v1', 'relay.client-ping.v1', 'relay.transfer-hint.v1']);
     socket.open();
 
     socket.receive(frame(unknownControlFixture, 'relay-ready.unknown-control'));

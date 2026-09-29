@@ -5,6 +5,7 @@ import type {
   AgentQuestion,
   ProjectDescriptor,
   ApprovalRequest,
+  ChatMessage,
   ConnectionDescriptor,
   FinalMessage,
   PromptInput,
@@ -55,6 +56,8 @@ export type SessionUpdate =
       stopReason: 'end_turn' | 'cancelled' | 'error' | 'max_tokens';
       unappliedInput?: string;
       message?: FinalMessage;
+      /** Stable, history-backed system notice for a failed native turn. Never raw provider diagnostics. */
+      terminalMessage?: Pick<ChatMessage, 'id' | 'text' | 'timestampMs'> & { role: 'system' };
       usage?: Usage;
     }
   | { type: 'compaction'; sessionKey: string; phase: 'start' | 'end' }
@@ -102,12 +105,16 @@ export interface AgentAdapter {
   listSessions(agentId?: string): Promise<SessionDescriptor[]>;
   loadSession(key: string, options?: { limit?: number; cursor?: string }): Promise<SessionHistory>;
   prompt(key: string, input: PromptInput): Promise<{ runId: string }>;
+  /** Read-only receipt lookup. Recorded proves durable Bridge receipt, not native execution. */
+  getPromptStatus?(key: string, idempotencyKey: string): Promise<PromptStatus>;
   cancel(key: string, runId?: string): Promise<void>;
   steer?(key: string, runId: string, text: string): Promise<void>;
   createSession?(agentId: string, options?: { title?: string; fromSession?: string; projectId?: string }): Promise<SessionDescriptor>;
   patchSession?(key: string, patch: { title?: string }): Promise<void>;
   resetSession?(key: string): Promise<void>;
   deleteSession?(key: string): Promise<void>;
+  archiveSession?(key: string, archived: boolean): Promise<void>;
+  listArchivedSessions?(agentId?: string): Promise<SessionDescriptor[]>;
   projects?: { list(): Promise<ProjectDescriptor[]> };
   questions?: {
     list(key: string): Promise<AgentQuestion[]>;
@@ -119,3 +126,5 @@ export interface AgentAdapter {
   on(event: 'state', listener: (state: ConnectionState, reason?: string) => void): () => void;
   on(event: 'sessions', listener: (sessions: SessionDescriptor[]) => void): () => void;
 }
+
+export type PromptStatus = { status: 'unknown' } | { status: 'recorded'; runId: string };

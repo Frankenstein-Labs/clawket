@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import WebSocket, { WebSocketServer } from 'ws';
 import { WEBSOCKET_FRAME_LIMIT_BYTES, isWebSocketMaxPayloadError } from '../frame-limit.js';
 import { PiService, type PiRequest } from './service.js';
+import { allowsLocalWebSocketOrigin, MAX_LOCAL_BRIDGE_SOCKETS } from '../local-websocket-policy.js';
 
 export class PiServer {
   private http: Server | null = null;
@@ -31,6 +32,8 @@ export class PiServer {
     this.ws = new WebSocketServer({ noServer: true, maxPayload: WEBSOCKET_FRAME_LIMIT_BYTES });
     this.http.on('upgrade', (request, socket, head) => {
       if (request.url !== '/v1/pi/ws') { socket.destroy(); return; }
+      if (!allowsLocalWebSocketOrigin(request)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
+      if (this.ws!.clients.size >= MAX_LOCAL_BRIDGE_SOCKETS) { socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n'); return; }
       this.ws!.handleUpgrade(request, socket, head, client => this.accept(client));
     });
     this.conversation.on('update', this.update);
@@ -42,7 +45,7 @@ export class PiServer {
         client.send(JSON.stringify({ type: 'tick', ts: Date.now() }));
       }
     }, 30_000);
-    this.ws.on('connection', socket => { alive.add(socket); socket.on('pong', () => alive.add(socket)); });
+    this.ws.on('connection', socket => { alive.add(socket); socket.on('pong', () => alive.add(socket)); socket.once('close', () => alive.delete(socket)); });
     try {
       await new Promise<void>((resolve, reject) => { this.http!.once('error', reject); this.http!.listen(port, host, resolve); });
     } catch (error) { await this.stop(); throw error; }

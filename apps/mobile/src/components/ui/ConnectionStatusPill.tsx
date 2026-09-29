@@ -36,12 +36,16 @@ import { createFloatingSurfaceStyle, FLOATING_BUTTON_STROKE_WIDTH } from './Floa
 /**
  * Connection state lives in the chrome, not in the content: a quiet capsule
  * that never takes layout space, so a reconnect after backgrounding cannot
- * push the page around. `inline` sits in a header slot or list header;
- * `floating` overlays the top of a positioned content region.
+ * push the page around. `inline` sits in a header slot; `floating` overlays
+ * the least important edge of a positioned content region: the top of the
+ * chat timeline (its newest rows and the composer sit at the bottom), the
+ * bottom of a top-down list such as Search or the Session Panel (owner
+ * request 2026-09-29: their inline capsule pushed the list down).
  *
  * Reconnecting breathes its label on the Skeleton cadence and carries no
  * action; offline and error keep one action word and the whole capsule is
- * the 44-point target.
+ * the 44-point target. A capsule without an action lets touches through to
+ * the content under it.
  */
 export type ConnectionStatusPillStatus = 'reconnecting' | 'offline' | 'error';
 export type ConnectionStatusPillPlacement = 'inline' | 'floating';
@@ -53,6 +57,8 @@ export type ConnectionStatusPillProps = Readonly<{
   actionLabel?: string;
   onAction?: () => void;
   placement?: ConnectionStatusPillPlacement;
+  /** The edge a `floating` capsule rides on; lists read top-down float it over their bottom. */
+  edge?: 'top' | 'bottom';
   accessibilityLabel?: string;
   style?: StyleProp<ViewStyle>;
   testID?: string;
@@ -62,6 +68,8 @@ export const CONNECTION_STATUS_PILL_HEIGHT = ControlSize.pill;
 /** Vertical slop that lifts the 40-point capsule to the 44-point touch target. */
 export const CONNECTION_STATUS_PILL_HIT_SLOP = (ControlSize.floatingButton - ControlSize.pill) / 2;
 export const CONNECTION_STATUS_PILL_ICON_SIZE = IconSize.sm;
+/** The band a floating capsule covers from its edge; a list adds it to that end's padding while one shows. */
+export const CONNECTION_STATUS_FLOATING_CLEARANCE = CONNECTION_STATUS_PILL_HEIGHT + Space.sm;
 
 /** Quiet recovery breath: the label is a loading surface while recovery runs. */
 const RECONNECTING_RESTING_OPACITY = 0.36;
@@ -83,6 +91,7 @@ export function ConnectionStatusPill({
   actionLabel,
   onAction,
   placement = 'floating',
+  edge = 'top',
   accessibilityLabel,
   style,
   testID,
@@ -176,6 +185,8 @@ export function ConnectionStatusPill({
       accessibilityRole="text"
       accessibilityLabel={resolvedAccessibilityLabel}
       accessibilityLiveRegion="polite"
+      // A status with nothing to do must not block the rows it floats over.
+      pointerEvents="none"
       style={[styles.pill, chrome]}
     >
       {content}
@@ -188,7 +199,7 @@ export function ConnectionStatusPill({
       pointerEvents="box-none"
       entering={reduceMotion ? undefined : PILL_FADE_IN}
       exiting={reduceMotion ? undefined : PILL_FADE_OUT}
-      style={[placement === 'floating' ? styles.floating : styles.inline, style]}
+      style={[placement === 'floating' ? edge === 'bottom' ? styles.floatingBottom : styles.floating : styles.inline, style]}
     >
       {capsule}
     </Animated.View>
@@ -199,6 +210,14 @@ const styles = StyleSheet.create({
   floating: {
     position: 'absolute',
     top: Space.sm,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: Space.lg,
+  },
+  floatingBottom: {
+    position: 'absolute',
+    bottom: Space.sm,
     left: 0,
     right: 0,
     alignItems: 'center',

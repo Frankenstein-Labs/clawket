@@ -25,10 +25,11 @@ jest.mock('react-i18next', () => ({ useTranslation: () => ({
 }) }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 44, bottom: 34, left: 0, right: 0 }) }));
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: require('../../theme/theme').buildInterfaceTheme('light', 'light', require('../../theme/accents').builtInAccents.iceBlue) }) }));
-jest.mock('../../components/ui/ScreenHeader', () => ({ ScreenHeader: ({ title, onBack, rightContent }: Record<string, unknown>) => {
+jest.mock('../../components/ui/ScreenHeader', () => ({ ScreenHeader: ({ title, status, onBack, rightContent }: Record<string, unknown>) => {
   const R = require('react');
-  return R.createElement('View', null, R.createElement('Text', { testID: 'identity-title' }, title), R.createElement('Pressable', { testID: 'identity-back', onPress: onBack }), rightContent);
+  return R.createElement('View', null, status ?? R.createElement('Text', { testID: 'identity-title' }, title), R.createElement('Pressable', { testID: 'identity-back', onPress: onBack }), rightContent);
 } }));
+jest.mock('../../components/ui/ConnectionStatusPill', () => ({ ConnectionStatusPill: (props: Record<string, unknown>) => require('react').createElement('ConnectionStatusPill', props) }));
 jest.mock('../../components/ui/AgentAvatar', () => ({ AgentAvatar: (props: unknown) => require('react').createElement('Avatar', props) }));
 jest.mock('../../components/ui/FormTextInput', () => ({ FormTextInput: (props: unknown) => require('react').createElement('TextInput', props) }));
 jest.mock('../../components/ui/FloatingButton', () => ({ FloatingButton: (props: unknown) => require('react').createElement('Pressable', props) }));
@@ -203,6 +204,8 @@ describe('IdentityScreen', () => {
     const onRemoved = jest.fn();
     const view = render(<IdentityScreen {...data} agent={writer} online={false} isPro onOpenPaywall={jest.fn()} onRemoved={onRemoved} />);
     await waitFor(() => expect(view.getByTestId('agent-identity-profile-name')).toBeTruthy());
+    expect(view.getByTestId('agent-identity-offline').props.status).toBe('offline');
+    expect(view.queryByText('Offline · reconnecting')).toBeNull();
     expect(view.getByTestId('agent-identity-profile-name').props.editable).toBe(false);
     expect(view.getByTestId('agent-identity-delete').props.disabled).toBe(true);
 

@@ -1,9 +1,10 @@
 import type { ConnectionState } from '../types';
+import { APP_FOREGROUND_PROBE_AWAY_MS, FOREGROUND_PROBE_TIMEOUT_MS, shouldProbeGatewayOnForegroundResume } from '../services/foregroundReconnectPolicy';
 
 export const FOREGROUND_REFRESH_DELAY_MS_SHORT = 500;
 export const FOREGROUND_REFRESH_DELAY_MS_LONG = 800;
-export const FOREGROUND_RECONNECT_AWAY_MS = 8_000;
-export const FOREGROUND_REFRESH_AFTER_RECONNECT_TIMEOUT_MS = 2_000;
+export const FOREGROUND_RECONNECT_AWAY_MS = APP_FOREGROUND_PROBE_AWAY_MS;
+export const FOREGROUND_REFRESH_AFTER_RECONNECT_TIMEOUT_MS = FOREGROUND_PROBE_TIMEOUT_MS;
 
 export function shouldReconnectBeforeForegroundRefresh(input: {
   platformOs: string;
@@ -11,11 +12,7 @@ export function shouldReconnectBeforeForegroundRefresh(input: {
   hasRunningChat: boolean;
   connectionState: ConnectionState;
 }): boolean {
-  if (input.hasRunningChat) return false;
-  if (input.connectionState === 'pairing_pending') return false;
-  if (input.platformOs === 'ios' && input.awayMs > 0) return true;
-  if (input.awayMs < FOREGROUND_RECONNECT_AWAY_MS) return false;
-  return true;
+  return shouldProbeGatewayOnForegroundResume(input);
 }
 
 export function getForegroundRefreshDelayMs(awayMs: number): number {

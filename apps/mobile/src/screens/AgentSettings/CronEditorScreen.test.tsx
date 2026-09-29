@@ -297,6 +297,19 @@ describe('guided Cron management', () => {
     }
   });
 
+  it('keeps the empty run line in place while the history re-reads', async () => {
+    const data = setup();
+    const view = render(<CronEditorScreen {...data} agent={agent} online jobId="daily" />);
+    await waitFor(() => expect(view.getByText('No runs yet')).toBeTruthy());
+    let finish!: (value: Awaited<ReturnType<typeof data.runs>>) => void;
+    data.runs.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.press(view.getByTestId('cron-refresh-runs'));
+    await waitFor(() => expect(data.runs).toHaveBeenCalledTimes(2));
+    expect(view.getByText('No runs yet')).toBeTruthy();
+    await act(async () => finish({ entries: [], total: 0, offset: 0, limit: 3, hasMore: false, nextOffset: null }));
+    expect(view.getByText('No runs yet')).toBeTruthy();
+  });
+
   it('shows OpenClaw-owned monitors as read-only in the list and details', async () => {
     const monitor = { ...existing, id: 'review', name: 'skill-collection-review-main',
       payload: { kind: 'skillCollectionReview' } } as unknown as CronJob;

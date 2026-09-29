@@ -62,11 +62,13 @@ export function YouMindSignInPanel({
       return;
     }
     requestBusy.current = true;
-    setAuthError(null);
+    // A previous error stays until this request answers: clearing it first pulled the card up
+    // and pushed it back down when the retry failed too (owner rule 2026-09-29).
     analyticsEvents.youMindSignInTapped({ method: 'email', source: otpSent ? 'otp' : source });
     setAuthBusy(true);
     try {
       await client.sendOtp(email.trim());
+      setAuthError(null);
       setEmail(email.trim());
       setCode('');
       setResendUntil(Date.now() + 60000);
@@ -90,11 +92,11 @@ export function YouMindSignInPanel({
       return false;
     }
     requestBusy.current = true;
-    setAuthError(null);
     analyticsEvents.youMindSignInTapped({ method: 'email', source: 'otp' });
     setAuthBusy(true);
     try {
       const session = await client.verifyOtp(email.trim(), submittedCode);
+      setAuthError(null);
       analyticsEvents.youMindSignInResolved({ method: 'email', result: 'success', source: 'otp' });
       await onSignedIn?.(session);
       completed.current = true;
@@ -165,7 +167,7 @@ export function YouMindSignInPanel({
           otpSent={otpSent}
           emailBusy={authBusy}
           resendCountdown={resendCountdown}
-          invalid={Boolean(authError)}
+          invalid={Boolean(authError) && !authBusy}
           onBack={() => {
             if (authBusy) return;
             setSignInStep('options');

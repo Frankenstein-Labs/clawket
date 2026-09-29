@@ -36,6 +36,73 @@ beforeEach(() => {
 });
 afterEach(async () => { for (const service of services.splice(0)) await service.stop(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 describe('Claude service durable send and ownership boundary', () => {
+  it('a rename acknowledgement prevents a new sync from reusing a pre-rename multi-row scan', async () => {
+    const { service } = fixture();
+    const first = await request(service, 'sessions.create', { title: 'Before rename' }) as any;
+    const second = await request(service, 'sessions.create', { title: 'Second' }) as any;
+    const original = (service as any).descriptor.bind(service);
+    let reached!: () => void, release!: () => void, blocked = false;
+    const entered = new Promise<void>(resolve => { reached = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(service as any, 'descriptor').mockImplementation(async (...args: any[]) => {
+      const value = await original(...args);
+      if (args[0].key === second.key && !blocked) { blocked = true; reached(); await barrier; }
+      return value;
+    });
+    const older = request(service, 'sessions.sync') as Promise<any>; await entered;
+    await request(service, 'sessions.rename', { sessionKey: first.key, title: 'Confirmed name' });
+    const newer = await request(service, 'sessions.sync') as any;
+    release();
+    const retried = await older;
+    for (const response of [newer, retried]) expect(response.sessions.find((row: any) => row.key === first.key).title).toBe('Confirmed name');
+  });
+  it('negotiates catalog sync without replacing legacy list, and retains the baseline after incomplete native reads', async () => {
+    const { service, project } = fixture();
+    await request(service, 'sessions.create', { title: 'Owned' });
+    const info = { sessionId: randomUUID(), cwd: project, summary: 'Native', lastModified: 1 };
+    mocks.list.mockResolvedValue([info]);
+    const first = await request(service, 'sessions.sync') as any;
+    const base = { epoch: first.epoch, revision: first.revision };
+    expect(first).toMatchObject({ kind: 'full', total: 2, nextOffset: null });
+    expect(await request(service, 'sessions.list')).toEqual(first.sessions);
+    expect(await service.health()).toMatchObject({ sessionCatalogSync: 1 });
+    mocks.list.mockRejectedValue(new Error('private native path'));
+    await expect(request(service, 'sessions.sync', { base })).rejects.toThrow('Conversation catalog could not be refreshed completely');
+    expect(await request(service, 'sessions.sync', { page: { ...base, offset: 0 } })).toEqual(first);
+    expect(await request(service, 'sessions.list')).toHaveLength(1);
+    const nativeKey = first.sessions.find((session: any) => session.source === 'native').key;
+    mocks.list.mockResolvedValue([{ sessionId: info.sessionId, cwd: project }]);
+    await expect(request(service, 'sessions.sync', { base })).rejects.toThrow('Conversation catalog could not be refreshed completely');
+    expect(await request(service, 'chat.history', { sessionKey: nativeKey })).toMatchObject({ messages: [] });
+    mocks.list.mockResolvedValue([info]);
+    expect(await request(service, 'sessions.sync', { base })).toEqual({ kind: 'unchanged', ...base });
+    mocks.list.mockResolvedValue([]);
+    expect(await request(service, 'sessions.sync')).toMatchObject({ kind: 'full', total: 1 });
+    await expect(request(service, 'chat.history', { sessionKey: nativeKey })).rejects.toThrow('Unknown');
+  });
+  it('rejects truncated Claude discovery for sync while preserving legacy partial listing', async () => {
+    const { service, project } = fixture();
+    const rows = Array.from({ length: 100 }, () => ({ sessionId: randomUUID(), cwd: project, summary: 'Native', lastModified: 1 }));
+    mocks.list.mockResolvedValue(rows);
+    await expect(request(service, 'sessions.sync')).rejects.toThrow('Conversation catalog could not be refreshed completely');
+    expect(await request(service, 'sessions.list')).toHaveLength(100);
+  });
+  it('looks up durable receipts after restart without native discovery, owner takeover or replay', async () => {
+    const { service, open } = fixture();
+    const row = await request(service, 'sessions.create') as { key: string };
+    const input = { sessionKey: row.key, text: 'receipt', idempotencyKey: '__proto__' };
+    expect(await request(service, 'chat.promptStatus', input)).toEqual({ status: 'unknown' });
+    expect(mocks.starts).not.toHaveBeenCalled();
+    const sent = await request(service, 'chat.send', input) as { runId: string };
+    await service.stop();
+    const restarted = open(); vi.clearAllMocks();
+    expect(await request(restarted, 'chat.promptStatus', input)).toEqual({ status: 'recorded', runId: sent.runId });
+    expect(await request(restarted, 'chat.promptStatus', { ...input, sessionKey: 'other' })).toEqual({ status: 'unknown' });
+    expect(await request(restarted, 'chat.promptStatus', { ...input, idempotencyKey: 'constructor' })).toEqual({ status: 'unknown' });
+    await expect(request(restarted, 'chat.promptStatus', { ...input, idempotencyKey: '' })).rejects.toThrow('Invalid');
+    expect(mocks.starts).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.list).not.toHaveBeenCalled(); expect(mocks.roster).not.toHaveBeenCalled();
+  });
   it('shows the accepted user message, then the completed assistant reply without persisting transcript text', async () => {
     const { service } = fixture();
     const row = await request(service, 'sessions.create') as { key: string };

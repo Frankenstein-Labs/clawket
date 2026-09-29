@@ -1009,6 +1009,8 @@ function ThreadScreenContent({
         pendingReplyRenderKey={controller.pendingReplyRenderKey}
         canSend={!sessionPreview && controller.canSend}
         loadingMoreHistory={!sessionPreview && controller.loadingMoreHistory}
+        historyLoadMoreError={!sessionPreview && controller.historyLoadMoreError}
+        onRetryHistory={!sessionPreview ? controller.retryLoadMoreHistory : undefined}
         topInset={insets.top}
         bottomInset={insets.bottom}
         copy={copy}
@@ -1068,6 +1070,17 @@ function ThreadScreenContent({
         showSlashSuggestions={controller.showSlashSuggestions}
         onSelectSlashCommand={controller.onSelectSlashCommand}
         onDismissSlashSuggestions={controller.dismissSlashSuggestions}
+        runtimeSettings={controller.hasRuntimeSettings}
+        onReviewRuntimeSettings={controller.runtimeSettingsUnconfirmed && !controller.runtimeSettingsBusy ? () => {
+          controller.composerRef.current?.blur();
+          Keyboard.dismiss();
+          const reviewPermissions = controller.permissions?.requiresConfirmation === true;
+          controller.setPermissionPickerVisible(reviewPermissions);
+          controller.setModelPickerVisible(!reviewPermissions);
+          controller.retryModelPickerLoad();
+        } : undefined}
+        permissionMode={controller.permissions?.mode}
+        onOpenPermissions={() => { Keyboard.dismiss(); controller.openPermissionPicker(); }}
         thinkingLevel={controller.thinkingLevel}
         thinkingLevelOptions={controller.thinkingLevelOptions}
         onSelectThinkingLevel={controller.onSelectStaticThinkLevel}
@@ -1147,6 +1160,16 @@ function ThreadScreenContent({
           onRetry: controller.retryModelPickerLoad,
           onSelect: controller.onSelectModel,
         }}
+        runtimeSettings={controller.hasRuntimeSettings ? {
+          visible: !sessionPreview && (controller.modelPickerVisible || controller.permissionPickerVisible),
+          permissionsOnly: controller.permissionPickerVisible,
+          loading: controller.modelPickerLoading, busy: controller.runtimeSettingsBusy, running: controller.isSending, error: controller.modelPickerError,
+          thinkingLevel: controller.thinkingLevel, thinkingLevels: controller.thinkingLevelOptions,
+          fastMode: controller.fastMode, permissions: controller.permissions,
+          onClose: () => { controller.setModelPickerVisible(false); controller.setPermissionPickerVisible(false); },
+          onSelectThinking: controller.onSelectStaticThinkLevel,
+          onSelectFastMode: controller.onSelectFastMode, onSelectPermissions: controller.onSelectPermissions,
+        } : undefined}
         commandPicker={{
           visible: !sessionPreview && controller.commandPickerVisible,
           title: controller.commandPickerTitle,

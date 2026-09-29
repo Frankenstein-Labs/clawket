@@ -10,6 +10,7 @@ import type { AgentAdapter, AgentDescriptor } from '@clawket/agent-protocol';
 import type { RootStackParamList } from '../../navigation/root-stack';
 import { AgentAvatar } from '../../components/ui/AgentAvatar';
 import { Banner } from '../../components/ui/Banner';
+import { ConnectionStatusPill } from '../../components/ui/ConnectionStatusPill';
 import { Button } from '../../components/ui/Button';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { FormTextInput } from '../../components/ui/FormTextInput';
@@ -41,6 +42,8 @@ export type IdentityScreenProps = Readonly<{
   adapter: AgentAdapter;
   agent: AgentDescriptor;
   online: boolean;
+  /** The runtime's foreground grace window is open: show quiet reconnecting instead of offline. */
+  reconnecting?: boolean;
   isPro: boolean;
   navigation: Pick<NativeStackNavigationProp<RootStackParamList, 'AgentSettingsSection'>, 'goBack' | 'dispatch'>;
   openCreateOnMount?: boolean;
@@ -63,6 +66,7 @@ export function IdentityScreen({
   adapter,
   agent,
   online,
+  reconnecting = false,
   isPro,
   navigation,
   openCreateOnMount = false,
@@ -313,6 +317,9 @@ export function IdentityScreen({
     <View testID="agent-identity-screen" style={styles.screen}>
       <ScreenHeader
         title={t('Identity', { ns: 'config' })}
+        // Connection state takes the title slot, never a banner that pushes the form (owner rule 2026-09-16).
+        status={!online && reconnecting ? <ConnectionStatusPill placement="inline" status="reconnecting" message={t('Reconnecting…', { ns: 'common' })} />
+          : !online ? <ConnectionStatusPill testID="agent-identity-offline" placement="inline" status="offline" message={t('Offline · reconnecting', { ns: 'common' })} /> : undefined}
         topInset={insets.top}
         onBack={back}
         rightContent={profileEditable && bundle ? (
@@ -331,7 +338,6 @@ export function IdentityScreen({
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Space.xl }]}
       >
-        {!online ? <Banner message={t('Offline · reconnecting', { ns: 'common' })} /> : null}
         {error ? <Banner testID="agent-identity-error" tone="bad" message={error} /> : null}
         {loading && !bundle ? (
           <IdentityLoading />

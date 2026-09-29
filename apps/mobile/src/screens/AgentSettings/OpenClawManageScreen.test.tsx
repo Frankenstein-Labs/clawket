@@ -164,7 +164,7 @@ jest.mock('../../components/ui/Button', () => {
       loading?: boolean;
     }) => ReactRuntime.createElement(
       Pressable,
-      { testID, onPress: disabled || loading ? undefined : onPress, disabled },
+      { testID, onPress: disabled || loading ? undefined : onPress, disabled, loading: Boolean(loading) },
       ReactRuntime.createElement(Text, null, label),
     ),
   };
@@ -860,6 +860,55 @@ describe('OpenClawManageScreen', () => {
     await waitFor(() => expect(screen.queryByTestId('openclaw-manage-error')).toBeNull());
   });
 
+  it('keeps a failure notice through Retry until the read answers', async () => {
+    const harness = createAdapterHarness();
+    let finish!: (value: { config: Record<string, unknown>; hash: string }) => void;
+    harness.view
+      .mockRejectedValueOnce(new AdapterError('server', 'private server detail'))
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const screen = renderScreen(harness);
+    await waitFor(() => expect(screen.getByTestId('openclaw-manage-error')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('openclaw-manage-error-action'));
+    await waitFor(() => expect(harness.view).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('openclaw-manage-error')).toBeTruthy();
+    await act(async () => finish({ config: { ok: true }, hash: 'hash-2' }));
+    expect(screen.queryByTestId('openclaw-manage-error')).toBeNull();
+  });
+
+  it('keeps the saved configuration on screen while it re-reads and holds Edit until the hash returns', async () => {
+    const harness = createAdapterHarness();
+    const screen = renderScreen(harness);
+    await waitFor(() => expect(screen.getByTestId('openclaw-configuration-content')).toBeTruthy());
+    let finish!: (value: { config: Record<string, unknown>; hash: string }) => void;
+    harness.view.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.press(screen.getByTestId('openclaw-configuration-edit'));
+    fireEvent.changeText(screen.getByTestId('openclaw-configuration-input'), '{"theme":"light"}');
+    fireEvent.press(screen.getByTestId('openclaw-configuration-review'));
+    fireEvent.press(screen.getByTestId('openclaw-configuration-confirm-action'));
+    await waitFor(() => expect(harness.view).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('openclaw-manage-loading')).toBeNull();
+    expect(screen.getByTestId('openclaw-configuration-content')).toBeTruthy();
+    expect(screen.getByTestId('openclaw-configuration-edit').props.disabled).toBe(true);
+    await act(async () => finish({ config: { theme: 'light' }, hash: 'hash-2' }));
+    expect(screen.getByTestId('openclaw-configuration-edit').props.disabled).toBe(false);
+  });
+
+  it('runs diagnostics again under the last report with its button spinning', async () => {
+    const harness = createAdapterHarness();
+    const screen = renderScreen(harness, { initialTab: 'diagnostics' });
+    await waitFor(() => expect(screen.getByTestId('openclaw-diagnostics-content')).toBeTruthy());
+    let finish!: (value: DoctorResult) => void;
+    harness.doctor.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    fireEvent.press(screen.getByTestId('openclaw-diagnostics-run'));
+    await waitFor(() => expect(harness.doctor).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('openclaw-manage-loading')).toBeNull();
+    expect(screen.getByTestId('openclaw-diagnostics-content')).toBeTruthy();
+    expect(screen.getByTestId('openclaw-diagnostics-run').props.loading).toBe(true);
+    await act(async () => finish({ ok: true, checks: [], summary: 'Rechecked' }));
+    expect(screen.getByText('Rechecked')).toBeTruthy();
+    expect(screen.getByTestId('openclaw-diagnostics-run').props.loading).toBe(false);
+  });
+
   it('retains cached content behind the offline banner', async () => {
     const harness = createAdapterHarness();
     const screen = renderScreen(harness);
@@ -869,6 +918,15 @@ describe('OpenClawManageScreen', () => {
     expect(screen.getByTestId('openclaw-manage-offline')).toBeTruthy();
     expect(screen.getByTestId('openclaw-configuration-content')).toBeTruthy();
     expect(harness.view).toHaveBeenCalledTimes(1);
+  });
+
+  it('inserts no offline notice during a short reconnect', async () => {
+    const harness = createAdapterHarness();
+    const screen = renderScreen(harness, { reconnecting: true });
+    await waitFor(() => expect(screen.getByTestId('openclaw-configuration-content')).toBeTruthy());
+    act(() => harness.emitState('offline'));
+    expect(screen.queryByTestId('openclaw-manage-offline')).toBeNull();
+    expect(screen.getByTestId('openclaw-configuration-content')).toBeTruthy();
   });
 
   it('blocks management calls and preserves each contextual paywall trigger without Pro access', () => {

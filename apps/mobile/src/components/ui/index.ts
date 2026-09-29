@@ -57,6 +57,8 @@ export {
 export type { SheetHeaderProps } from './SheetHeader';
 export { SheetHeaderButton } from './SheetHeaderButton';
 export type { SheetHeaderButtonProps } from './SheetHeaderButton';
+export { SheetHeaderSpinner } from './SheetHeaderSpinner';
+export type { SheetHeaderSpinnerProps } from './SheetHeaderSpinner';
 export { ThemedFullWindowOverlay } from './ThemedFullWindowOverlay';
 export { Button } from './Button';
 export type { ButtonSize, ButtonVariant } from './Button';

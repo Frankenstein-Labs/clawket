@@ -30,7 +30,7 @@ export class ClaudeCatalog {
   private projects = new Map<string, ProjectDescriptor>();
   private previews = new Map<string, { version: number; preview?: string; lastActivityAt: number | null }>();
   private previewFailures = new Map<string, { version: number; checkedAt: number }>();
-  private refresh?: Promise<{ truncated: boolean; sessions: SessionDescriptor[] }>;
+  private refresh?: Promise<{ truncated: boolean; complete: boolean; sessions: SessionDescriptor[] }>;
 
   constructor(private readonly scope: { project: string; device: boolean },
     private readonly sdk: NativeApi = { listSessions, getSessionMessages },
@@ -58,21 +58,21 @@ export class ClaudeCatalog {
     return project;
   }
 
-  discover(): Promise<{ truncated: boolean; sessions: SessionDescriptor[] }> {
+  discover(): Promise<{ truncated: boolean; complete: boolean; sessions: SessionDescriptor[] }> {
     if (this.refresh) return this.refresh;
     const attempt = this.discoverOnce().finally(() => { if (this.refresh === attempt) this.refresh = undefined; });
     this.refresh = attempt;
     return attempt;
   }
 
-  private async discoverOnce(): Promise<{ truncated: boolean; sessions: SessionDescriptor[] }> {
+  private async discoverOnce(): Promise<{ truncated: boolean; complete: boolean; sessions: SessionDescriptor[] }> {
     const next = new Map<string, NativeEntry>();
     await this.addProject(this.scope.project);
     if (this.scope.device) {
       for (const path of await this.savedProjects()) await this.addProject(path);
     }
     const refreshedProjects = new Map<string, ProjectDescriptor>();
-    let truncated = false;
+    let truncated = false, complete = true;
     const root = await canonical(this.scope.project);
     for (let offset = 0; offset < MAX_SESSIONS; offset += PAGE_SIZE) {
       const rows = await this.sdk.listSessions({ limit: PAGE_SIZE, offset,
@@ -82,11 +82,11 @@ export class ClaudeCatalog {
       let added = 0;
       for (const info of rows) {
         if (!info || !UUID.test(info.sessionId) || typeof info.cwd !== 'string' || !isAbsolute(info.cwd)
-          || typeof info.summary !== 'string' || !Number.isFinite(info.lastModified)) continue;
+          || typeof info.summary !== 'string' || !Number.isFinite(info.lastModified)) { complete = false; continue; }
         const cwd = await canonical(info.cwd);
         if (!this.scope.device && cwd !== root) continue;
         const key = `native:${opaqueId(info.sessionId)}`;
-        if (next.has(key)) continue;
+        if (next.has(key)) { complete = false; continue; }
         // Sequential directory reads keep native discovery cheap on a shared development computer.
         const project = refreshedProjects.get(cwd) ?? await this.addProject(cwd);
         refreshedProjects.set(cwd, project);
@@ -96,14 +96,22 @@ export class ClaudeCatalog {
       if (rows.length < PAGE_SIZE) break;
       if (!added || offset + PAGE_SIZE >= MAX_SESSIONS) { truncated = true; break; }
     }
-    this.entries = next;
+    if (complete && !truncated) this.entries = next;
+    else {
+      // Preserve known read-only lookups through a partial scan. Positive rows
+      // still obey this pairing's cwd filter; never infer removal or takeover.
+      for (const [key, entry] of next) {
+        if (this.entries.has(key) || this.entries.size < MAX_SESSIONS) this.entries.set(key, entry);
+        else next.delete(key);
+      }
+    }
     const recent = [...next.values()].sort((a, b) => b.info.lastModified - a.info.lastModified).slice(0, 12);
     for (let index = 0; index < recent.length; index += 2) await Promise.all(recent.slice(index, index + 2).map(({ info }) =>
       this.loadPreview(info.sessionId, info.cwd!, info.lastModified, info.fileSize)));
     // Bridge-owned sessions are intentionally excluded by listSessions; retain their cached tails too.
     while (this.previews.size > 3_000) this.previews.delete(this.previews.keys().next().value!);
     while (this.previewFailures.size > 3_000) this.previewFailures.delete(this.previewFailures.keys().next().value!);
-    return { truncated, sessions: [...next].map(([key, entry]) => this.descriptor(key, entry)) };
+    return { truncated, complete: complete && !truncated, sessions: [...next].map(([key, entry]) => this.descriptor(key, entry)) };
   }
 
   cachedPreview(sessionId: string): { preview: string; lastActivityAt: number } | undefined {

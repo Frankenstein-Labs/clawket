@@ -154,6 +154,7 @@ export type GatewayProtocolProfile = Readonly<{
 }>;
 
 export type GatewayProtocolClientOptions = {
+  onTransportDiagnostic?: (diagnostic: import('../transports/types').TransportDiagnostic) => void;
   profile: GatewayProtocolProfile;
   webSocketFactory?: WebSocketFactory;
   identityProvider?: () => Promise<DeviceIdentity>;

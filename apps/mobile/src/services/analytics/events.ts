@@ -3,6 +3,7 @@ import type { BackendKind, DmScope, SessionKind, TransportKind } from '@clawket/
 import { normalizeAnalyticsEventString } from './event-property-normalizers';
 import { posthogClient, recordPostHogDiagnosticEvent } from './posthog';
 import { getAnalyticsSubscriptionProperties } from './subscription-context';
+import type { ConnectionDiagnosticEvent } from '../connection-diagnostics';
 
 type AnalyticsValue = boolean | number | string | null | undefined;
 type AnalyticsProperties = Record<string, AnalyticsValue>;
@@ -65,7 +66,9 @@ export const ANALYTICS_EVENT_PROPERTY_WHITELIST = Object.freeze({
   connect_phase: ['protocol', 'route', 'phase', 'elapsed_ms', 'phase_ms', 'attempt'],
   connect_ready: ['backend', 'transport', 'elapsed_ms', 'attempt'],
   connect_failed: ['backend', 'transport', 'code', 'stage', 'attempt'],
-  reconnect: ['backend', 'transport', 'reason'],
+  connection_diagnostic: ['backend', 'transport', 'operation', 'environment', 'outcome', 'phase', 'code', 'http_status', 'elapsed_ms', 'network', 'evidence'],
+  transport_diagnostic: ['backend', 'transport', 'environment', 'event', 'phase', 'code', 'close_code', 'elapsed_ms'],
+  reconnect: ['backend', 'transport', 'reason', 'origin', 'cause'],
   roster_viewed: ['connection_count', 'agent_count', 'pinned_count', 'unread_count', 'attention_count'],
   roster_row_opened: ['kind', 'unread', 'attention', 'locked', 'cached'],
   roster_pin_toggled: ['action', 'kind'],
@@ -249,6 +252,10 @@ export function sanitizeAnalyticsEventProperties(
   ]);
   return Object.entries(properties).reduce<Record<string, boolean | number | string>>((result, [key, value]) => {
     if (!allowed.has(key) || !isSafeAnalyticsValue(value)) return result;
+    if (event === 'transport_diagnostic' && key === 'close_code'
+      && (typeof value !== 'number' || !Number.isInteger(value) || value < 1000 || value > 4999)) return result;
+    if (event === 'transport_diagnostic' && key === 'elapsed_ms'
+      && (typeof value !== 'number' || value < 0 || value > 86_400_000)) return result;
     result[key] = typeof value === 'string'
       ? normalizeAnalyticsEventString(event, key, value)
       : value;
@@ -358,6 +365,14 @@ export const analyticsEvents = {
     captureAnalyticsEvent('connect_attempt', properties);
   },
 
+  connectionDiagnostic(properties: ConnectionDiagnosticEvent): void {
+    captureAnalyticsEvent('connection_diagnostic', properties);
+  },
+
+  transportDiagnostic(properties: import('../transport-diagnostics').TransportDiagnosticEvent): void {
+    captureAnalyticsEvent('transport_diagnostic', properties);
+  },
+
   connectReady(properties: {
     backend: AnalyticsBackend;
     transport: AnalyticsTransport;
@@ -381,7 +396,7 @@ export const analyticsEvents = {
     backend: AnalyticsBackend;
     transport: AnalyticsTransport;
     reason: 'tick_timeout' | 'socket_close' | 'probe_failed' | 'seq_gap' | 'foreground';
-  }): void {
+  } & Partial<import('../transport-diagnostics').ReconnectDiagnostic>): void {
     captureAnalyticsEvent('reconnect', properties);
   },
 
@@ -527,7 +542,7 @@ export const analyticsEvents = {
     });
   },
 
-  sessionAction(properties: { action: 'pin' | 'rename' | 'reset' | 'delete' | 'create' | 'export' }): void {
+  sessionAction(properties: { action: 'pin' | 'rename' | 'reset' | 'delete' | 'create' | 'export' | 'copy_id' | 'archive' }): void {
     captureAnalyticsEvent('session_action', properties);
   },
 

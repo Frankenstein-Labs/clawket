@@ -38,6 +38,7 @@ it('uses a distinct registration when the requested environment changes', async 
   mock.fetch.mockImplementation(async (url: string) => url.endsWith('/register') ? Response.json({ gatewayId: 'preview-id', relaySecret: 'preview-secret', relayUrl: 'wss://preview.example', accessCode: 'code' }) : Response.json({ sessionId: 'legacy' }));
   await handleClaudeCommand(['pair', '--foreground', '--project', project, '--config', path, '--registry', 'https://preview.example']);
   expect(mock.fetch.mock.calls[0][0]).toBe('https://preview.example/v1/pair/register');
+  expect(JSON.parse(mock.fetch.mock.calls[0][1].body)).toEqual({ displayName: 'Claude Code' });
   expect(JSON.parse(readFileSync(path, 'utf8')).relay.gatewayId).toBe('preview-id');
 });
 it('does not stop an active task to refresh pairing', async () => {

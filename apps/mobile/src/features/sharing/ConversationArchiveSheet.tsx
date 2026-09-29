@@ -124,7 +124,6 @@ export function ConversationArchiveSheet({ visible, suspended = false, isPro, on
     headerRight={!renaming ? <SheetHeaderButton icon={MoreHorizontal} accessibilityLabel={t('Archive actions')}
       onPress={() => { Keyboard.dismiss(); setMenu(value => !value); setConfirmDelete(false); }} disabled={updating || deleting} testID="archive-actions" /> : undefined}>
     {error ? <View style={styles.inset}><Banner message={t('Failed to save')} actionLabel={t('Retry')} onAction={() => setRevision(value => value + 1)} /></View> : null}
-    {!entries && !error ? <LoadingState size="compact" /> : null}
     {selected || menu ? <View style={styles.inset}><SettingsRow title={t('Back', { ns: 'common' })} leading={<ChevronLeft size={IconSize.md} color={theme.colors.inkSecondary} />}
       onPress={back} disabled={updating || deleting} testID="archive-back" /></View> : null}
     {renaming ? <View style={styles.content}>
@@ -160,6 +159,8 @@ export function ConversationArchiveSheet({ visible, suspended = false, isPro, on
       </View>} />
       : <BottomSheetScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {caption(t('Saved on this device'))}
+        {/* The wait holds the list's own place: above the caption, its reserved height shoved the page down on every open. */}
+        {!entries && !error ? <LoadingState size="compact" /> : null}
         {entries?.length ? <SegmentedTabs tabs={[{ key: 'all', label: t('All') }, { key: 'pinned', label: t('Pinned archives') }, { key: 'files', label: t('With files') }]}
           active={filter} onSwitch={setFilter} testID="archive-filter" /> : null}
         {searching && isPro ? <SearchInput inSheet autoFocus value={query} onChangeText={setQuery} onClear={() => setQuery('')} placeholder={t('Search saved conversations')} testID="archive-search" /> : null}

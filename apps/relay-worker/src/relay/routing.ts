@@ -26,6 +26,7 @@ import {
 } from './control';
 import { parsePositiveInt } from './utils';
 import { rememberPendingRequest, takePendingRequest } from './pending-requests';
+import { sendRelayFrame } from './transfer';
 
 export function allowMessage(
   runtime: RelayRuntime,
@@ -117,7 +118,7 @@ export function tryDeliverChallenge(
     return false;
   }
 
-  challengeClient.send(data);
+  sendRelayFrame(runtime, challengeClient, data);
   const challengeAttachment = challengeClient.deserializeAttachment() as SocketAttachment | null;
   if (challengeAttachment) {
     challengeAttachment.challengeDeliveredAt = now;
@@ -225,7 +226,7 @@ export function flushPendingConnectStarts(runtime: RelayRuntime): void {
       runtime.pendingConnectStarts.delete(clientId);
       continue;
     }
-    runtime.gatewaySocket.send(pending.data);
+    sendRelayFrame(runtime, runtime.gatewaySocket, pending.data);
     runtime.connectStartAtByClientId.set(clientId, pending.queuedAt);
     markAwaitingChallenge(runtime, clientId, pending.queuedAt);
     runtime.pendingConnectStarts.delete(clientId);
@@ -247,11 +248,16 @@ export function flushPendingConnectStarts(runtime: RelayRuntime): void {
 
 export async function handleGatewayMessage(
   runtime: RelayRuntime,
+  ownerSocket: WebSocket,
   attachment: SocketAttachment,
   text: string,
   touchGatewayOwner: (gatewayId: string) => Promise<void>,
 ): Promise<void> {
+  if (runtime.gatewaySocket !== ownerSocket) return;
   await touchGatewayOwner(attachment.clientId);
+  // Preserve incarnation fencing if this callback later gains non-storage I/O;
+  // a stale owner must never broadcast into the replacement's client generation.
+  if (runtime.gatewaySocket !== ownerSocket) return;
   touchGatewayActivity(runtime);
   if (text.startsWith(CONTROL_PREFIX)) {
     const gatewayControl = parseControlEnvelope(text);
@@ -297,7 +303,7 @@ export async function handleGatewayMessage(
     if (event?.type !== 'event' || event.event !== `${runtime.policy.backend}.update`) return;
     for (const [clientId, client] of runtime.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
-      client.send(text);
+      sendRelayFrame(runtime, client, text);
       touchClientActivity(runtime, clientId);
     }
     return;
@@ -307,7 +313,7 @@ export async function handleGatewayMessage(
       const target = takePendingRequest(runtime, connectResId);
       runtime.connectReqClientByReqId.delete(connectResId);
       if (target) {
-        target.socket.send(text);
+        sendRelayFrame(runtime, target.socket, text);
         touchClientActivity(runtime, target.clientId);
         logRuntimeTelemetry(runtime, 'request_response_delivered', {
           role: 'gateway',
@@ -325,7 +331,7 @@ export async function handleGatewayMessage(
     if (targetClientId) {
       const targetClient = runtime.clients.get(targetClientId);
       if (targetClient?.readyState === WebSocket.OPEN) {
-        targetClient.send(text);
+        sendRelayFrame(runtime, targetClient, text);
         touchClientActivity(runtime, targetClientId);
         logRuntimeTelemetry(runtime, 'connect_response_delivered', {
           diagnosticId: (targetClient.deserializeAttachment() as SocketAttachment | null)?.diagnosticId,
@@ -345,7 +351,7 @@ export async function handleGatewayMessage(
   let delivered = 0;
   const activeClient = runtime.activeClientId ? runtime.clients.get(runtime.activeClientId) : null;
   if (activeClient?.readyState === WebSocket.OPEN) {
-    activeClient.send(text);
+    sendRelayFrame(runtime, activeClient, text);
     touchClientActivity(runtime, runtime.activeClientId!);
     delivered = 1;
   }
@@ -391,7 +397,7 @@ function routeGatewayControl(
     const targetClient = runtime.clients.get(targetClientId)
       ?? (runtime.policy.securePairing ? runtime.pairingClients.get(targetClientId) : undefined);
     if (targetClient?.readyState === WebSocket.OPEN) {
-      targetClient.send(serializeControlEnvelope(envelope));
+      sendRelayFrame(runtime, targetClient, serializeControlEnvelope(envelope));
       touchClientActivity(runtime, targetClientId);
       logControlRoutingTelemetry(runtime, 'gateway_control_target_delivered', attachment, envelope);
       return;
@@ -403,7 +409,7 @@ function routeGatewayControl(
   const activeClientId = runtime.activeClientId;
   const activeClient = activeClientId ? runtime.clients.get(activeClientId) : null;
   if (activeClientId && activeClient?.readyState === WebSocket.OPEN) {
-    activeClient.send(serializeControlEnvelope(envelope));
+    sendRelayFrame(runtime, activeClient, serializeControlEnvelope(envelope));
     touchClientActivity(runtime, activeClientId);
     logControlRoutingTelemetry(runtime, 'gateway_control_delivered', attachment, envelope);
     return;
@@ -532,7 +538,7 @@ export function forwardClientMessageToGateway(
       clientCount: runtime.clients.size,
     });
   }
-  runtime.gatewaySocket.send(text);
+  sendRelayFrame(runtime, runtime.gatewaySocket, text);
 }
 
 export const forwardClientMessageToBridge = forwardClientMessageToGateway;
@@ -558,7 +564,7 @@ export function rejectClientRequestWithoutBridge(
     },
   });
   try {
-    ws.send(response);
+    sendRelayFrame(runtime, ws, response);
     touchClientActivity(runtime, attachment.clientId);
   } catch {
     // Best effort error delivery; the client may retry on the same socket.
@@ -596,7 +602,7 @@ export function forwardClientControlToGateway(
     type: typeof envelope.type === 'string' && envelope.type.trim() ? envelope.type : 'control',
     sourceClientId: attachment.clientId,
   };
-  runtime.gatewaySocket.send(serializeControlEnvelope(forwardedEnvelope));
+  sendRelayFrame(runtime, runtime.gatewaySocket, serializeControlEnvelope(forwardedEnvelope));
   logControlRoutingTelemetry(runtime, 'client_control_forwarded', attachment, forwardedEnvelope, {
     [runtime.policy.pendingOwnerField]: gatewayAttachment?.clientId ?? null,
   });
@@ -621,7 +627,7 @@ export function forwardPairingControlToGateway(
     logControlRoutingTelemetry(runtime, 'pairing_control_no_gateway', attachment, envelope);
     return true;
   }
-  runtime.gatewaySocket.send(serializeControlEnvelope({
+  sendRelayFrame(runtime, runtime.gatewaySocket, serializeControlEnvelope({
     ...envelope,
     type: 'control',
     sourceClientId: attachment.clientId,

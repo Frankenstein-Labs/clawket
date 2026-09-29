@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { analyticsEvents } from '../services/analytics/events';
 import { useAppContext } from '../contexts/AppContext';
+import { runtimeSettingsStatus } from '../connection/runtime-settings-status';
+import { SessionCatalogSupersededError } from '../connection/adapters/session-catalog';
 import type {
   AgentAdapter,
   ModelProviderInfo,
   ModelSelectionState,
+  SessionPermissionMode,
 } from '@clawket/agent-protocol';
 import { ConnectionState, SessionInfo } from '../types';
 
@@ -56,30 +59,80 @@ export function useChatModelPicker({
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [nativeThinkingLevel, setNativeThinkingLevel] = useState<string | null>(null);
   const [currentModelProvider, setCurrentModelProvider] = useState<string | null>(null);
+  const [runtimeSettingsBusy, setRuntimeSettingsBusy] = useState(false);
+  const [runtimeSettingsUnconfirmed, setRuntimeSettingsUnconfirmed] = useState(() => (
+    !!adapter && runtimeSettingsStatus.version(adapter.connection.id, sessionKey) !== undefined
+  ));
+  const runtimeSettingsUnconfirmedRef = useRef(runtimeSettingsUnconfirmed);
+  const [fastMode, setFastMode] = useState<ModelSelectionState['fastMode']>();
+  const [permissions, setPermissions] = useState<ModelSelectionState['permissions']>();
+  const [permissionPickerVisible, setPermissionPickerVisible] = useState(false);
+  const runtimeSettingsPendingRef = useRef(false);
+  // An interrupted write may have reached the computer. Keep that uncertainty
+  // with its conversation, including while another adapter/session is shown.
+  const settingsScope = JSON.stringify([adapter?.connection.id, adapter?.capabilities.modelPerSession ? sessionKey : null]);
+  const hasRuntimeSettings = Boolean(adapter?.capabilities.fastMode || adapter?.capabilities.sessionPermissions);
   const requestContextRef = useRef({ adapter, connectionState, sessionKey });
   const modelLoadRequestRef = useRef(0);
   const modelRefreshRequestRef = useRef(0);
   const modelSelectionRequestRef = useRef(0);
   const modelValueRevisionRef = useRef(0);
+  const runtimeReadRevisionRef = useRef(0);
   const modelMetadataScope = useRef<{ adapter: AgentAdapter | null; sessionKey: string | null } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   requestContextRef.current = { adapter, connectionState, sessionKey };
 
-  const isCurrentAdapterRequest = useCallback((
+  const isSameAdapterRequest = useCallback((
     requestAdapter: AgentAdapter,
     connectionId: string,
     requestSessionKey?: string | null,
   ): boolean => {
     const current = requestContextRef.current;
-    return current.connectionState === 'ready'
-      && current.adapter === requestAdapter
+    return mounted.current && current.adapter === requestAdapter
       && current.adapter.connection.id === connectionId
       && (requestSessionKey === undefined || current.sessionKey === requestSessionKey);
   }, []);
 
+  const isCurrentAdapterRequest = useCallback((requestAdapter: AgentAdapter, connectionId: string, requestSessionKey?: string | null) => (
+    requestContextRef.current.connectionState === 'ready'
+    && isSameAdapterRequest(requestAdapter, connectionId, requestSessionKey)
+  ), [isSameAdapterRequest]);
+
+  const confirmRuntimeSettings = useCallback((selection: ModelSelectionState, revision?: number) => {
+    if (!adapter) return;
+    if (adapter.capabilities.sessionPermissions && selection.permissions?.requiresConfirmation === true) {
+      runtimeSettingsUnconfirmedRef.current = true;
+      setRuntimeSettingsUnconfirmed(true);
+      if (sessionKey) runtimeSettingsStatus.requirePermissions(adapter.connection.id, sessionKey);
+      return;
+    }
+    // A read with missing native settings is not proof that an interrupted
+    // permission change failed. Keep Send paused until the computer resolves it.
+    if (adapter?.capabilities.sessionPermissions && selection.permissions?.mode == null) {
+      if (runtimeSettingsStatus.version(adapter.connection.id, sessionKey) !== undefined) {
+        setModelPickerError('Codex has not confirmed these settings. Refresh before sending a message.');
+        setModelPickerVisible(true);
+      }
+      return;
+    }
+    runtimeSettingsStatus.confirm(adapter.connection.id, sessionKey, revision, selection.permissions?.requiresConfirmation === false);
+    const unconfirmed = runtimeSettingsStatus.version(adapter.connection.id, sessionKey) !== undefined;
+    runtimeSettingsUnconfirmedRef.current = unconfirmed;
+    setRuntimeSettingsUnconfirmed(unconfirmed);
+  }, [adapter, sessionKey]);
+
+  const hydrateRuntimeSettings = useCallback((selection: ModelSelectionState, revision?: number) => {
+    confirmRuntimeSettings(selection, revision);
+    setFastMode(selection.fastMode);
+    setPermissions(selection.permissions);
+  }, [confirmRuntimeSettings]);
+
   const hydrateModelSelection = useCallback((selection: ModelSelectionState) => {
     modelMetadataScope.current = { adapter, sessionKey };
     setAvailableModels((previous) => selection.models?.length ? selection.models : previous);
-    if (selection.thinkingLevel) { setNativeThinkingLevel(selection.thinkingLevel); setThinkingLevel?.(selection.thinkingLevel); }
+    setNativeThinkingLevel(selection.thinkingLevel ?? null);
+    if (selection.thinkingLevel) setThinkingLevel?.(selection.thinkingLevel);
     setAvailableProviders(selection.providers ?? []);
     setCurrentModel(selection.currentModel?.trim() || null);
     setCurrentModelProvider(selection.currentProvider?.trim() || null);
@@ -110,8 +163,20 @@ export function useChatModelPicker({
     setCurrentModel(null);
     setCurrentModelProvider(null);
     setNativeThinkingLevel(null);
+    setFastMode(undefined);
+    setPermissions(undefined);
+    setPermissionPickerVisible(false);
+    setModelPickerVisible(false);
+    setModelPickerLoading(false);
+    setRuntimeSettingsBusy(false);
+    const unconfirmed = !!adapter && runtimeSettingsStatus.version(adapter.connection.id, sessionKey) !== undefined;
+    setRuntimeSettingsUnconfirmed(unconfirmed);
+    runtimeSettingsUnconfirmedRef.current = unconfirmed;
+    runtimeSettingsPendingRef.current = false;
+    modelSelectionRequestRef.current += 1;
+    modelLoadRequestRef.current += 1;
     modelMetadataScope.current = null;
-  }, [adapter, selectionSessionKey]);
+  }, [adapter, selectionSessionKey, settingsScope]);
 
   const metadataKey = sessionMetadata?.key;
   const metadataModel = sessionMetadata?.model;
@@ -129,6 +194,8 @@ export function useChatModelPicker({
   const loadModelsForPicker = useCallback(async () => {
     const requestId = ++modelLoadRequestRef.current;
     const valueRevision = modelValueRevisionRef.current;
+    const runtimeRevision = ++runtimeReadRevisionRef.current;
+    const selectionRevision = modelSelectionRequestRef.current;
     const requestAdapter = adapter;
     const models = requestAdapter?.management?.models;
     if (connectionState !== 'ready' || !requestAdapter?.capabilities.models || !models?.list) {
@@ -139,10 +206,12 @@ export function useChatModelPicker({
       return;
     }
     const connectionId = requestAdapter.connection.id;
-    const isCurrent = () => (
+    const settingsRevision = runtimeSettingsStatus.version(connectionId, sessionKey);
+    const isSameScope = () => (
       requestId === modelLoadRequestRef.current
-      && isCurrentAdapterRequest(requestAdapter, connectionId, sessionKey)
+      && isSameAdapterRequest(requestAdapter, connectionId, sessionKey)
     );
+    const isCurrent = () => isSameScope() && requestContextRef.current.connectionState === 'ready';
 
     setModelPickerLoading(true);
     setModelPickerError(null);
@@ -154,6 +223,20 @@ export function useChatModelPicker({
       }).catch(() => {});
     }
     try {
+      // Native model/settings replies already contain the ordered catalog.
+      // One scoped read avoids an extra process round trip and a stale global read.
+      if (hasRuntimeSettings && models.getSelection) {
+        const selection = await models.getSelection(sessionKey);
+        if (!isCurrent()) return;
+        hydrateModels(selection.models);
+        // Session metadata carries model/provider only. It cannot invalidate a
+        // native permission or speed read; newer reads and explicit writes can.
+        if (runtimeRevision === runtimeReadRevisionRef.current && selectionRevision === modelSelectionRequestRef.current) {
+          hydrateRuntimeSettings(selection, settingsRevision);
+        }
+        if (valueRevision === modelValueRevisionRef.current) hydrateModelSelection(selection);
+        return;
+      }
       const available = await models.list();
       if (!isCurrent()) return;
       hydrateModels(available);
@@ -163,45 +246,56 @@ export function useChatModelPicker({
         if (valueRevision === modelValueRevisionRef.current) hydrateModelSelection(selection);
       }
     } catch (err: unknown) {
-      if (!isCurrent()) return;
+      if (!isSameScope()) return;
       const msg = err instanceof Error ? err.message : String(err);
       setModelPickerError(msg || 'Failed to load models.');
       setAvailableModels([]);
       setAvailableProviders([]);
     } finally {
-      if (isCurrent()) setModelPickerLoading(false);
+      if (isSameScope()) setModelPickerLoading(false);
     }
   }, [
     adapter,
     connectionState,
     hydrateModelSelection,
+    hydrateRuntimeSettings,
     hydrateModels,
-    isCurrentAdapterRequest,
+    hasRuntimeSettings,
+    isSameAdapterRequest,
     sessionKey,
   ]);
 
   const refreshCurrentModel = useCallback(async () => {
     const requestId = ++modelRefreshRequestRef.current;
     const valueRevision = modelValueRevisionRef.current;
+    const runtimeRevision = ++runtimeReadRevisionRef.current;
+    const selectionRevision = modelSelectionRequestRef.current;
     const requestAdapter = adapter;
     if (connectionState !== 'ready' || !requestAdapter?.capabilities.models) return;
     const connectionId = requestAdapter.connection.id;
     const requestSessionKey = sessionKey;
-    const isCurrent = () => (
+    const settingsRevision = runtimeSettingsStatus.version(connectionId, requestSessionKey);
+    const isCurrentScope = () => (
       requestId === modelRefreshRequestRef.current
-      && valueRevision === modelValueRevisionRef.current
       && isCurrentAdapterRequest(requestAdapter, connectionId, requestSessionKey)
     );
+    const isCurrent = () => isCurrentScope() && valueRevision === modelValueRevisionRef.current;
     try {
       const getSelection = requestAdapter.management?.models?.getSelection;
       if (getSelection) {
         const currentState = await getSelection(requestAdapter.capabilities.modelPerSession ? requestSessionKey : undefined);
+        if (!isCurrentScope()) return;
+        // Newer session metadata supersedes this selection, not its catalog.
+        if (currentState.models?.length) setAvailableModels(currentState.models);
+        if (runtimeRevision === runtimeReadRevisionRef.current && selectionRevision === modelSelectionRequestRef.current) {
+          hydrateRuntimeSettings(currentState, settingsRevision);
+        }
         if (!isCurrent()) return;
+        setNativeThinkingLevel(currentState.thinkingLevel ?? null);
         const selectedModel = currentState.currentModel?.trim();
         if (selectedModel) {
           modelMetadataScope.current = { adapter: requestAdapter, sessionKey: requestSessionKey };
-          if (currentState.thinkingLevel) { setNativeThinkingLevel(currentState.thinkingLevel); setThinkingLevel?.(currentState.thinkingLevel); }
-          if (currentState.models?.length) setAvailableModels(currentState.models);
+          if (currentState.thinkingLevel) setThinkingLevel?.(currentState.thinkingLevel);
           setCurrentModel(selectedModel);
           setCurrentModelProvider(currentState.currentProvider?.trim() || null);
           return;
@@ -215,7 +309,12 @@ export function useChatModelPicker({
       }));
       if (!isCurrent()) return;
       hydrateCurrentModelFromSessions(sessions);
-    } catch {
+    } catch (error) {
+      if (error instanceof SessionCatalogSupersededError) return;
+      if (isCurrent() && runtimeSettingsStatus.version(connectionId, requestSessionKey) !== undefined) {
+        setModelPickerError(error instanceof Error ? error.message : String(error));
+        setModelPickerVisible(true);
+      }
       // Keep the last visible state; model refresh should be non-disruptive in chat.
     }
   }, [
@@ -225,6 +324,7 @@ export function useChatModelPicker({
     setThinkingLevel,
     isCurrentAdapterRequest,
     sessionKey,
+    hydrateRuntimeSettings,
   ]);
 
   const openModelPicker = useCallback((): boolean => {
@@ -258,6 +358,71 @@ export function useChatModelPicker({
     void refreshCurrentModel();
   }, [foregroundEpoch, isFocused, refreshCurrentModel]);
 
+  // Runtime controls publish only native-confirmed values. A queued owner ACK is
+  // not an applied setting; Bridge waits for that confirmation before replying.
+  const applyRuntimeSetting = useCallback((operation: () => Promise<ModelSelectionState>): boolean => {
+    if (!adapter || !sessionKey || connectionState !== 'ready' || runtimeSettingsPendingRef.current) return false;
+    const requestAdapter = adapter, key = sessionKey;
+    let settingsRevision: number;
+    try { settingsRevision = runtimeSettingsStatus.begin(adapter.connection.id, sessionKey); }
+    catch (error) {
+      setModelPickerError(error instanceof Error ? error.message : String(error));
+      setModelPickerVisible(true);
+      return false;
+    }
+    const requestId = ++modelSelectionRequestRef.current;
+    modelValueRevisionRef.current += 1;
+    runtimeSettingsPendingRef.current = true;
+    runtimeSettingsUnconfirmedRef.current = true;
+    setRuntimeSettingsUnconfirmed(true);
+    setRuntimeSettingsBusy(true);
+    setModelPickerError(null);
+    const isSameScope = () => requestId === modelSelectionRequestRef.current
+      && isSameAdapterRequest(requestAdapter, requestAdapter.connection.id, key);
+    const isCurrent = () => isSameScope() && requestContextRef.current.connectionState === 'ready';
+    void operation().then(selection => {
+      if (!isCurrent()) return;
+      runtimeReadRevisionRef.current += 1;
+      hydrateRuntimeSettings(selection, settingsRevision);
+      hydrateModelSelection(selection);
+      setSessions(previous => previous.map(session => session.key === key
+        ? { ...session, model: selection.currentModel || undefined, modelProvider: selection.currentProvider || undefined }
+        : session));
+    }).catch(error => {
+      if (!isSameScope()) return;
+      runtimeSettingsUnconfirmedRef.current = true;
+      setRuntimeSettingsUnconfirmed(true);
+      setModelPickerError(error instanceof Error ? error.message : String(error));
+      if (requestContextRef.current.connectionState === 'ready') void refreshCurrentModel();
+      // Keep the setting and draft intact; a failed write must stay reviewable.
+      setModelPickerVisible(true);
+    }).finally(() => {
+      if (!isSameScope()) return;
+      runtimeSettingsPendingRef.current = false;
+      setRuntimeSettingsBusy(false);
+    });
+    return true;
+  }, [adapter, connectionState, hydrateModelSelection, hydrateRuntimeSettings, isSameAdapterRequest, sessionKey, setSessions, refreshCurrentModel]);
+
+  const onSelectFastMode = useCallback((enabled: boolean) => {
+    const operation = adapter?.management?.models?.setFastMode;
+    if (!operation || !sessionKey || !fastMode?.available) return;
+    applyRuntimeSetting(() => operation(sessionKey, enabled));
+  }, [adapter, applyRuntimeSetting, fastMode?.available, sessionKey]);
+
+  const onSelectPermissions = useCallback((mode: SessionPermissionMode) => {
+    const operation = adapter?.management?.models?.setPermissions;
+    if (!operation || !sessionKey || !permissions?.available) return;
+    if (permissions.availableModes && !permissions.availableModes.includes(mode)) return;
+    applyRuntimeSetting(() => operation(mode, sessionKey));
+  }, [adapter, applyRuntimeSetting, permissions, sessionKey]);
+
+  const openPermissionPicker = useCallback(() => {
+    if (!adapter?.capabilities.sessionPermissions || connectionState !== 'ready' || !sessionKey) return;
+    setPermissionPickerVisible(true);
+    void loadModelsForPicker();
+  }, [adapter, connectionState, loadModelsForPicker, sessionKey]);
+
   const onSelectModel = useCallback((selected: ModelInfo) => {
     const providerModel = resolveProviderModel(selected);
     if (!providerModel.trim()) return;
@@ -272,6 +437,13 @@ export function useChatModelPicker({
       source: 'chat_model_picker',
       session_key_present: Boolean(sessionKey),
     });
+
+    if (hasRuntimeSettings) {
+      const operation = adapter?.management?.models?.setSelection;
+      if (operation && sessionKey) applyRuntimeSetting(() => operation({ model: modelId,
+        ...(providerId ? { provider: providerId } : {}), scope: 'session', sessionKey }));
+      return;
+    }
 
     // Optimistically update the current session so the thread header responds immediately.
     const slashIdx = providerModel.indexOf('/');
@@ -343,6 +515,8 @@ export function useChatModelPicker({
     connectionState,
     currentModel,
     currentModelProvider,
+    hasRuntimeSettings,
+    applyRuntimeSetting,
     hydrateModelSelection,
     isCurrentAdapterRequest,
     refreshCurrentModel,
@@ -355,6 +529,10 @@ export function useChatModelPicker({
     const operation = adapter?.management?.models?.setThinkingLevel;
     if (!operation) return false;
     if (connectionState !== 'ready' || !sessionKey || !adapter) return true;
+    if (hasRuntimeSettings) {
+      applyRuntimeSetting(() => operation(sessionKey, level as import('@clawket/agent-protocol').ThinkingLevel));
+      return true;
+    }
     const currentAdapter = adapter, key = sessionKey;
     void operation(key, level as import('@clawket/agent-protocol').ThinkingLevel).then(selection => {
       if (isCurrentAdapterRequest(currentAdapter, currentAdapter.connection.id, key)) hydrateModelSelection(selection);
@@ -364,18 +542,33 @@ export function useChatModelPicker({
       setModelPickerVisible(true);
     });
     return true;
-  }, [adapter, connectionState, sessionKey, hydrateModelSelection, isCurrentAdapterRequest]);
+  }, [adapter, connectionState, sessionKey, hydrateModelSelection, isCurrentAdapterRequest, hasRuntimeSettings, applyRuntimeSetting]);
 
-  const currentModelHeaderLabel = currentModel
-    ? (currentModelProvider ? `${currentModelProvider}/${currentModel}` : currentModel)
-    : null;
-
-  const selectedCatalogModel = availableModels.find((item) =>
+  const matchingCatalogModels = availableModels.filter((item) =>
     (item.id === currentModel || item.resolvedModel === currentModel || `${item.provider}/${item.id}` === currentModel)
     && (!currentModelProvider || item.provider === currentModelProvider));
-  const currentModelDisplayName = (selectedCatalogModel?.resolvedModel || selectedCatalogModel?.name || currentModel)?.split('/').pop() || null;
+  const selectedCatalogModel = matchingCatalogModels[0];
+  // Session metadata may omit a provider for native aliases such as "haiku".
+  // A unique catalog match can restore its icon, never its write identity.
+  const matchingProviders = new Set(matchingCatalogModels.map(model => model.provider.trim()).filter(Boolean));
+  const displayProvider = currentModelProvider || (!currentModel?.includes('/') && matchingProviders.size === 1
+    ? [...matchingProviders][0] : null);
+  const currentModelHeaderLabel = currentModel
+    ? (displayProvider ? `${displayProvider}/${currentModel}` : currentModel)
+    : null;
+  const catalogDisplayName = selectedCatalogModel?.id === 'default'
+    ? selectedCatalogModel.resolvedModel || selectedCatalogModel.name
+    : selectedCatalogModel?.name || selectedCatalogModel?.resolvedModel;
+  const currentModelDisplayName = (catalogDisplayName || currentModel)?.split('/').pop() || null;
+  const visiblePermissions: ModelSelectionState['permissions'] = adapter?.capabilities.sessionPermissions
+    && runtimeSettingsStatus.requiresPermissions(adapter.connection.id, sessionKey)
+    ? { ...(permissions ?? { mode: null, available: false, scope: 'session' }), requiresConfirmation: true }
+    : permissions;
 
   return {
+    hasRuntimeSettings, runtimeSettingsBusy, runtimeSettingsPendingRef, runtimeSettingsUnconfirmed, runtimeSettingsUnconfirmedRef,
+    fastMode, permissions: visiblePermissions, permissionPickerVisible, setPermissionPickerVisible,
+    onSelectFastMode, onSelectPermissions, openPermissionPicker,
     currentModelSupportsImages: modelMetadataScope.current?.adapter === adapter
       && modelMetadataScope.current?.sessionKey === sessionKey && selectedCatalogModel?.input?.length
       ? selectedCatalogModel.input.includes('image') : undefined,

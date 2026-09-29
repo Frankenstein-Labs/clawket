@@ -1,7 +1,9 @@
 import { extractText } from './events';
+import { requiresConnectionAction } from '../recovery-window';
+import { OpenClawAdapter } from '../adapters/openclaw';
 import { GatewayProtocolClient } from './gateway-client';
 import { GatewayRequestError } from './types';
-import { RELAY_CONTROL_PREFIX } from './relay-control';
+import { RELAY_CONTROL_PREFIX, RELAY_CLIENT_CAPABILITIES } from './relay-control';
 import { RELAY_CLIENT_PONG_CAPABILITY } from '../transports/relay-ws';
 import {
   HERMES_GATEWAY_PROTOCOL_PROFILE,
@@ -258,6 +260,156 @@ describe('GatewayProtocolClient migrated parity', () => {
     jest.restoreAllMocks();
   });
 
+  describe('bounded device token repair', () => {
+    async function begin(storedToken: string | null = 'stale-token') {
+      const { StorageService: store } = jest.requireMock('../../services/storage');
+      store.getDeviceToken.mockResolvedValue(storedToken);
+      store.deleteDeviceToken.mockReset().mockImplementation(async () => {
+        store.getDeviceToken.mockResolvedValue(null);
+      });
+      client.configure({ url: 'ws://127.0.0.1:18789', token: 'configured-token' });
+      client.connect();
+      await flushPromises();
+      return store;
+    }
+
+    async function challenge() {
+      const socket = createdWs;
+      socket.readyState = MockWebSocket.OPEN;
+      socket.onopen!();
+      socket.onmessage!({ data: JSON.stringify({ type: 'event', event: 'connect.challenge',
+        payload: { nonce: 'b'.repeat(64), ts: Date.now() } }) });
+      await flushPromises();
+      return { socket, frame: JSON.parse(socket.send.mock.calls[0][0]) };
+    }
+
+    async function reject(frame: any, code = 'AUTH_TOKEN_MISMATCH', message = 'unauthorized: device token mismatch') {
+      createdWs.onmessage!({ data: JSON.stringify({ type: 'res', id: frame.id, ok: false,
+        error: { code, message } }) });
+      await flushPromises();
+    }
+
+    it.each(['AUTH_TOKEN_MISMATCH', 'AUTH_SCOPE_MISMATCH', 'UNAUTHORIZED'])(
+      'keeps adapter readiness pending during %s repair and resolves after a valid handshake', async code => {
+        const store = await begin();
+        client.disconnect();
+        const adapter = new OpenClawAdapter({ id: 'repair-test', backendKind: 'openclaw',
+          transportKind: 'local', label: 'Repair test', createdAt: 1,
+          url: 'ws://127.0.0.1:18789', auth: { token: 'configured-token' } }, { gateway: client, historyCache: null });
+        const blocked = jest.fn();
+        adapter.on('state', (_state, reason) => {
+          if (requiresConnectionAction(reason)) {
+            blocked();
+            void Promise.resolve().then(() => adapter.disconnect());
+          }
+        });
+        let finish!: () => void;
+        store.deleteDeviceToken.mockImplementationOnce(() => new Promise<void>(resolve => {
+          finish = () => { store.getDeviceToken.mockResolvedValue(null); resolve(); };
+        }));
+        let settled = false;
+        const pending = adapter.connect().then(() => { settled = true; }, error => { throw error; });
+        try {
+          await flushPromises();
+          const first = await challenge();
+          expect(first.frame.params.auth).toEqual({ deviceToken: 'stale-token' });
+          await reject(first.frame, code);
+          expect(blocked).not.toHaveBeenCalled();
+          expect(settled).toBe(false);
+          finish();
+          await flushPromises();
+          const next = await challenge();
+          expect(next.frame.params.auth).toEqual({ token: 'configured-token' });
+          next.socket.onmessage!({ data: JSON.stringify({ type: 'res', id: next.frame.id, ok: true,
+            payload: { type: 'hello-ok', server: { version: 'test' },
+              auth: { deviceToken: 'fresh-token', role: 'operator', scopes: ['operator.read'] } } }) });
+          await pending;
+          expect(adapter.state).toBe('ready');
+          expect(store.setDeviceToken).toHaveBeenCalledWith('a'.repeat(64), 'fresh-token',
+            { gatewayUrl: 'ws://127.0.0.1:18789' });
+          expect(blocked).not.toHaveBeenCalled();
+        } finally { adapter.dispose(); await pending.catch(() => undefined); }
+      });
+
+    it.each(['delete-fails', 'rejected-again', 'no-stored-token'])(
+      'stops bounded repair on %s without an automatic retry loop', async scenario => {
+        const store = await begin(scenario === 'no-stored-token' ? null : 'stale-token');
+        if (scenario === 'delete-fails') store.deleteDeviceToken.mockRejectedValueOnce(new Error('storage failure'));
+        if (scenario === 'rejected-again') store.deleteDeviceToken.mockResolvedValueOnce(undefined);
+        const errors = jest.fn(); client.on('error', errors);
+        const first = await challenge(); await reject(first.frame);
+        if (scenario === 'rejected-again') {
+          const next = await challenge(); await reject(next.frame);
+        }
+        expect(errors).toHaveBeenCalledWith(expect.objectContaining({ code: 'auth_rejected', retryable: false }));
+        expect(requiresConnectionAction(errors.mock.calls[0][0])).toBe(true);
+        const sockets = (globalThis.WebSocket as unknown as jest.Mock).mock.calls.length;
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect((globalThis.WebSocket as unknown as jest.Mock).mock.calls).toHaveLength(sockets);
+        expect(store.deleteDeviceToken).toHaveBeenCalledTimes(scenario === 'no-stored-token' ? 0 : 1);
+      });
+
+    it.each([true, false])('waits for cleanup after remote close (cleanup succeeds: %s)', async succeeds => {
+      const store = await begin();
+      let finish!: () => void;
+      store.deleteDeviceToken.mockImplementationOnce(() => new Promise<void>((resolve, rejectDeletion) => {
+        finish = () => {
+          if (succeeds) { store.getDeviceToken.mockResolvedValue(null); resolve(); }
+          else rejectDeletion(new Error('storage failure'));
+        };
+      }));
+      const errors = jest.fn(); client.on('error', errors);
+      const first = await challenge(); await reject(first.frame);
+      first.socket.close();
+      await jest.advanceTimersByTimeAsync(1_000);
+      const nextSocket = createdWs;
+      expect(nextSocket).not.toBe(first.socket);
+      nextSocket.readyState = MockWebSocket.OPEN; nextSocket.onopen!();
+      nextSocket.onmessage!({ data: JSON.stringify({ type: 'event', event: 'connect.challenge',
+        payload: { nonce: 'b'.repeat(64), ts: Date.now() } }) });
+      await flushPromises();
+      expect(nextSocket.send).not.toHaveBeenCalled();
+      finish(); await flushPromises();
+      if (succeeds) {
+        expect(JSON.parse(nextSocket.send.mock.calls[0][0]).params.auth).toEqual({ token: 'configured-token' });
+        expect(errors).not.toHaveBeenCalled();
+      } else {
+        expect(errors).toHaveBeenCalledWith(expect.objectContaining({ code: 'auth_rejected' }));
+        expect(nextSocket.send).not.toHaveBeenCalled();
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect((globalThis as any).WebSocket).toHaveBeenCalledTimes(2);
+      }
+    });
+
+    it('does not delay a different Gateway behind the retired credential cleanup', async () => {
+      const store = await begin();
+      let finish!: () => void;
+      store.deleteDeviceToken.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+      const first = await challenge(); await reject(first.frame);
+      client.configure({ url: 'ws://127.0.0.1:19999', token: 'other-token' });
+      store.getDeviceToken.mockResolvedValue(null);
+      client.connect(); await flushPromises();
+      const next = await challenge();
+      expect(next.frame.params.auth).toEqual({ token: 'other-token' });
+      finish(); await flushPromises();
+      expect((globalThis as any).WebSocket).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['disconnect', 'configure'])(
+      'does not resurrect a retired connection after delayed deletion and %s', async action => {
+        const store = await begin();
+        let finish!: () => void;
+        store.deleteDeviceToken.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+        const first = await challenge(); await reject(first.frame);
+        if (action === 'disconnect') client.disconnect();
+        else client.configure({ url: 'ws://127.0.0.1:19999', token: 'other-token' });
+        finish(); await flushPromises();
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect((globalThis as any).WebSocket).toHaveBeenCalledTimes(1);
+        expect(store.deleteDeviceToken).toHaveBeenCalledWith('a'.repeat(64), { gatewayUrl: 'ws://127.0.0.1:18789' });
+      });
+  });
+
   describe('initial state', () => {
     it('starts in idle state', () => {
       expect(client.getConnectionState()).toBe('idle');
@@ -512,7 +664,7 @@ describe('GatewayProtocolClient migrated parity', () => {
       expect(parsed.searchParams.get('role')).toBe('client');
       expect(parsed.searchParams.get('clientId')).toBe('a'.repeat(64));
       expect(parsed.searchParams.get('token')).toBe('relay-access-token');
-      expect(parsed.searchParams.get('capabilities')).toBe(RELAY_CLIENT_PONG_CAPABILITY);
+      expect(parsed.searchParams.get('capabilities')).toBe(RELAY_CLIENT_CAPABILITIES);
       expect(globalThis.fetch).not.toHaveBeenCalled();
 
       createdWs.onmessage!({
@@ -1213,6 +1365,57 @@ describe('GatewayProtocolClient migrated parity', () => {
     });
   });
 
+  describe.each([
+    ['openclaw', OPENCLAW_GATEWAY_PROTOCOL_PROFILE],
+    ['hermes', HERMES_GATEWAY_PROTOCOL_PROFILE],
+  ] as const)('%s negotiated transfer deadlines', (backendKind, profile) => {
+    const receiveControl = (event: string, payload: object) => createdWs.onmessage!({
+      data: `${RELAY_CONTROL_PREFIX}${JSON.stringify({ type: 'control', event, payload })}`,
+    });
+    const requests = () => createdWs.send.mock.calls.map(([raw]) => String(raw)).filter(raw => raw.startsWith('{')).map(raw => JSON.parse(raw));
+    const reply = (id: string, payload: object) => createdWs.onmessage!({ data: JSON.stringify({ type: 'res', id, ok: true, payload }) });
+    async function startHandshake() {
+      client = new GatewayProtocolClient({ profile, identityProvider, reconnectJitter: false });
+      client.configure({ url: 'wss://example.com/ws', token: 'fixture-token', backendKind, transportKind: 'relay',
+        relay: { serverUrl: 'https://registry.example.com', gatewayId: 'fixture-gateway', clientToken: 'fixture-client', supportsBootstrap: false } });
+      client.connect(); await flushPromises(); createdWs.onopen!();
+      receiveControl('relay.ready', { capabilities: ['relay.client-ping.v1', 'relay.transfer-hint.v1'] });
+      if (backendKind === 'openclaw') {
+        createdWs.onmessage!({ data: JSON.stringify({ type: 'event', event: 'connect.challenge', payload: { nonce: 'b'.repeat(64), ts: Date.now() } }) });
+        await flushPromises();
+      }
+      return requests().at(-1);
+    }
+    function completeHandshake(id: string) {
+      reply(id, backendKind === 'hermes' ? { status: 'ok', hermesApiReachable: true } : { server: { version: 'fixture', connId: 'fixture' } });
+    }
+
+    it('retains an exact large send and health RPC through a 25-second queue, without replay', async () => {
+      const handshake = await startHandshake(); completeHandshake(handshake.id); await flushPromises();
+      expect(client.getConnectionState()).toBe('ready');
+      let settled = false;
+      const send = client.request('chat.send', { message: 'x'.repeat(128 * 1024), idempotencyKey: 'exact-key' }).then(value => { settled = true; return value; });
+      const sendId = requests().at(-1).id;
+      const health = client.probeConnection(5_000); const healthId = requests().at(-1).id;
+      await jest.advanceTimersByTimeAsync(25_000);
+      expect(settled).toBe(false); expect(client.getConnectionState()).toBe('ready');
+      const pingRaw = createdWs.send.mock.calls.map(([raw]) => String(raw)).filter(raw => raw.startsWith(RELAY_CONTROL_PREFIX)).at(-1)!;
+      receiveControl('relay.client-pong', JSON.parse(pingRaw.slice(RELAY_CONTROL_PREFIX.length)).payload);
+      await jest.advanceTimersByTimeAsync(2_000);
+      reply(sendId, { runId: 'fixture-run' }); reply(healthId, { status: 'ok', hermesApiReachable: true });
+      await expect(send).resolves.toEqual({ runId: 'fixture-run' }); await expect(health).resolves.toBe(true);
+      expect(requests().filter(frame => frame.method === 'chat.send')).toHaveLength(1);
+    });
+
+    it('keeps both protocol and transport handshake deadlines within the bounded large response window', async () => {
+      const request = await startHandshake(); receiveControl('relay.transfer-start', { bytes: 128 * 1024 });
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(createdWs.close).not.toHaveBeenCalled(); expect(client.getConnectionState()).not.toBe('ready');
+      completeHandshake(request.id); await flushPromises();
+      expect(client.getConnectionState()).toBe('ready');
+    });
+  });
+
   describe('request timeout recovery', () => {
     beforeEach(() => {
       client.configure({ url: 'wss://example.com' });
@@ -1748,6 +1951,14 @@ describe('GatewayProtocolClient migrated parity', () => {
       };
       StorageService.getDeviceToken.mockResolvedValue('stored-device-token');
       mockDeviceIdentity();
+      let finishDeletion!: () => void;
+      StorageService.deleteDeviceToken.mockImplementationOnce(() => new Promise<void>(resolve => {
+        finishDeletion = resolve;
+      }));
+      const errors = jest.fn(error => {
+        if (requiresConnectionAction(error)) void Promise.resolve().then(() => client.disconnect());
+      });
+      client.on('error', errors);
 
       client.configure({
         url: 'wss://relay-us.example.com/ws',
@@ -1792,6 +2003,10 @@ describe('GatewayProtocolClient migrated parity', () => {
         serverUrl: 'https://registry.example.com',
         gatewayId: 'gateway-device-relay',
       });
+      expect(errors).not.toHaveBeenCalled();
+      expect((globalThis as any).WebSocket).toHaveBeenCalledTimes(1);
+      finishDeletion();
+      await flushPromises();
       expect((globalThis as any).WebSocket).toHaveBeenCalledTimes(2);
     });
 
@@ -2056,6 +2271,17 @@ describe('GatewayProtocolClient migrated parity', () => {
       const fallbackConnectFrame = JSON.parse(fallbackWs.send.mock.calls[0][0] as string);
       expect(fallbackConnectFrame.params.auth).toEqual({ password: 'legacy-password' });
       expect(decodeLatestSignedPayload()).toContain(`||${'d'.repeat(64)}|`);
+    });
+  });
+
+  it.each([undefined, 'off', 'high'] as const)('sendChat inherits thinking unless explicitly supplied (%s)', async thinkingLevel => {
+    const request = jest.spyOn(client, 'request').mockResolvedValue({ runId: 'thinking-run' });
+    await expect(client.sendChat('agent:main:main', 'hello', undefined, {
+      idempotencyKey: 'thinking-key', thinkingLevel,
+    })).resolves.toEqual({ runId: 'thinking-run' });
+    expect(request).toHaveBeenCalledWith('chat.send', {
+      sessionKey: 'agent:main:main', message: 'hello', deliver: false, idempotencyKey: 'thinking-key',
+      ...(thinkingLevel !== undefined ? { thinking: thinkingLevel } : {}),
     });
   });
 
@@ -2680,6 +2906,20 @@ describe('GatewayProtocolClient migrated parity', () => {
   });
 
   describe('stale transport recovery', () => {
+    it.each([OPENCLAW_GATEWAY_PROTOCOL_PROFILE, HERMES_GATEWAY_PROTOCOL_PROFILE])(
+      'returns failed health without starting its own reconnect (%#)', async profile => {
+        client.configure({ url: 'wss://example.com' }, profile);
+        client.connect();
+        (client as unknown as { state: string }).state = 'ready';
+        jest.spyOn(client as any, 'sendRequest').mockRejectedValueOnce(new Error('health timed out'));
+        const reconnect = jest.spyOn(client, 'reconnect');
+        const connect = jest.spyOn(client, 'connect');
+        await expect(client.probeConnection(1234)).resolves.toBe(false);
+        expect(reconnect).not.toHaveBeenCalled();
+        expect(connect).not.toHaveBeenCalled();
+      },
+    );
+
     it.each([OPENCLAW_GATEWAY_PROTOCOL_PROFILE, HERMES_GATEWAY_PROTOCOL_PROFILE])(
       'does not resurrect a disposed client when an in-flight probe rejects (%#)', async profile => {
         client.configure({ url: 'wss://example.com' }, profile);

@@ -85,6 +85,7 @@ export type SessionKind =
   | 'other';
 
 export interface SessionActions {
+  archive?: boolean;
   rename: boolean;
   reset: boolean;
   delete: boolean;
@@ -99,6 +100,7 @@ export interface ProjectDescriptor {
 }
 
 export interface SessionDescriptor {
+  archived?: boolean;
   project?: ProjectDescriptor;
   /** Exact native continuation is available; absent preserves legacy read-only semantics. */
   canContinue?: boolean;

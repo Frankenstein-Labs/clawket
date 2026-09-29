@@ -43,6 +43,48 @@ describe('DirectWsTransport', () => {
     jest.useRealTimers();
   });
 
+  it('disposes a retired native Upgrade without accepting its late direct handshake', () => {
+    const old = new FakeWebSocket();
+    old.close = jest.fn((code?: number, reason?: string) => {
+      old.closeCalls.push([code, reason]);
+      // Android has no native socket to close until Upgrade completes.
+      old.readyState = old.readyState === 0 ? 2 : 3;
+    });
+    const current = new FakeWebSocket();
+    const factory = jest.fn().mockReturnValueOnce(old).mockReturnValueOnce(current);
+    const transport = new DirectWsTransport({
+      url: 'ws://bridge.example/ws',
+      autoReadyOnFirstFrame: true,
+      webSocketFactory: factory,
+    });
+    const messages = jest.fn();
+    const opened = jest.fn();
+    transport.onMessage(messages);
+    transport.onOpen(opened);
+    transport.connect();
+    transport.reconnect();
+    current.open();
+    current.receive(JSON.stringify({ type: 'event', event: 'health' }));
+    expect(transport.state).toBe('ready');
+    messages.mockClear();
+
+    old.open();
+    old.receive(JSON.stringify({ type: 'event', event: 'health' }));
+    old.serverClose({ code: 1006 });
+
+    expect(old.closeCalls).toEqual([
+      [undefined, undefined],
+      [1000, 'retired_socket'],
+    ]);
+    expect(old.onopen).toBeNull();
+    expect(messages).not.toHaveBeenCalled();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(transport.state).toBe('ready');
+    expect(transport.hasReceivedValidFrame).toBe(true);
+    expect(current.closeCalls).toEqual([]);
+    transport.disconnect();
+  });
+
   it('resets backoff on the first valid frame, not on raw open or invalid JSON', () => {
     const sockets: FakeWebSocket[] = [];
     const transport = new DirectWsTransport({
@@ -141,5 +183,56 @@ describe('DirectWsTransport', () => {
     expect(transport.state).toBe('closed');
     expect(factory).toHaveBeenCalledTimes(1);
   });
-});
+  it('reports fixed current-socket error and close metadata without peer text', () => {
+    const sockets: FakeWebSocket[] = [];
+    const diagnostic = jest.fn();
+    const transport = new DirectWsTransport({ url: 'ws://private.example/?token=private',
+      onDiagnostic: diagnostic, webSocketFactory: () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket; },
+    });
+    transport.connect();
+    const staleError = sockets[0].onerror;
+    const staleClose = sockets[0].onclose;
+    jest.advanceTimersByTime(50);
+    sockets[0].onerror?.({ message: 'private native URL credential' });
+    sockets[0].onerror?.({ message: 'another private message' });
+    sockets[0].serverClose({ code: 1006, reason: 'private peer close body' });
+    expect(diagnostic.mock.calls.map(([value]) => value)).toEqual([
+      { event: 'error', phase: 'connecting', code: 'ws_error', elapsed_ms: 50 },
+      { event: 'close', phase: 'connecting', code: 'unknown', close_code: 1006, elapsed_ms: 50 },
+    ]);
+    transport.reconnect();
+    staleError?.({ message: 'late private error' });
+    staleClose?.({ code: 4001, reason: 'old socket' });
+    expect(diagnostic).toHaveBeenCalledTimes(2);
+    transport.disconnect();
+  });
 
+  it('observes open timeout separately from an actual close without changing retry', () => {
+    const diagnostic = jest.fn();
+    const socket = new FakeWebSocket();
+    const transport = new DirectWsTransport({ url: 'ws://bridge.example/ws',
+      openTimeoutMs: 25, onDiagnostic: diagnostic, webSocketFactory: () => socket,
+    });
+    transport.connect();
+    jest.advanceTimersByTime(25);
+    expect(diagnostic).toHaveBeenCalledWith({ event: 'error', phase: 'connecting', code: 'ws_connect_timeout', elapsed_ms: 25 });
+    expect(diagnostic).toHaveBeenCalledTimes(1);
+    expect(transport.state).toBe('reconnecting');
+    transport.disconnect();
+  });
+
+  it('does not let a diagnostic callback prevent retirement or schedule a second retry', () => {
+    const factory = jest.fn(() => new FakeWebSocket());
+    const transport = new DirectWsTransport({ url: 'ws://bridge.example/ws', reconnectJitter: false,
+      onDiagnostic: () => { throw new Error('observer failed'); }, webSocketFactory: factory,
+    });
+    transport.connect();
+    const socket = factory.mock.results[0].value;
+    expect(() => socket.serverClose({ code: 1006 })).not.toThrow();
+    expect(transport.state).toBe('reconnecting');
+    jest.advanceTimersByTime(800);
+    expect(factory).toHaveBeenCalledTimes(2);
+    transport.disconnect();
+  });
+
+});

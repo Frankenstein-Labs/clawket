@@ -50,17 +50,44 @@ export function ConversationEntry({ navigation, route, locked, lockedReason = 'a
     void (async () => {
       if (locked) return;
       const runtime = getConnectionRuntime();
-      await runtime.activate(connectionId);
-      if (current) setStage('sessions');
-      await runtime.refreshRoster();
-      const last = await SessionPreferencesService.getLastSession(connectionId, agentId);
-      if (!current || runtime.getSnapshot().activeConnectionId !== connectionId) return;
-      const sessions = runtime.getSnapshot().roster.find(group => group.connection.id === connectionId)?.agents
-        .find(row => row.agent.agentId === agentId)?.sessions;
-      if (last && sessions?.some(session => session.key === last)) {
+      const initial = runtime.getSnapshot();
+      const initialAdapter = initial.activeAdapter;
+      const lastPromise = SessionPreferencesService.getLastSession(connectionId, agentId).catch(() => null);
+      const reopenKnownSession = (last: string | null, adapter: typeof initialAdapter) => {
+        if (!last || !adapter || !current || !scope.current.focused
+          || scope.current.connectionId !== connectionId || scope.current.agentId !== agentId) return false;
+        const latest = runtime.getSnapshot();
+        const group = latest.roster.find(candidate => candidate.connection.id === connectionId);
+        const known = group?.agents.find(row => row.agent.agentId === agentId)?.sessions
+          ?.some(session => session.key === last && session.archived !== true);
+        if (!known || group?.source !== 'live' || latest.activeConnectionId !== connectionId
+          || latest.activeState !== 'ready' || latest.activeAdapter !== adapter
+          || adapter.connection.id !== connectionId) return false;
         navigation.replace('Thread', { ...route.params, sessionKey: last });
         current = false;
+        return true;
+      };
+      if (initial.activeConnectionId === connectionId && initial.activeState === 'ready'
+        && initialAdapter?.connection.id === connectionId) {
+        const last = await lastPromise;
+        if (!current || !scope.current.focused || scope.current.connectionId !== connectionId
+          || scope.current.agentId !== agentId) return;
+        if (reopenKnownSession(last, initialAdapter)) {
+          // A ready, known conversation need not wait for the entire catalog.
+          void runtime.refreshRoster().catch(() => {});
+          return;
+        }
       }
+      const activated = await runtime.activate(connectionId);
+      const last = await lastPromise;
+      // Activation already waits for its ready transition's catalog. Reuse only
+      // that live scope; activation may also resolve after a failed refresh.
+      if (reopenKnownSession(last, activated.activeAdapter)) return;
+      if (!current || !scope.current.focused || scope.current.connectionId !== connectionId
+        || scope.current.agentId !== agentId || runtime.getSnapshot().activeConnectionId !== connectionId) return;
+      if (current) setStage('sessions');
+      await runtime.refreshRoster();
+      reopenKnownSession(last, activated.activeAdapter);
     })().catch(() => { /* The session sheet retains cached history and reconnect controls. */ }).finally(() => {
       if (current) { setLoading(false); setVisible(true); }
     });

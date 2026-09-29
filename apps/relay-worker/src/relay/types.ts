@@ -65,10 +65,21 @@ export type SocketAttachment = {
   connectedAt: number;
   traceId?: string;
   clientLabel?: string | null;
+  /** One-way authenticated token fingerprint for capacity/revocation; never log it. */
+  credentialHash?: string;
   capabilities?: string[];
   lastPongAt?: number;
+  /** Echo rate limit survives hibernation; no heartbeat nonce is persisted. */
+  lastOwnerPingAt?: number;
+  lastOwnerPingRateLimitedAt?: number;
+  /** Client-initiated Relay echo budget, independent of the legacy pong ACK. */
+  lastClientPingAt?: number;
+  /** Bounded nonce echo credits survive hibernation; never contain the nonce. */
+  heartbeatEchoBudget?: { updatedAt: number; creditMs: number };
   /** Routing identity survives Durable Object hibernation; never contains payloads. */
   activeClient?: boolean;
+  /** Retired backend-session incarnation; never restore its routes after hibernation. */
+  backendSessionRetired?: true;
   /** Bounded response origins survive hibernation; no request bodies or credentials. */
   pendingRequests?: Array<[id: string, expiresAt: number]>;
   challengeDeliveredAt?: number;

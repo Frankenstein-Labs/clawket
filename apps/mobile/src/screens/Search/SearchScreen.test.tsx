@@ -361,6 +361,35 @@ describe('SearchScreen connection container', () => {
     });
   });
 
+  it('keeps the current results on screen while a refined query searches', async () => {
+    render(<SearchScreen {...createProps()} />);
+    await waitFor(() => expect(mockSearchViewProps?.state).toBe('ready'));
+    let finish!: (value: Awaited<ReturnType<typeof mockSearch>>) => void;
+    mockSearch.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    act(() => mockSearchViewProps?.onChangeQuery('launc'));
+    await waitFor(() => expect(mockSearch).toHaveBeenLastCalledWith('launc'));
+    expect(mockSearchViewProps?.state).toBe('ready');
+    expect(mockSearchViewProps?.sections.map((section) => section.kind)).toContain('messages');
+    await act(async () => finish([]));
+    expect(mockSearchViewProps?.state).toBe('ready');
+    expect(mockSearchViewProps?.sections.map((section) => section.kind)).not.toContain('messages');
+  });
+
+  it('keeps an empty answer on screen while the next keystroke searches, and waits again after clearing', async () => {
+    mockSearch.mockImplementationOnce(async () => []);
+    render(<SearchScreen {...createProps('zzz')} />);
+    await waitFor(() => expect(mockSearchViewProps?.state).toBe('empty'));
+    mockSearch.mockImplementationOnce(() => new Promise(() => undefined));
+    act(() => mockSearchViewProps?.onChangeQuery('zzzz'));
+    await waitFor(() => expect(mockSearch).toHaveBeenLastCalledWith('zzzz'));
+    expect(mockSearchViewProps?.state).toBe('empty');
+    act(() => mockSearchViewProps?.onChangeQuery(''));
+    mockSearch.mockImplementationOnce(() => new Promise(() => undefined));
+    act(() => mockSearchViewProps?.onChangeQuery('zz'));
+    await waitFor(() => expect(mockSearch).toHaveBeenLastCalledWith('zz'));
+    expect(mockSearchViewProps?.state).toBe('loading');
+  });
+
   it('exposes back, retry, and whole-page permission callbacks', async () => {
     const props = createProps('');
     render(<SearchScreen {...props} permissionGranted={false} />);

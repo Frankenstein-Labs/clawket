@@ -1,3 +1,7 @@
+import type { BackendKind } from '@clawket/agent-protocol';
+import { pairingRequest } from './pairing-request';
+import { resolveOfficialRelayEnvironment } from './relay-environment';
+
 type PairClaimResponse = {
   gatewayId?: string;
   relayUrl?: string;
@@ -40,43 +44,49 @@ export type PairingQrPayload =
 
 export const RelayPairingService = {
   async claim(input: {
+    backendKind?: BackendKind;
     serverUrl: string;
     gatewayId: string;
     accessCode: string;
     clientLabel?: string | null;
   }): Promise<RelayPairingClaimResult> {
-    const response = await fetch(`${normalizeHttpBase(input.serverUrl)}/v1/pair/claim`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify({
-        gatewayId: input.gatewayId,
-        accessCode: input.accessCode,
-        clientLabel: input.clientLabel ?? null,
-      }),
-    });
+    return pairingRequest(async (signal, receivedResponse) => {
+      const response = await fetch(`${normalizeHttpBase(input.serverUrl)}/v1/pair/claim`, {
+        signal,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({
+          gatewayId: input.gatewayId,
+          accessCode: input.accessCode,
+          clientLabel: input.clientLabel ?? null,
+        }),
+      });
 
-    if (!response.ok) {
-      throw await toRelayError(response, 'Failed to claim Relay pairing code.');
-    }
+      receivedResponse(response.status);
+      if (!response.ok) {
+        throw await toRelayError(response, 'Failed to claim Relay pairing code.');
+      }
 
-    const payload = await response.json() as PairClaimResponse;
-    const gatewayId = payload.gatewayId?.trim() ?? '';
-    const relayUrl = payload.relayUrl?.trim() ?? '';
-    const clientToken = payload.clientToken?.trim() ?? '';
-    if (!gatewayId || !relayUrl || !clientToken) {
-      throw new Error('Pairing response missing relay connection fields.');
-    }
+      const payload = await response.json() as PairClaimResponse;
+      const gatewayId = payload.gatewayId?.trim() ?? '';
+      const relayUrl = payload.relayUrl?.trim() ?? '';
+      const clientToken = payload.clientToken?.trim() ?? '';
+      if (!gatewayId || !relayUrl || !clientToken) {
+        throw new Error('Pairing response missing relay connection fields.');
+      }
 
-    return {
-      gatewayId,
-      relayUrl,
-      clientToken,
-      displayName: typeof payload.displayName === 'string' ? payload.displayName : null,
-      region: typeof payload.region === 'string' ? payload.region : null,
-    };
+      return {
+        gatewayId,
+        relayUrl,
+        clientToken,
+        displayName: typeof payload.displayName === 'string' ? payload.displayName : null,
+        region: typeof payload.region === 'string' ? payload.region : null,
+      };
+    }, { backend: input.backendKind ?? 'unknown', transport: 'relay', operation: 'pair_claim',
+      environment: resolveOfficialRelayEnvironment(input.serverUrl) ?? 'custom' });
   },
 };
 

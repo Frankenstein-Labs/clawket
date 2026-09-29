@@ -4,6 +4,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { WEBSOCKET_FRAME_LIMIT_BYTES, isWebSocketMaxPayloadError } from '../frame-limit.js';
 import { ClaudeService, type ClaudeRequest } from './service.js';
 import { ClaudeFault } from './errors.js';
+import { allowsLocalWebSocketOrigin, MAX_LOCAL_BRIDGE_SOCKETS } from '../local-websocket-policy.js';
 
 export class ClaudeServer {
   private http: Server | null = null;
@@ -32,6 +33,8 @@ export class ClaudeServer {
     this.ws = new WebSocketServer({ noServer: true, maxPayload: WEBSOCKET_FRAME_LIMIT_BYTES });
     this.http.on('upgrade', (request, socket, head) => {
       if (request.url !== '/v1/claude-code/ws') { socket.destroy(); return; }
+      if (!allowsLocalWebSocketOrigin(request)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
+      if (this.ws!.clients.size >= MAX_LOCAL_BRIDGE_SOCKETS) { socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n'); return; }
       this.ws!.handleUpgrade(request, socket, head, client => this.accept(client));
     });
     this.conversation.on('update', this.update);

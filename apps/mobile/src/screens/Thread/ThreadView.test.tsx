@@ -15,18 +15,56 @@ import { ThreadView, resolveThreadHeaderHeight, type ThreadCopy, type ThreadView
 import type { ThreadRunCard } from './model';
 import { messageMetaSpacer } from '../../components/chat/MessageMeta';
 
-it.each(['ios', 'android'])('keeps the composer above the keyboard on %s', (platform) => {
+it.each(['ios', 'android'])('uses the stable platform keyboard padding container with its safe-area offset on %s', (platform) => {
   const { Platform } = require('react-native');
   const previous = Platform.OS;
   Platform.OS = platform;
   try {
     const view = render(<ThreadView {...createProps({ bottomInset: 24 })} />);
-    const avoiding = view.UNSAFE_getByType(require('react-native-keyboard-controller').KeyboardAvoidingView);
+    const avoidingType = platform === 'ios' ? require('react-native').KeyboardAvoidingView
+      : require('../../components/chat/AndroidChatKeyboardAvoider').AndroidChatKeyboardAvoider;
+    const avoiding = view.UNSAFE_getByType(avoidingType);
     expect(avoiding.props.behavior).toBe('padding');
     expect(avoiding.props.keyboardVerticalOffset).toBe(Space.md - Math.max(24, Space.lg));
   } finally {
     Platform.OS = previous;
   }
+});
+
+it.each(['ios', 'android'])('keeps the same avoider, editor and timeline across send and keyboard-related React commits on %s', (platform) => {
+  const { Platform } = require('react-native');
+  const KeyboardAvoidingView = platform === 'ios' ? require('react-native').KeyboardAvoidingView
+    : require('../../components/chat/AndroidChatKeyboardAvoider').AndroidChatKeyboardAvoider;
+  const { FlashList } = require('@shopify/flash-list');
+  const previous = Platform.OS;
+  Platform.OS = platform;
+  try {
+    const props = createProps({ bottomInset: 24 });
+    const view = render(<ThreadView {...props} />);
+    const avoider = view.UNSAFE_getByType(KeyboardAvoidingView);
+    const input = view.getByTestId('thread-screen-composer-input');
+    const list = view.UNSAFE_getByType(FlashList);
+    fireEvent.press(view.getByTestId('thread-screen-composer-primary'));
+    expect(props.onSend).toHaveBeenCalledTimes(1);
+    // Native keyboard geometry is device-tested; this guards React reconciliation
+    // when a send clears the draft and the keyboard/safe area changes concurrently.
+    view.rerender(<ThreadView {...props} input="" isRunning bottomInset={0} />);
+    expect(view.UNSAFE_getByType(KeyboardAvoidingView)).toBe(avoider);
+    expect(avoider.props.behavior).toBe('padding');
+    expect(avoider.props.enabled).not.toBe(false);
+    expect(avoider.props.keyboardVerticalOffset).toBe(Space.md - Space.lg);
+    expect(view.getByTestId('thread-screen-composer-input')).toBe(input);
+    expect(view.UNSAFE_getByType(FlashList)).toBe(list);
+    view.rerender(<ThreadView {...props} input="Next draft" isRunning={false} />);
+    expect(view.getByTestId('thread-screen-composer-input')).toBe(input);
+    expect(view.UNSAFE_getByType(require('../../components/ui/Composer').Composer).props.value).toBe('Next draft');
+    fireEvent.changeText(input, 'Edited draft');
+    expect(props.onChangeInput).toHaveBeenLastCalledWith('Edited draft');
+    expect(view.UNSAFE_getByType(FlashList)).toBe(list);
+    expect(avoider.props.keyboardVerticalOffset).toBe(Space.md - Math.max(24, Space.lg));
+    expect(props.onSend).toHaveBeenCalledTimes(1);
+    view.unmount();
+  } finally { Platform.OS = previous; }
 });
 
 it('reserves the user clock with nonbreaking whitespace, never another visible time', () => {
@@ -74,6 +112,7 @@ jest.mock('react-native', () => {
     ...require('../../../__mocks__/native-animated'),
     DynamicColorIOS: (variants: unknown) => ({ dynamic: variants }),
     Keyboard: { dismiss: jest.fn() },
+    KeyboardAvoidingView: host('NativeKeyboardAvoidingView'),
     PanResponder: { create: (config: Record<string, unknown>) => ({ panHandlers: { __config: config } }) },
     BackHandler: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
     useWindowDimensions: () => ({ width: 393, height: 852, scale: 3, fontScale: 1 }),
@@ -128,6 +167,12 @@ jest.mock('react-native-enriched-markdown', () => {
 jest.mock('../../chat/useSmoothedStreamText', () => ({
   useSmoothedStreamText: (text: string) => mockPacedText ?? text,
 }));
+
+jest.mock('../../components/chat/AndroidChatKeyboardAvoider', () => {
+  const ReactRuntime = require('react');
+  return { AndroidChatKeyboardAvoider: ReactRuntime.forwardRef(({ children, ...props }: any, ref: any) =>
+    ReactRuntime.createElement(require('react-native').View, { ...props, ref }, children)) };
+});
 
 jest.mock('react-native-keyboard-controller', () => {
   const ReactRuntime = require('react');
@@ -400,6 +445,49 @@ function createProps(overrides: Partial<ThreadViewProps> = {}): ThreadViewProps 
 }
 
 describe('ThreadView', () => {
+
+  it.each([undefined, null])('labels unread permission mode %s as unknown and retries only its read action', (permissionMode) => {
+    const callbacks = createProps({ capabilities: { ...CAPABILITY_MATRIX.codex }, permissionMode, onOpenPermissions: jest.fn() });
+    const view = render(<ThreadView {...callbacks} />);
+    const button = view.getByTestId('thread-permissions');
+    expect(button.props.accessibilityLabel).toBe('Permissions: Unknown');
+    expect(button.props.accessibilityHint).toBe('Retry');
+    expect(button.findAll(node => typeof node.type === 'string' && String(node.type) === 'ShieldQuestionMark')).toHaveLength(1);
+    expect(view.getByTestId('thread-screen-composer-primary').props.accessibilityState.disabled).toBe(false);
+    fireEvent.press(button);
+    expect(callbacks.onOpenPermissions).toHaveBeenCalledTimes(1);
+    expect(callbacks.onSend).not.toHaveBeenCalled();
+    expect(callbacks.onChangeInput).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['custom', 'Computer settings', 'Shield'],
+    ['workspace', 'Workspace access', 'Shield'],
+    ['read-only', 'Read only', 'Shield'],
+    ['full-access', 'Full access', 'ShieldAlert'],
+  ])('keeps confirmed %s permissions distinct from unknown', (permissionMode, label, icon) => {
+    const view = render(<ThreadView {...createProps({ capabilities: { ...CAPABILITY_MATRIX.codex }, permissionMode, onOpenPermissions: jest.fn() })} />);
+    const button = view.getByTestId('thread-permissions');
+    expect(button.props.accessibilityLabel).toBe(`Permissions: ${label}`);
+    expect(button.props.accessibilityHint).toBeUndefined();
+    expect(button.findAll(node => typeof node.type === 'string' && node.type === icon)).toHaveLength(1);
+    expect(button.findAll(node => typeof node.type === 'string' && String(node.type) === 'ShieldQuestionMark')).toHaveLength(0);
+  });
+  it('shows one actionable settings notice only while settings are unconfirmed and preserves the draft', () => {
+    const onReviewRuntimeSettings = jest.fn();
+    const props = createProps({ canSend: false, onReviewRuntimeSettings });
+    const view = render(<ThreadView {...props} />);
+    expect(view.getByText('Confirm settings before sending.')).toBeTruthy();
+    fireEvent.press(view.getByTestId('thread-settings-unconfirmed-action'));
+    expect(onReviewRuntimeSettings).toHaveBeenCalledTimes(1);
+    expect(props.onSend).not.toHaveBeenCalled();
+    expect(props.onChangeInput).not.toHaveBeenCalled();
+    expect(view.getByTestId('thread-screen-composer-primary').props.accessibilityState.disabled).toBe(true);
+    view.rerender(<ThreadView {...props} canSend onReviewRuntimeSettings={undefined} />);
+    expect(view.queryByTestId('thread-settings-unconfirmed')).toBeNull();
+    expect(view.getByTestId('thread-screen-composer-primary').props.accessibilityState.disabled).toBe(false);
+  });
+
   let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
@@ -656,6 +744,39 @@ describe('ThreadView', () => {
     expect(view.queryByTestId('thread-thinking-streaming')).toBeNull();
   });
 
+  it.each([false, true])('says sending before the newest prompt is acknowledged (image-only: %s)', (imageOnly) => {
+    const prompt: UiMessage = { id: 'pending-prompt', role: 'user', text: imageOnly ? '' : 'Hello',
+      ...(imageOnly ? { imageUris: ['file:///qa.png'] } : {}) };
+    const props = createProps({ messages: [prompt], input: '', isRunning: true,
+      unconfirmedMessageIds: new Set([prompt.id]), runAcknowledged: false });
+    const view = render(<ThreadView {...props} />);
+    expect(view.getByTestId('thread-thinking-streaming')).toHaveTextContent('Sending…');
+    view.rerender(<ThreadView {...props} runAcknowledged />);
+    expect(view.getByTestId('thread-thinking-streaming')).toHaveTextContent('Thinking…');
+  });
+
+  it('keeps actual tool activity while a send acknowledgement is delayed', () => {
+    const prompt: UiMessage = { id: 'pending-prompt', role: 'user', text: 'Hello' };
+    const props = createProps({ messages: [prompt], input: '', isRunning: true,
+      unconfirmedMessageIds: new Set([prompt.id]), activityLabel: 'Using exec…' });
+    const view = render(<ThreadView {...props} />);
+    expect(view.getByTestId('thread-thinking-streaming')).toHaveTextContent('Using exec…');
+    view.rerender(<ThreadView {...props} activityLabel={null}
+      messages={[{ id: 'tool', role: 'tool', text: 'Completed' }, prompt]} />);
+    expect(view.getByTestId('thread-thinking-streaming')).toHaveTextContent('Thinking…');
+  });
+
+  it('does not relabel recovered runs or a queued follow-up as sending', () => {
+    const prompt: UiMessage = { id: 'accepted-prompt', role: 'user', text: 'Hello' };
+    const props = createProps({ messages: [prompt], input: '', isRunning: true });
+    const view = render(<ThreadView {...props} />);
+    expect(view.getByTestId('thread-thinking-streaming')).toHaveTextContent('Thinking…');
+    view.rerender(<ThreadView {...props}
+      messages={[{ id: 'queued', role: 'user', text: 'Next', delivery: 'queued' }, prompt]}
+      unconfirmedMessageIds={new Set(['queued'])} />);
+    expect(view.getByTestId('thread-thinking-streaming')).toHaveTextContent('Thinking…');
+  });
+
   it('marks the user’s own messages with Telegram-style delivery glyphs', () => {
     const now = Date.now();
     const turn: UiMessage = { id: 'usr_9', role: 'user', text: 'Ping', timestampMs: now };
@@ -883,6 +1004,56 @@ describe('ThreadView', () => {
     expect(locked.queryByTestId('thread-screen-composer')).toBeNull();
     fireEvent.press(locked.getByText('View Pro'));
     expect(onOpenPaywall).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'Model authentication failed. Sign in again on your computer.',
+    'The model account has insufficient credits or quota.',
+    'The model is rate limited. Try again shortly.',
+    "The agent couldn't complete this reply. Please try again.",
+  ])('localizes cold or cached fixed system notices without rewriting conversation text: %s', (text) => {
+    const translated = `localized:${text}`;
+    const translation = jest.spyOn(require('react-i18next'), 'useTranslation').mockReturnValue({
+      t: (key: string) => key === text ? translated : key,
+    });
+    try {
+      const messages: UiMessage[] = [
+        { id: 'historical-user', role: 'user', text },
+        { id: 'historical-assistant', role: 'assistant', text },
+        { id: 'codex-turn-error:cold-native-turn', role: 'system', text },
+        { id: 'ordinary-system', role: 'system', text: 'Connection restored' },
+      ];
+      const view = render(<ThreadView {...createProps({ messages })} />);
+      expect(view.getAllByText(translated)).toHaveLength(1);
+      expect(view.getByTestId('thread-markdown-historical-assistant').props.markdown).toBe(text);
+      const userText = view.getByTestId('thread-bubble-historical-user')
+        .findAllByType(require('react-native').Text)
+        .find(node => Array.isArray(node.props.children) && node.props.children[0] === text);
+      // The inline metadata spacer is another child; the message itself is exact.
+      expect(userText?.props.children[0]).toBe(text);
+      expect(view.getByText('Connection restored')).toBeTruthy();
+      expect(messages[2]).toEqual({ id: 'codex-turn-error:cold-native-turn', role: 'system', text });
+      view.unmount();
+    } finally {
+      translation.mockRestore();
+    }
+  });
+
+  it.each(['ready', 'empty'] as const)('offers a local older-history retry without auto-looping or disturbing the %s composer', kind => {
+    const onRetryHistory = jest.fn();
+    const props = createProps({ state: { kind }, messages: kind === 'empty' ? [] : [{ id: 'current', role: 'user', text: 'Keep reading' }],
+      historyLoadMoreError: true, onRetryHistory });
+    const view = render(<ThreadView {...props} />);
+    expect(view.getByTestId('thread-screen-history-error')).toBeTruthy();
+    expect(view.getByText('Could not load older messages')).toBeTruthy();
+    expect(view.getByTestId('thread-screen-timeline').props.onStartReached).toBeUndefined();
+    fireEvent.press(view.getByTestId('thread-screen-history-error-action'));
+    expect(onRetryHistory).toHaveBeenCalledTimes(1);
+    expect(props.onSend).not.toHaveBeenCalled();
+    expect(props.onChangeInput).not.toHaveBeenCalled();
+    view.rerender(<ThreadView {...props} historyLoadMoreError={false} />);
+    expect(view.queryByTestId('thread-screen-history-error')).toBeNull();
+    expect(view.getByTestId('thread-screen-timeline').props.onStartReached).toBe(props.onLoadMoreHistory);
   });
 
   it('routes header, composer, history, run, attachment, and approval interactions', () => {

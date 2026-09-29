@@ -1,4 +1,5 @@
 import { relayNetworkOptions } from '../relay-network.js';
+import { advertiseRelayOwnerPong, RelayOwnerPong } from '../relay-owner-pong.js';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +16,7 @@ export class LocalModelRelay {
   private socket: WebSocket | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private ping: ReturnType<typeof setInterval> | null = null;
+  private ownerPong: RelayOwnerPong | null = null;
   private readiness: ReturnType<typeof setTimeout> | null = null;
   private stopped = true;
   private attempts = 0;
@@ -49,6 +51,7 @@ export class LocalModelRelay {
   stop(): void {
     this.stopped = true;
     this.ready = false;
+    this.ownerPong?.dispose(); this.ownerPong = null;
     for (const waiter of this.readyWaiters) waiter.reject(new Error('Relay stopped'));
     if (this.retry) clearTimeout(this.retry);
     if (this.ping) clearInterval(this.ping);
@@ -65,12 +68,24 @@ export class LocalModelRelay {
     url.searchParams.set('gatewayId', this.config.gatewayId);
     url.searchParams.set('role', 'gateway');
     url.searchParams.set('clientId', this.instanceId);
+    advertiseRelayOwnerPong(url);
     const socket = new WebSocket(url, { ...this.relayNetwork, headers: { Authorization: `Bearer ${this.config.relaySecret}` }, maxPayload: WEBSOCKET_FRAME_LIMIT_BYTES, handshakeTimeout: 15_000 });
     this.socket = socket;
     let alive = true;
     let missedPongs = 0;
     let lastPongAt = 0;
     let lastPingCheckAt = 0;
+    const ownerPong = new RelayOwnerPong({
+      legacyProtocolPongs: true,
+      send: frame => { if (this.socket === socket && !this.stopped) this.send(frame); },
+      onConfirmed: () => {
+        if (this.socket !== socket || this.stopped) return;
+        alive = true; missedPongs = 0; lastPongAt = Date.now();
+      },
+      onTimeout: () => { if (this.socket === socket && !this.stopped) socket.terminate(); },
+      log: line => this.log('local-model ' + line),
+    });
+    this.ownerPong = ownerPong;
     socket.on('open', () => {
       if (this.socket !== socket || this.stopped) { socket.terminate(); return; }
       this.log('local-model relay transport connected');
@@ -84,7 +99,12 @@ export class LocalModelRelay {
         const now = Date.now();
         const schedulerDelayMs = Math.max(0, now - lastPingCheckAt - 15_000);
         lastPingCheckAt = now;
-        if (!alive) missedPongs++;
+        if (!alive) {
+          missedPongs++;
+          // Negotiated owners verify the first missed protocol pong rather
+          // than waiting through the legacy three-interval failure budget.
+          if (ownerPong.request()) return;
+        }
         if (missedPongs >= 3) {
           this.log(`local-model relay heartbeat timeout idleMs=${Math.max(0, now - lastPongAt)} schedulerDelayMs=${schedulerDelayMs} queuedBytes=${socket.bufferedAmount}`);
           socket.terminate(); return;
@@ -94,7 +114,8 @@ export class LocalModelRelay {
       }, 15_000);
     });
     socket.on('pong', () => {
-      if (this.socket !== socket) return;
+      if (this.socket !== socket || this.stopped) return;
+      ownerPong.confirmTransportPong();
       if (missedPongs) this.log(`local-model relay heartbeat recovered missedPongs=${missedPongs}`);
       alive = true; missedPongs = 0; lastPongAt = Date.now();
     });
@@ -104,6 +125,7 @@ export class LocalModelRelay {
       if (text.startsWith(PREFIX)) {
         try {
           const control = JSON.parse(text.slice(PREFIX.length));
+          if (ownerPong.handleControl(control)) return;
           if (control.event === 'relay.ready') {
             if (this.readiness) clearTimeout(this.readiness); this.readiness = null;
             this.attempts = 0; this.ready = true;
@@ -149,6 +171,8 @@ export class LocalModelRelay {
       this.log(`local-model relay closed code=${code}`);
       this.socket = null;
       this.ready = false;
+      ownerPong.dispose();
+      if (this.ownerPong === ownerPong) this.ownerPong = null;
       if (this.ping) clearInterval(this.ping);
       if (this.readiness) clearTimeout(this.readiness);
       this.ping = null; this.readiness = null;

@@ -170,7 +170,7 @@ describe('mapGatewayErrorCode', () => {
     ['rate_limited', 'rate_limited'],
     ['4008 Policy violation', 'rate_limited'],
     ['auth_failed', 'unauthorized'],
-    ['challenge_timeout', 'bridge_offline'],
+    ['challenge_timeout', 'timeout'],
     ['request_timeout', 'timeout'],
     ['BRIDGE_UNAVAILABLE', 'bridge_offline'],
     ['ws_error', 'network'],

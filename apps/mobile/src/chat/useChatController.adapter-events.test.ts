@@ -159,6 +159,9 @@ jest.mock('./useChatVoiceInput', () => ({
 
 jest.mock('./useChatModelPicker', () => ({
   useChatModelPicker: jest.fn(() => ({
+    runtimeSettingsBusy: false,
+    runtimeSettingsPendingRef: { current: false },
+    runtimeSettingsUnconfirmedRef: { current: false },
     availableModels: [],
     modelPickerError: null,
     modelPickerLoading: false,
@@ -306,6 +309,38 @@ describe('useChatController adapter event migration', () => {
 
     expect(result.current.isSending).toBe(false);
     expect(historyMock.messages).toEqual([]);
+  });
+
+  it('keeps one failed native-turn notice after live completion and repeated history recovery', () => {
+    const { result, adapter, handlers } = renderController('codex');
+    const terminalMessage = {
+      id: 'codex-turn-error:native-failed-turn', role: 'system' as const,
+      text: 'Model authentication failed. Sign in again on your computer.', timestampMs: 200,
+    };
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'run_started', sessionKey: 'agent:main:main', runId: 'bridge-failed-run',
+      }, { now: () => 100 }));
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'run_finished', sessionKey: 'agent:main:main', runId: 'bridge-failed-run',
+        stopReason: 'error', terminalMessage,
+        message: { role: 'assistant', content: terminalMessage.text },
+      }, { now: () => 200 }));
+    });
+    expect(result.current.isSending).toBe(false);
+    expect(historyMock.messages.filter(message => message.role === 'assistant')).toEqual([]);
+    expect(historyMock.messages.filter(message => message.id === terminalMessage.id)).toHaveLength(1);
+    for (let count = 0; count < 2; count++) act(() => {
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'history_reconciled', sessionKey: 'agent:main:main',
+        history: { key: 'agent:main:main', hasActiveRun: false, messages: [terminalMessage] },
+      }));
+    });
+    expect(historyMock.messages.filter(message => message.id === terminalMessage.id)).toEqual([
+      expect.objectContaining(terminalMessage),
+    ]);
+    expect(adapter.prompt).not.toHaveBeenCalled();
   });
 
   it('persists an agent-event-only child through a cold controller mount using the real cache codec', async () => {

@@ -306,6 +306,44 @@ function createApp(): Record<string, unknown> {
 }
 
 describe('ThreadScreen connection container', () => {
+  it('routes a required native permission confirmation directly to permission selection', () => {
+    const props = createNavigationProps();
+    mockController.runtimeSettingsUnconfirmed = true;
+    mockController.runtimeSettingsBusy = false;
+    mockController.permissions = { mode: 'workspace', available: true, scope: 'session', requiresConfirmation: true };
+    const setPermissionPickerVisible = jest.fn();
+    mockController.setPermissionPickerVisible = setPermissionPickerVisible;
+    render(<ThreadScreen {...props} />);
+    act(() => mockThreadViewProps?.onReviewRuntimeSettings?.());
+    expect(setPermissionPickerVisible).toHaveBeenCalledWith(true);
+    expect(mockController.setModelPickerVisible).toHaveBeenCalledWith(false);
+    expect(mockController.retryModelPickerLoad).toHaveBeenCalledTimes(1);
+    expect(mockController.onSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps an explicit settings recovery action after the sheet closes, including while offline', () => {
+    const props = createNavigationProps();
+    const setPermissionPickerVisible = jest.fn();
+    mockController.runtimeSettingsUnconfirmed = true;
+    mockController.runtimeSettingsBusy = false;
+    mockController.modelPickerVisible = false;
+    mockController.connectionState = 'reconnecting';
+    mockController.setPermissionPickerVisible = setPermissionPickerVisible;
+    const view = render(<ThreadScreen {...props} />);
+    act(() => mockThreadViewProps?.onReviewRuntimeSettings?.());
+    expect(setPermissionPickerVisible).toHaveBeenCalledWith(false);
+    expect(mockController.setModelPickerVisible).toHaveBeenCalledWith(true);
+    expect(mockController.retryModelPickerLoad).toHaveBeenCalledTimes(1);
+    expect(mockController.onSend).not.toHaveBeenCalled();
+    mockController.runtimeSettingsBusy = true;
+    view.rerender(<ThreadScreen {...props} />);
+    expect(mockThreadViewProps?.onReviewRuntimeSettings).toBeUndefined();
+    mockController.runtimeSettingsBusy = false;
+    mockController.runtimeSettingsUnconfirmed = false;
+    view.rerender(<ThreadScreen {...props} />);
+    expect(mockThreadViewProps?.onReviewRuntimeSettings).toBeUndefined();
+  });
+
   it('clears a selected skill with the composer instead of recreating a hidden draft', async () => {
     const props = createNavigationProps();
     const view = render(<ThreadScreen {...props} />);

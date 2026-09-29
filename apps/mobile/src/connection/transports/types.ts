@@ -12,6 +12,15 @@ export type TransportStateChange = {
   reconnectAttempt: number;
 };
 
+/** Metadata only: never include URL, peer close text, payload or error.message. */
+export type TransportDiagnostic = Readonly<{
+  event: 'error' | 'close';
+  phase: TransportState;
+  code: string;
+  close_code?: number;
+  elapsed_ms: number;
+}>;
+
 export type TransportError = {
   code: string;
   message: string;

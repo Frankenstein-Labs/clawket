@@ -7,6 +7,8 @@ import { buildCachedPreviewSessions } from './startupPreview';
 import { useChatHistoryState } from './useChatHistoryState';
 import { ChatCacheService } from '../services/chat-cache';
 import { StorageService } from '../services/storage';
+import { AdapterError } from '@clawket/agent-protocol';
+import { SessionCatalogSupersededError } from '../connection/adapters/session-catalog';
 
 jest.mock('../services/storage', () => ({
   StorageService: {
@@ -76,6 +78,263 @@ describe('useChatHistoryState', () => {
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
+  });
+
+  describe.each(['codex', 'claude-code', 'pi'])('%s catalog cancellation', backendKind => {
+    it.each(['loadSessionsAndHistory', 'onRefresh', 'refreshSessions'] as const)('retries only the pure directory once during %s', async operation => {
+      const key = 'owned-session';
+      const adapter = { connection: { backendKind }, state: 'ready',
+        listSessions: jest.fn().mockRejectedValueOnce(new SessionCatalogSupersededError())
+          .mockResolvedValue([{ ...createSession(key), title: 'Renamed' }]),
+        loadSession: jest.fn().mockResolvedValue({ messages: [], hasActiveRun: false }),
+      };
+      const { result } = renderHook(() => {
+        const sessionKeyRef = useRef<string | null>(key);
+        return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+          sessionKeyRef, mainSessionKey: key, routeSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+      });
+      await act(async () => { await result.current[operation](); });
+      expect(adapter.listSessions).toHaveBeenCalledTimes(2);
+      expect(adapter.listSessions).toHaveBeenNthCalledWith(2, 'main');
+      expect(result.current.sessions[0]).toMatchObject({ key, title: 'Renamed' });
+      expect(result.current.refreshing).toBe(false);
+      expect(result.current.refreshingSessions).toBe(false);
+      expect(adapter.loadSession).toHaveBeenCalledTimes(operation === 'refreshSessions' ? 0 : 1);
+      if (operation !== 'refreshSessions') expect(result.current.historyLoaded).toBe(true);
+    });
+
+    it.each(['consecutive', 'ordinary', 'retired'] as const)('does not loop or retry a %s catalog failure', async failure => {
+      const key = 'owned-session';
+      const pending = deferred<ReturnType<typeof createSession>[]>();
+      const adapter = { connection: { backendKind }, state: 'ready',
+        listSessions: jest.fn().mockReturnValueOnce(pending.promise)
+          .mockRejectedValue(new SessionCatalogSupersededError()),
+        loadSession: jest.fn().mockResolvedValue({ messages: [], hasActiveRun: false }),
+      };
+      const { result } = renderHook(() => {
+        const sessionKeyRef = useRef<string | null>(key);
+        return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+          sessionKeyRef, mainSessionKey: key, routeSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+      });
+      await act(async () => {
+        const refresh = result.current.onRefresh();
+        if (failure === 'retired') adapter.state = 'reconnecting';
+        pending.reject(failure === 'ordinary'
+          ? new AdapterError('network', 'Session catalog read was superseded') : new SessionCatalogSupersededError());
+        await refresh;
+      });
+      expect(adapter.listSessions).toHaveBeenCalledTimes(failure === 'consecutive' ? 2 : 1);
+      expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+      expect(result.current.refreshing).toBe(false);
+      expect(result.current.historyLoaded).toBe(true);
+    });
+  });
+
+  describe('session read scope', () => {
+    const first = 'agent:main:first';
+    const second = 'agent:main:second';
+    function makeAdapter() {
+      return { connection: { backendKind: 'codex' }, state: 'ready',
+        listSessions: jest.fn().mockResolvedValue([createSession(first), createSession(second)]),
+        loadSession: jest.fn(async (key: string) => ({ messages: [{ id: key, role: 'user', text: key, timestampMs: 1000 }], hasActiveRun: false })),
+      };
+    }
+    function setup(adapter = makeAdapter()) {
+      const hook = renderHook(({ route, currentAdapter }: { route: string; currentAdapter: ReturnType<typeof makeAdapter> }) => {
+        const sessionKeyRef = useRef<string | null>(first);
+        return useChatHistoryState({ adapter: currentAdapter as any, dbg: jest.fn(), t: translate,
+          sessionKeyRef, mainSessionKey: first, routeSessionKey: route, gatewayConfigId: 'scope-qa', currentAgentId: 'main' });
+      }, { initialProps: { route: first, currentAdapter: adapter } });
+      return { ...hook, adapter };
+    }
+
+    it('does not select the old route when its bootstrap snapshot resolves after a route switch', async () => {
+      const snapshot = deferred<null>();
+      (StorageService.getLastOpenedSessionSnapshot as jest.Mock).mockReturnValueOnce(snapshot.promise);
+      const { result, rerender, adapter } = setup();
+      let old!: Promise<void>;
+      act(() => { old = result.current.loadSessionsAndHistory(); });
+      rerender({ route: second, currentAdapter: adapter });
+      await act(async () => {
+        result.current.setSessionKey(second);
+        await result.current.loadHistory(second);
+      });
+      adapter.loadSession.mockClear();
+      await act(async () => { snapshot.resolve(null); await old; });
+      expect(result.current.sessionKey).toBe(second);
+      expect(result.current.messages.map(message => message.text)).toEqual([second]);
+      expect(adapter.loadSession).not.toHaveBeenCalled();
+    });
+
+    it.each(['loadSessionsAndHistory', 'onRefresh', 'refreshSessions'] as const)(
+      'fences a delayed %s catalog before it can reselect a prior route', async operation => {
+        const pending = deferred<ReturnType<typeof createSession>[]>();
+        const { result, rerender, adapter } = setup();
+        adapter.listSessions.mockReturnValueOnce(pending.promise);
+        let old!: Promise<void>;
+        await act(async () => { old = result.current[operation](); await Promise.resolve(); });
+        rerender({ route: second, currentAdapter: adapter });
+        await act(async () => {
+          result.current.setSessionKey(second);
+          result.current.setSessions([createSession(second)]);
+          await result.current.loadHistory(second);
+        });
+        adapter.loadSession.mockClear();
+        await act(async () => { pending.resolve([createSession(first)]); await old; });
+        expect(result.current.sessionKey).toBe(second);
+        expect(result.current.messages.map(message => message.text)).toEqual([second]);
+        expect(result.current.sessions.map(session => session.key)).toEqual([second]);
+        expect(adapter.loadSession).not.toHaveBeenCalled();
+        expect(result.current.refreshing).toBe(false);
+        expect(result.current.refreshingSessions).toBe(false);
+      },
+    );
+
+    it.each(['success', 'failure'] as const)(
+      'finishes initial history after an overlapping pure directory refresh %s', async outcome => {
+        const snapshot = deferred<null>();
+        (StorageService.getLastOpenedSessionSnapshot as jest.Mock).mockReturnValueOnce(snapshot.promise);
+        const { result, adapter } = setup();
+        let bootstrap!: Promise<void>;
+        act(() => { bootstrap = result.current.loadSessionsAndHistory(); });
+        if (outcome === 'failure') adapter.listSessions.mockRejectedValueOnce(new AdapterError('network', 'Offline'));
+        else adapter.listSessions.mockResolvedValueOnce([{ ...createSession(first), title: 'Latest' }]);
+        await act(async () => { await result.current.refreshSessions(); });
+        expect(adapter.loadSession).not.toHaveBeenCalled();
+        await act(async () => { snapshot.resolve(null); await bootstrap; });
+        expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+        expect(result.current.sessionKey).toBe(first);
+        expect(result.current.historyLoaded).toBe(true);
+        expect(result.current.messages.map(message => message.text)).toEqual([first]);
+        if (outcome === 'success') expect(result.current.sessions[0].title).toBe('Latest');
+      },
+    );
+
+    it('does not repopulate a newer empty catalog from a delayed local snapshot', async () => {
+      const snapshot = deferred<{ sessionKey: string; title: string; updatedAt: number }>();
+      (StorageService.getLastOpenedSessionSnapshot as jest.Mock).mockReturnValueOnce(snapshot.promise);
+      const { result, adapter } = setup();
+      let bootstrap!: Promise<void>;
+      act(() => { bootstrap = result.current.loadSessionsAndHistory(); });
+      adapter.listSessions.mockResolvedValueOnce([]);
+      await act(async () => { await result.current.refreshSessions(); });
+      expect(result.current.sessions).toEqual([]);
+      await act(async () => { snapshot.resolve({ sessionKey: first, title: 'Old cached row', updatedAt: 1000 }); await bootstrap; });
+      expect(result.current.sessions).toEqual([]);
+      expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+      expect(result.current.historyLoaded).toBe(true);
+    });
+
+    it('does not let an old callback retire the current route bootstrap', async () => {
+      const snapshot = deferred<null>();
+      const { result, rerender, adapter } = setup();
+      const obsoleteRefresh = result.current.onRefresh;
+      rerender({ route: second, currentAdapter: adapter });
+      act(() => result.current.setSessionKey(second));
+      (StorageService.getLastOpenedSessionSnapshot as jest.Mock).mockReturnValueOnce(snapshot.promise);
+      let bootstrap!: Promise<void>;
+      act(() => { bootstrap = result.current.loadSessionsAndHistory(); });
+      await act(async () => { await obsoleteRefresh(); snapshot.resolve(null); await bootstrap; });
+      expect(adapter.listSessions).toHaveBeenCalledTimes(1);
+      expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+      expect(adapter.loadSession).toHaveBeenCalledWith(second, { limit: 50 });
+      expect(result.current.sessionKey).toBe(second);
+      expect(result.current.historyLoaded).toBe(true);
+    });
+
+    it('does not start history after a delayed cache restore crosses a route switch', async () => {
+      const cache = deferred<[]>();
+      (ChatCacheService.getMessages as jest.Mock).mockReturnValueOnce(cache.promise);
+      const { result, rerender, adapter } = setup();
+      let old!: Promise<void>;
+      await act(async () => { old = result.current.onRefresh(); await Promise.resolve(); });
+      expect(ChatCacheService.getMessages).toHaveBeenCalledTimes(1);
+      rerender({ route: second, currentAdapter: adapter });
+      await act(async () => { result.current.setSessionKey(second); await result.current.loadHistory(second); });
+      adapter.loadSession.mockClear();
+      await act(async () => { cache.resolve([]); await old; });
+      expect(result.current.sessionKey).toBe(second);
+      expect(result.current.messages.map(message => message.text)).toEqual([second]);
+      expect(adapter.loadSession).not.toHaveBeenCalled();
+      expect(result.current.refreshing).toBe(false);
+    });
+
+    it('does not run an old history fallback after a delayed ordinary catalog failure', async () => {
+      const pending = deferred<ReturnType<typeof createSession>[]>();
+      const { result, rerender, adapter } = setup();
+      adapter.listSessions.mockReturnValueOnce(pending.promise);
+      let old!: Promise<void>;
+      await act(async () => { old = result.current.onRefresh(); });
+      rerender({ route: second, currentAdapter: adapter });
+      await act(async () => { result.current.setSessionKey(second); await result.current.loadHistory(second); });
+      adapter.loadSession.mockClear();
+      await act(async () => { pending.reject(new AdapterError('network', 'Offline')); await old; });
+      expect(adapter.loadSession).not.toHaveBeenCalled();
+      expect(result.current.sessionKey).toBe(second);
+      expect(result.current.refreshing).toBe(false);
+    });
+
+    it.each(['onRefresh', 'refreshSessions'] as const)(
+      'does not let an older %s clear or replace a newer refresh', async operation => {
+        const older = deferred<Array<ReturnType<typeof createSession> & { title: string }>>();
+        const newer = deferred<Array<ReturnType<typeof createSession> & { title: string }>>();
+        const { result, adapter } = setup();
+        adapter.listSessions.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+        let old!: Promise<void>, latest!: Promise<void>;
+        await act(async () => { old = result.current[operation](); latest = result.current[operation](); });
+        await act(async () => { older.resolve([{ ...createSession(first), title: 'Old' }]); await old; });
+        expect(result.current[operation === 'onRefresh' ? 'refreshing' : 'refreshingSessions']).toBe(true);
+        expect(result.current.sessions.some(session => session.title === 'Old')).toBe(false);
+        await act(async () => { newer.resolve([{ ...createSession(first), title: 'Latest' }]); await latest; });
+        expect(result.current.sessions[0]).toMatchObject({ key: first, title: 'Latest' });
+        expect(result.current.refreshing).toBe(false);
+        expect(result.current.refreshingSessions).toBe(false);
+      },
+    );
+
+    it.each(['route', 'adapter', 'selection', 'unmount'] as const)(
+      'does not retry a superseded catalog after %s changes', async change => {
+        const pending = deferred<ReturnType<typeof createSession>[]>();
+        const { result, rerender, unmount, adapter } = setup();
+        adapter.listSessions.mockReturnValueOnce(pending.promise);
+        let old!: Promise<void>;
+        await act(async () => { old = result.current.onRefresh(); });
+        if (change === 'route') rerender({ route: second, currentAdapter: adapter });
+        if (change === 'adapter') rerender({ route: first, currentAdapter: makeAdapter() });
+        if (change === 'selection') act(() => result.current.setSessionKey(second));
+        if (change === 'unmount') unmount();
+        await act(async () => { pending.reject(new SessionCatalogSupersededError()); await old; });
+        expect(adapter.listSessions).toHaveBeenCalledTimes(1);
+        expect(adapter.loadSession).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it('handles an immediately rejected bootstrap catalog while the local snapshot is still pending', async () => {
+    const key = 'owned-session';
+    const snapshot = deferred<null>();
+    (StorageService.getLastOpenedSessionSnapshot as jest.Mock).mockReturnValue(snapshot.promise);
+    const adapter = { connection: { backendKind: 'codex' }, state: 'ready',
+      listSessions: jest.fn().mockRejectedValue(new AdapterError('network', 'Offline')),
+      loadSession: jest.fn().mockResolvedValue({ messages: [], hasActiveRun: false }),
+    };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, routeSessionKey: key, gatewayConfigId: 'codex-connection', currentAgentId: 'main' });
+    });
+    let bootstrap!: Promise<void>;
+    await act(async () => {
+      bootstrap = result.current.loadSessionsAndHistory();
+      // An unhandled rejection would be reported before this next event-loop turn.
+      await new Promise<void>(resolve => setImmediate(resolve));
+    });
+    expect(adapter.listSessions).toHaveBeenCalledTimes(1);
+    expect(adapter.loadSession).not.toHaveBeenCalled();
+    await act(async () => { snapshot.resolve(null); await bootstrap; });
+    expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+    expect(result.current.historyLoaded).toBe(true);
+    expect(result.current.sessionKey).toBe(key);
   });
 
   it.each(['openclaw', 'hermes'])('preserves %s participants with identical timestamps and text', async backendKind => {
@@ -267,7 +526,7 @@ describe('useChatHistoryState', () => {
     expect(adapter.loadSession.mock.calls.every(([session]) => session === key)).toBe(true);
   });
 
-  it('keeps a newer session switch when refresh resolves with an older captured key', async () => {
+  it('keeps a newer session switch without starting history from the old refresh', async () => {
     const listSessionsDeferred = deferred<Array<ReturnType<typeof createSession>>>();
     const adapter = {
       listSessions: jest.fn(() => listSessionsDeferred.promise),
@@ -311,7 +570,8 @@ describe('useChatHistoryState', () => {
 
     expect(result.current.state.sessionKey).toBe('agent:main:channel:target');
     expect(result.current.sessionKeyRef.current).toBe('agent:main:channel:target');
-    expect(adapter.loadSession).toHaveBeenCalledWith('agent:main:channel:target', { limit: 50 });
+    expect(adapter.loadSession).not.toHaveBeenCalled();
+    expect(result.current.state.refreshing).toBe(false);
   });
 
   it('optimistically enters the Hermes main session before sessions.list resolves', async () => {
@@ -385,6 +645,45 @@ describe('useChatHistoryState', () => {
     expect(adapter.listSessions).not.toHaveBeenCalled();
     expect(result.current.state.sessionKey).toBe('agent:main:main');
     expect(result.current.sessionKeyRef.current).toBe('agent:main:main');
+  });
+
+  it('reads again after pre-recovery history finishes instead of mistaking it for current history', async () => {
+    const key = 'agent:main:main'; const old = deferred<{ messages: unknown[] }>();
+    const adapter = { state: 'ready', listSessions: jest.fn().mockResolvedValue([]),
+      loadSession: jest.fn().mockReturnValueOnce(old.promise).mockResolvedValue({
+        messages: [{ id: 'fresh', role: 'assistant', text: 'Latest reply', timestampMs: 200000 }], hasActiveRun: false,
+      }),
+    };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    let initial!: Promise<number>; let recovery!: Promise<void>;
+    act(() => { initial = result.current.loadHistory(key); });
+    act(() => { recovery = result.current.refreshCurrentSessionHistory({ afterInFlight: true, isCurrent: () => true }); });
+    expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+    await act(async () => { old.resolve({ messages: [] }); await initial; await recovery; });
+    expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+    expect(result.current.messages.map(message => message.text)).toEqual(['Latest reply']);
+    expect(adapter.listSessions).not.toHaveBeenCalled();
+  });
+
+  it.each(['scope', 'inactive'] as const)('does not dispatch a delayed recovery read after %s changes', async change => {
+    const key = 'agent:main:main'; const old = deferred<{ messages: unknown[] }>();
+    const adapter = { state: 'ready', listSessions: jest.fn().mockResolvedValue([]), loadSession: jest.fn(() => old.promise) };
+    let current = true;
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    let initial!: Promise<number>; let recovery!: Promise<void>;
+    act(() => { initial = result.current.loadHistory(key); });
+    act(() => { recovery = result.current.refreshCurrentSessionHistory({ afterInFlight: true, isCurrent: () => current }); });
+    act(() => { if (change === 'scope') result.current.setSessionKey('agent:main:other'); else current = false; });
+    await act(async () => { old.resolve({ messages: [] }); await initial; await recovery; });
+    expect(adapter.loadSession).toHaveBeenCalledTimes(1);
   });
 
   it('deduplicates concurrent loadHistory calls for the same session and limit', async () => {
@@ -923,6 +1222,189 @@ describe('useChatHistoryState', () => {
     });
 
     expect(result.current.state.messages.map((message) => message.text)).toEqual(['reply']);
+  });
+
+  it.each(['codex', 'claude-code', 'pi'])('follows the real %s history cursor instead of treating a short first page as the end', async backendKind => {
+    const key = 'owned-session';
+    const row = (index: number) => ({ id: `native-${index}`, role: index % 2 ? 'assistant' : 'user', text: `message ${index}`, timestampMs: 10_000 + index });
+    const adapter = { connection: { backendKind }, state: 'ready', loadSession: jest.fn()
+      .mockResolvedValueOnce({ key, sessionId: 'native-session', messages: Array.from({ length: 31 }, (_, i) => row(i + 16)), nextCursor: 'older-16', hasActiveRun: false })
+      .mockResolvedValueOnce({ key, sessionId: 'native-session', messages: Array.from({ length: 16 }, (_, i) => row(i)), hasActiveRun: true, thinkingLevel: 'old' }),
+    };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate, sessionKeyRef,
+        mainSessionKey: key, routeSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    await act(async () => { await result.current.loadHistory(key); });
+    await act(async () => { await result.current.onLoadMoreHistory(); });
+    expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+    expect(adapter.loadSession).toHaveBeenLastCalledWith(key, { limit: 50, cursor: 'older-16' });
+    expect(result.current.messages.filter(row => row.role === 'user')).toHaveLength(24);
+    expect(result.current.messages.some(row => row.text === 'message 0')).toBe(true);
+    expect(result.current.hasMoreHistory).toBe(false);
+    expect(result.current.activitySnapshot?.hasActiveRun).toBe(false);
+    expect(result.current.thinkingLevel).not.toBe('old');
+    expect(ChatCacheService.getTimelinePage).not.toHaveBeenCalled();
+  });
+
+  describe('native history cursor window', () => {
+    const key = 'owned-session';
+    const message = (id: string, role = 'user') => ({ id, role, text: id, timestampMs: 10_000 });
+    const page = (ids: string[], nextCursor?: string) => ({ key, sessionId: 'native', messages: ids.map(id => message(id)), nextCursor, hasActiveRun: false });
+    const setup = (adapter: any) => renderHook(({ route = key, source = adapter }: { route?: string; source?: any }) => {
+      const sessionKeyRef = useRef<string | null>(route);
+      return useChatHistoryState({ adapter: source, dbg: jest.fn(), t: translate, sessionKeyRef,
+        mainSessionKey: key, routeSessionKey: route, gatewayConfigId: null, currentAgentId: 'main' });
+    }, { initialProps: { route: key, source: adapter } });
+
+    it('recovers the real missing-page role structure: 18 users and 6 tools including the older 5 users and 3 tools', async () => {
+      const roles = [...Array(5).fill('user'), ...Array(8).fill('assistant'), ...Array(3).fill('tool'),
+        ...Array(13).fill('user'), ...Array(15).fill('assistant'), ...Array(3).fill('tool')];
+      const rows = roles.map((role, index) => ({ ...message(`native-${index}`, role), timestampMs: 10_000 + index,
+        ...(role === 'tool' ? { tool: { callId: `call-${index}`, name: 'exec', status: 'success', output: 'complete' } } : {}) }));
+      const adapter = { state: 'ready', loadSession: jest.fn()
+        .mockResolvedValueOnce({ ...page([], 'older'), messages: rows.slice(16) })
+        .mockResolvedValueOnce({ ...page([]), messages: rows.slice(0, 16) }) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.messages.filter(row => row.role === 'user')).toHaveLength(13);
+      expect(result.current.messages.filter(row => row.role === 'tool')).toHaveLength(3);
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(result.current.messages.filter(row => row.role === 'user')).toHaveLength(18);
+      expect(result.current.messages.filter(row => row.role === 'tool')).toHaveLength(6);
+      expect(result.current.hasMoreHistory).toBe(false);
+      const assistantText = result.current.messages.filter(row => row.role === 'assistant').map(row => row.text).join(' ');
+      for (let index = 5; index < 13; index++) expect(assistantText).toContain(`native-${index}`);
+    });
+
+    it('rejects a cursor head for another conversation', async () => {
+      const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValue({ ...page(['foreign'], 'p1'), key: 'other' }) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.messages).toEqual([]);
+      expect(result.current.historyLoadMoreError).toBe(true);
+      expect(result.current.hasMoreHistory).toBe(true);
+    });
+
+    it('does not coalesce a new adapter head with the old same-key pending head', async () => {
+      const pending = deferred<any>();
+      const old = { state: 'ready', loadSession: jest.fn().mockReturnValue(pending.promise) };
+      const next = { state: 'ready', loadSession: jest.fn().mockResolvedValue(page(['current'], 'more')) };
+      const { result, rerender } = setup(old);
+      let oldRead!: Promise<number>;
+      act(() => { oldRead = result.current.loadHistory(key); });
+      rerender({ route: key, source: next });
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(next.loadSession).toHaveBeenCalledTimes(1);
+      expect(result.current.messages.map(row => row.text)).toEqual(['current']);
+      await act(async () => { pending.resolve(page(['stale'], 'old')); await oldRead; });
+      expect(result.current.messages.map(row => row.text)).toEqual(['current']);
+    });
+
+    it('retries a malformed initial cursor head from the head instead of reporting an empty conversation', async () => {
+      const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValueOnce(page(['a', 'a'], 'p1'))
+        .mockResolvedValueOnce(page(['a'], 'p1')) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.historyLoadMoreError).toBe(true);
+      await act(async () => { await result.current.retryLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenLastCalledWith(key, { limit: 50 });
+      expect(result.current.messages.map(row => row.text)).toEqual(['a']);
+    });
+
+    it('does not publish old head activity or thinking again when fetching an older page', async () => {
+      const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValueOnce(page(['b'], 'older')).mockResolvedValueOnce(page(['a'])) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      const activity = result.current.activitySnapshot;
+      act(() => { result.current.setThinkingLevel('new-live'); result.current.setMessages(previous => [...previous,
+        { id: 'stream_segment_run-1_0', presentationRunId: 'run-1', role: 'assistant', text: 'in progress', streaming: true, timestampMs: 20_000 }]); });
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(result.current.activitySnapshot).toBe(activity);
+      expect(result.current.thinkingLevel).toBe('new-live');
+      expect(result.current.messages.some(row => row.id === 'stream_segment_run-1_0' && row.streaming)).toBe(true);
+    });
+
+    it('preserves native older rows and rendered identities after fresh and event head refreshes', async () => {
+      const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValueOnce(page(['c'], 'old'))
+        .mockResolvedValueOnce(page(['a', 'b'])).mockResolvedValueOnce(page(['c', 'd'], 'head-old')) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      const ids = result.current.messages.map(row => row.id);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.messages.map(row => row.text)).toEqual(['a', 'b', 'c', 'd']);
+      expect(result.current.messages.slice(0, 3).map(row => row.id)).toEqual(ids);
+      expect(result.current.hasMoreHistory).toBe(false);
+      await act(async () => { expect(result.current.applyReconciledHistory(page(['d', 'e'], 'event-old') as any)).toBe(true); });
+      expect(result.current.messages.map(row => row.text)).toEqual(['a', 'b', 'c', 'd', 'e']);
+      expect(result.current.hasMoreHistory).toBe(false);
+    });
+
+    it.each(['initial', 'older'])('advances through an empty %s native page', async when => {
+      const adapter = { state: 'ready', loadSession: jest.fn()
+        .mockResolvedValueOnce(page(when === 'initial' ? [] : ['c'], 'p1'))
+        .mockResolvedValueOnce(page([], 'p2')).mockResolvedValueOnce(page(['a'])) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      if (when === 'older') await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(3);
+      expect(adapter.loadSession).toHaveBeenLastCalledWith(key, { limit: 50, cursor: 'p2' });
+      expect(result.current.messages[0].text).toBe('a'); expect(result.current.hasMoreHistory).toBe(false);
+    });
+
+    it('bounds an empty first-page chain and exposes manual continuation with its last cursor', async () => {
+      let n = 0;
+      const adapter = { state: 'ready', loadSession: jest.fn().mockImplementation(() => Promise.resolve(page([], `p${++n}`))) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(9);
+      expect(result.current.historyLoadMoreError).toBe(true); expect(result.current.hasMoreHistory).toBe(true);
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(9);
+      adapter.loadSession.mockResolvedValueOnce(page(['visible']));
+      await act(async () => { await result.current.retryLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenLastCalledWith(key, { limit: 50, cursor: 'p9' });
+      expect(result.current.messages[0].text).toBe('visible'); expect(result.current.historyLoadMoreError).toBe(false);
+    });
+
+    it.each(['repeated', 'network', 'identity'])('keeps rows and the cursor after a %s failure; only explicit retry reads again', async failure => {
+      jest.useFakeTimers();
+      const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValueOnce(page(['b'], 'p1')) };
+      if (failure === 'network') adapter.loadSession.mockRejectedValueOnce(new Error('network'));
+      else adapter.loadSession.mockResolvedValueOnce(failure === 'repeated' ? page(['a'], 'p1') : { ...page(['a']), sessionId: 'foreign' });
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(result.current.messages.map(row => row.text)).toEqual(['b']);
+      expect(result.current.historyLoadMoreError).toBe(true); expect(result.current.hasMoreHistory).toBe(true);
+      act(() => jest.advanceTimersByTime(350));
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+      adapter.loadSession.mockResolvedValueOnce(page(['a']));
+      await act(async () => { await result.current.retryLoadMoreHistory(); });
+      expect(result.current.messages.map(row => row.text)).toEqual(['a', 'b']);
+      expect(result.current.historyLoadMoreError).toBe(false); jest.useRealTimers();
+    });
+
+    it.each(['route', 'adapter', 'retirement', 'selection'])('drops an older page across %s invalidation', async invalidation => {
+      const pending = deferred<any>(); let stateListener: (state: string) => void = () => {};
+      const adapter = { state: 'ready', on: jest.fn((_event, listener) => { stateListener = listener; return () => {}; }),
+        loadSession: jest.fn().mockResolvedValueOnce(page(['b'], 'p1')).mockReturnValueOnce(pending.promise) };
+      const { result, rerender } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      let request!: Promise<void>;
+      act(() => { request = result.current.onLoadMoreHistory(); });
+      if (invalidation === 'route') rerender({ route: 'other', source: adapter });
+      else if (invalidation === 'adapter') rerender({ route: key, source: { ...adapter } });
+      else if (invalidation === 'selection') { act(() => result.current.setSessionKey('other')); act(() => result.current.setSessionKey(key)); }
+      else act(() => { stateListener('reconnecting'); stateListener('ready'); });
+      const previous = result.current.messages;
+      await act(async () => { pending.resolve(page(['stale'])); await request; });
+      expect(result.current.messages).toBe(previous);
+      expect(result.current.messages.some(row => row.text === 'stale')).toBe(false);
+    });
   });
 
   it('loads older local cached messages after adapter history is exhausted', async () => {

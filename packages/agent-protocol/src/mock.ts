@@ -76,16 +76,19 @@ function createManagement(
   provided: ManagementOperations | undefined,
   getAgents: () => AgentDescriptor[],
 ): ManagementOperations | undefined {
+  const runtimeSelections = new Map<string, { fastMode?: { enabled: boolean; available: boolean }; permissions?: import('./management').SessionPermissionState }>();
+  const runtimeSelection = (key: string) => {
+    const state = runtimeSelections.get(key);
+    return { currentModel: '', currentProvider: '', currentBaseUrl: '', models: [],
+      ...(state?.fastMode ? { fastMode: { ...state.fastMode } } : {}),
+      ...(state?.permissions ? { permissions: { ...state.permissions } } : {}),
+    };
+  };
   const models: NonNullable<ManagementOperations['models']> = {
     ...(capabilities.models
       ? {
           list: provided?.models?.list ?? (async () => []),
-          getSelection: provided?.models?.getSelection ?? (async () => ({
-            currentModel: '',
-            currentProvider: '',
-            currentBaseUrl: '',
-            models: [],
-          })),
+          getSelection: provided?.models?.getSelection ?? (async (key) => runtimeSelection(key ?? '')),
           setSelection: provided?.models?.setSelection ?? (async () => ({
             ok: true,
             scope: 'global' as const,
@@ -99,6 +102,18 @@ function createManagement(
     ...(capabilities.thinkingLevels
       ? { listThinkingLevels: provided?.models?.listThinkingLevels ?? (() => []) }
       : {}),
+    ...(capabilities.fastMode ? {
+      setFastMode: provided?.models?.setFastMode ?? (async (key, enabled) => {
+        runtimeSelections.set(key, { ...runtimeSelections.get(key), fastMode: { enabled, available: true } });
+        return runtimeSelection(key);
+      }),
+    } : {}),
+    ...(capabilities.sessionPermissions ? {
+      setPermissions: provided?.models?.setPermissions ?? (async (mode, key) => {
+        runtimeSelections.set(key, { ...runtimeSelections.get(key), permissions: { mode, scope: 'session', available: true } });
+        return runtimeSelection(key);
+      }),
+    } : {}),
     ...(capabilities.models && capabilities.modelManage
       ? {
           getCatalog: provided?.models?.getCatalog ?? (async () => ({
@@ -462,7 +477,7 @@ export function createMockAdapter(fixture: MockAdapterFixture): MockAgentAdapter
     listeners.state.forEach((listener) => listener(next, reason));
   };
   const emitSessions = (): void => {
-    const snapshot = sessions.map(cloneSession);
+    const snapshot = sessions.filter(session => !session.archived).map(cloneSession);
     listeners.sessions.forEach((listener) => listener(snapshot));
   };
   const emitUpdate = (update: SessionUpdate): void => {
@@ -499,9 +514,7 @@ export function createMockAdapter(fixture: MockAdapterFixture): MockAgentAdapter
       return agents.map(cloneAgent);
     },
     async listSessions(agentId?: string) {
-      const selected = agentId === undefined
-        ? sessions
-        : sessions.filter((session) => session.agentId === agentId);
+      const selected = sessions.filter((session) => !session.archived && (agentId === undefined || session.agentId === agentId));
       return selected.map(cloneSession);
     },
     async loadSession(key: string, options?: { limit?: number; cursor?: string }) {
@@ -523,6 +536,10 @@ export function createMockAdapter(fixture: MockAdapterFixture): MockAgentAdapter
       emitUpdate({ type: 'run_started', sessionKey: key, runId });
       return { runId };
     },
+    ...(capabilities.promptStatus ? { async getPromptStatus() {
+      // A generic fixture cannot prove persistence or native acceptance.
+      return { status: 'unknown' as const };
+    } } : {}),
     async cancel(key: string, runId?: string) {
       emitUpdate({
         type: 'run_finished',
@@ -589,6 +606,16 @@ export function createMockAdapter(fixture: MockAdapterFixture): MockAgentAdapter
           },
         }
       : {}),
+    ...(capabilities.sessionArchive ? {
+      async archiveSession(key: string, archived: boolean) {
+        if (!sessions.some((session) => session.key === key)) throw new AdapterError('unsupported', `Unknown mock session: ${key}`);
+        sessions = sessions.map((session) => session.key === key ? { ...session, archived } : session);
+        emitSessions();
+      },
+      async listArchivedSessions(agentId?: string) {
+        return sessions.filter((session) => session.archived && (agentId === undefined || session.agentId === agentId)).map(cloneSession);
+      },
+    } : {}),
     ...(management ? { management } : {}),
     on: addListener as AgentAdapter['on'],
     replayTimeline(untilMs = Number.POSITIVE_INFINITY) {

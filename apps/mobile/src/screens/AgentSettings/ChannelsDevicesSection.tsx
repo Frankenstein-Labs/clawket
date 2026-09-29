@@ -79,11 +79,14 @@ type PendingChannelWrite =
 export type ChannelsDevicesSectionProps = Readonly<{
   adapter: AgentAdapter;
   online: boolean;
+  /** The foreground grace window: keep the lists already shown instead of the offline notice. */
+  reconnecting?: boolean;
 }>;
 
 export function ChannelsDevicesSection({
   adapter,
   online,
+  reconnecting = false,
 }: ChannelsDevicesSectionProps): React.JSX.Element {
   const { t } = useTranslation(['common', 'settings', 'config']);
   const { theme } = useAppTheme();
@@ -108,6 +111,9 @@ export function ChannelsDevicesSection({
   const [nodes, setNodes] = useState<NodeListResult>(EMPTY_NODE_RESULT);
   const [nodeRequests, setNodeRequests] = useState<NodePairRequest[]>([]);
   const [loading, setLoading] = useState<Partial<Record<ChannelsDevicesView, boolean>>>({});
+  // Tabs this adapter has answered. A later read refreshes that list in place: tab switches, pairing
+  // decisions and reconnects no longer swap it for a skeleton (owner report 2026-09-29).
+  const [loaded, setLoaded] = useState<Readonly<{ adapter: AgentAdapter; views: Partial<Record<ChannelsDevicesView, boolean>> }> | null>(null);
   const [errors, setErrors] = useState<Partial<Record<ChannelsDevicesView, string>>>({});
   const [busyRequest, setBusyRequest] = useState<string | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
@@ -159,6 +165,7 @@ export function ChannelsDevicesSection({
         setNodes({ ...result, nodes: sortNodes(result.nodes) });
         setNodeRequests(sortNodeRequests(pairResult?.pending ?? []));
       }
+      setLoaded((current) => ({ adapter, views: { ...(current?.adapter === adapter ? current.views : {}), [target]: true } }));
     } catch (loadError: unknown) {
       const fallback = target === 'channels'
         ? t('Failed to load channels', { ns: 'settings' })
@@ -172,7 +179,7 @@ export function ChannelsDevicesSection({
     } finally {
       if (!quiet) setLoading((current) => ({ ...current, [target]: false }));
     }
-  }, [adapter.capabilities.pairRequests, channelManage, management, online, t, views]);
+  }, [adapter, channelManage, management, online, t, views]);
 
   useEffect(() => {
     void loadView(view);
@@ -368,7 +375,10 @@ export function ChannelsDevicesSection({
     );
   }
 
-  const viewLoading = loading[view] === true;
+  // A short reconnect keeps what the tab shows (the header says Reconnecting…); only a sustained
+  // outage swaps it for the offline notice (owner rule 2026-09-29).
+  const showContent = online || reconnecting;
+  const viewLoading = (loading[view] === true || !online) && !(loaded?.adapter === adapter && loaded.views[view]);
   const viewError = errors[view];
   return (
     <>
@@ -382,7 +392,7 @@ export function ChannelsDevicesSection({
             setView(next);
           }}
         />
-        {!online ? (
+        {!showContent ? (
           <Banner
             testID="agent-channels-devices-offline"
             message={t('Offline', { ns: 'common' })}
@@ -397,9 +407,9 @@ export function ChannelsDevicesSection({
             onAction={() => { void loadView(view); }}
           />
         ) : null}
-        {online && viewLoading ? (
+        {showContent && viewLoading ? (
           <ConnectionsLoading />
-        ) : online && view === 'channels' ? (
+        ) : showContent && view === 'channels' ? (
           <View testID="agent-channels-view" style={styles.groups}>
             {channelManage ? (
               <SettingsGroup testID="agent-channel-routing">
@@ -422,7 +432,7 @@ export function ChannelsDevicesSection({
               }}
             />
           </View>
-        ) : online && view === 'devices' ? (
+        ) : showContent && view === 'devices' ? (
           <View testID="agent-devices-content" style={styles.groups}>
             {devices.pending.length ? (
               <View style={styles.groupWrap}>
@@ -482,7 +492,7 @@ export function ChannelsDevicesSection({
               />
             ) : null}
           </View>
-        ) : online ? (
+        ) : showContent ? (
           <View testID="agent-nodes-content" style={styles.groups}>
             {nodeRequests.length ? (
               <View style={styles.groupWrap}>

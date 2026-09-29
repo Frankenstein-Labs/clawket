@@ -312,3 +312,21 @@ it('loads with catalog-shaped placeholder rows instead of a spinner in an empty 
   expect(view.getByTestId('model-picker-loading').props.accessibilityLabel).toBe('Loading models...');
   expect(view.queryByText('Loading models...')).toBeNull();
 });
+
+it('keeps a cached catalog and its search field on screen while a reopen refreshes it', () => {
+  const onSelectModel = jest.fn();
+  const view = render(<ModelPickerModal visible models={models} loading
+    onSelectModel={onSelectModel} onClose={jest.fn()} />);
+  expect(view.queryByTestId('model-picker-loading')).toBeNull();
+  expect(view.getByTestId('model-picker-search')).toBeTruthy();
+  fireEvent.press(view.getByTestId('model-picker-row-anthropic:claude-sonnet'));
+  expect(onSelectModel).toHaveBeenCalledWith(models[1]);
+});
+
+it('keeps the search field in place above first-read placeholders', () => {
+  const view = render(<ModelPickerModal visible models={[]} loading
+    onSelectModel={jest.fn()} onClose={jest.fn()} />);
+  expect(view.getByTestId('model-picker-search')).toBeTruthy();
+  expect(view.getByTestId('model-picker-loading')).toBeTruthy();
+  expect(view.queryByTestId('model-picker-section-list')).toBeNull();
+});

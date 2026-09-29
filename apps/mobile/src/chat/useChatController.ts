@@ -1,5 +1,5 @@
 import { sameLiveToolCall, withToolMessage } from './liveToolMessages';
-import { hasBackendEcho, rememberUncertainSend, recoverUncertainSends, useUncertainSends } from './sendRecovery';
+import { hasBackendEcho, rememberUncertainSend, recoverUncertainSends, reconcilePromptReceipts, useUncertainSends } from './sendRecovery';
 import { describeReplyFailure, sanitizeReplyFailure } from './reply-failure';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -50,6 +50,7 @@ import { useChatAutoCache } from "../hooks/useChatAutoCache";
 import { APPROVE_COMMAND, HISTORY_PAGE_SIZE, MAX_IMAGES } from "./constants";
 import type { ChatControllerOptions } from "./types";
 import { useAppContext } from "../contexts/AppContext";
+import { onAdapterPathRecovered, recoverAdapterConnection } from '../connection/adapter-recovery';
 import {
   AgentActivity,
   agentIdFromSessionKey,
@@ -188,9 +189,7 @@ function latestVisibleAssistant(history: SessionHistory): {
 }
 
 function reconnectAdapter(adapter: AgentAdapter | null): void {
-  if (!adapter) return;
-  adapter.disconnect();
-  void adapter.connect().catch(() => undefined);
+  void recoverAdapterConnection(adapter).catch(() => undefined);
 }
 
 function mergeStreamText(previous: string | null, incoming: string, textMode?: 'snapshot' | 'delta'): string {
@@ -439,14 +438,15 @@ export function useChatController({
   const silentCommandProbesRef = useRef<Map<string, SilentCommandProbe>>(new Map());
 
 
-  // Pending run inactivity timeout: if no events arrive for this duration
-  // while isSending is true, force-clear the stuck state.
+  // Quiet runs need verification, never a synthetic completion. A missing
+  // response can mean a disconnected transport or a tool still running.
   const PENDING_RUN_INACTIVITY_MS = 22_000;
   const HISTORY_COMPLETION_IDLE_MS = 8_000;
   const POST_STREAM_HISTORY_REFRESH_DELAY_MS = 300;
   const RUN_RECOVERY_MIN_INTERVAL_MS = 1_500;
   const HISTORY_RELOAD_MIN_INTERVAL_MS = 1_500;
   const ORPHAN_RUNNING_TOOL_GRACE_MS = 20_000;
+  const requestPendingRunRecoveryRef = useRef<((key: string, reason: string) => Promise<void>) | null>(null);
   const SEND_FAST_PROBE_TIMEOUT_MS = 1500;
   const SEND_HEALTH_WINDOW_MS = 3_000;
   const SEND_FORCE_PROBE_GRACE_MS = 8_000;
@@ -525,23 +525,14 @@ export function useChatController({
         schedule(PENDING_RUN_INACTIVITY_MS - quietMs);
         return;
       }
-      if (showDebug)
-        dbg(
-          `[isSending] → false | reason=pendingRunTimeout (${PENDING_RUN_INACTIVITY_MS}ms inactivity) | runId=${currentRunIdRef.current?.slice(0, 8)}`,
-        );
       const sessionKey = sessionKeyRef.current;
       if (sessionKey) {
-        sessionRunStateRef.current.delete(sessionKey);
-        pendingOptimisticRunIdsRef.current.delete(sessionKey);
+        void requestPendingRunRecoveryRef.current?.(sessionKey, "quiet-run").catch(() => {});
       }
-      currentRunIdRef.current = null;
-      streamStartedAtRef.current = null;
-      clearTransientRunPresentation();
-      setIsSending(false);
-      setActivityLabel(null);
+      schedule(PENDING_RUN_INACTIVITY_MS);
     }, delayMs); };
     schedule(PENDING_RUN_INACTIVITY_MS);
-  }, [clearPendingRunTimeout, clearTransientRunPresentation]);
+  }, [clearPendingRunTimeout]);
 
   const {
     initialChatPreview,
@@ -656,14 +647,52 @@ export function useChatController({
     sessionKey: history.sessionKey,
   });
   const uncertainSends = useUncertainSends(messageQueue.scopeKey, history.messages);
+  const [receiptRecoveryEpoch, setReceiptRecoveryEpoch] = useState(0);
+  const receiptNoticeRef = useRef<{ scope: string; identity: string } | null>(null);
+  useEffect(() => {
+    if (!adapter || connectionState !== 'ready' || !messageQueue.scopeKey || !history.sessionKey
+      || !uncertainSends.length || AppState.currentState === 'background' || AppState.currentState === 'inactive') return;
+    let current = true;
+    void reconcilePromptReceipts(adapter, messageQueue.scopeKey, history.sessionKey, uncertainSends, () => current).then(receipts => {
+      if (!current || !receipts.size) return;
+      history.setMessages(previous => {
+        let changed = false;
+        const next = previous.map(message => {
+          const runId = message.sendUncertain && message.idempotencyKey ? receipts.get(message.idempotencyKey) : undefined;
+          if (!runId || message.bridgeRecordedRunId === runId) return message;
+          changed = true;
+          return { ...message, bridgeRecordedRunId: runId };
+        });
+        return changed ? next : previous;
+      });
+    });
+    return () => { current = false; };
+  }, [adapter, connectionState, messageQueue.scopeKey, history.sessionKey, history.setMessages, uncertainSends, receiptRecoveryEpoch]);
   useEffect(() => {
     const failure = uncertainFailureRef.current;
+    const recovered = failure ? undefined : uncertainSends.findLast(message => message.bridgeRecordedRunId && message.idempotencyKey);
+    if (!sendFailure && recovered?.idempotencyKey && messageQueue.scopeKey
+      && (receiptNoticeRef.current?.scope !== messageQueue.scopeKey || receiptNoticeRef.current.identity !== recovered.idempotencyKey)) {
+      receiptNoticeRef.current = { scope: messageQueue.scopeKey, identity: recovered.idempotencyKey };
+      uncertainFailureRef.current = { scope: messageQueue.scopeKey, message: recovered };
+      setSendFailureMessage(t('Your computer received the message, but execution is unconfirmed. Check the conversation before retrying.'));
+      setSendFailureDetails(null);
+    }
     if (failure?.scope === messageQueue.scopeKey && hasBackendEcho(history.messages, failure.message)) {
       // Clear only the failure for this exact acknowledged send. A reconnect,
       // unrelated reply or matching text is not delivery evidence.
       setSendFailure(null);
+    } else if (failure?.scope === messageQueue.scopeKey
+      && uncertainSends.some(message => message.id === failure.message.id && message.bridgeRecordedRunId)) {
+      // Durable receipt is weaker evidence than native acceptance. Retain both
+      // the uncertain bubble and held queue, without claiming execution began.
+      if (messageQueue.scopeKey && failure.message.idempotencyKey) {
+        receiptNoticeRef.current = { scope: messageQueue.scopeKey, identity: failure.message.idempotencyKey };
+      }
+      setSendFailureMessage(t('Your computer received the message, but execution is unconfirmed. Check the conversation before retrying.'));
+      setSendFailureDetails(null);
     }
-  }, [history.messages, messageQueue.scopeKey, uncertainSends, setSendFailure]);
+  }, [history.messages, messageQueue.scopeKey, uncertainSends, sendFailure, setSendFailure, t]);
   const recoverableMessages = useMemo(
     () => recoverUncertainSends(history.messages, uncertainSends),
     [history.messages, uncertainSends],
@@ -865,6 +894,8 @@ export function useChatController({
 
   const revalidateRecoveredRun = useCallback(
     async (sessionKey: string, reason: string) => {
+      const scope = sendScopeRef.current;
+      if (!scope.active || sessionKeyRef.current !== sessionKey) return;
       const remembered = sessionRunStateRef.current.get(sessionKey);
       if (!remembered) {
         if (showDebug)
@@ -883,7 +914,8 @@ export function useChatController({
         if (!adapter) return;
         const requestedAt = Date.now();
         const historyResult = await adapter.loadSession(sessionKey, { limit: 12 });
-        if (lastAdapterRef.current !== adapter || sessionKeyRef.current !== sessionKey
+        if (!scope.active || sendScopeRef.current !== scope
+          || lastAdapterRef.current !== adapter || sessionKeyRef.current !== sessionKey
           || sessionRunStateRef.current.get(sessionKey)?.runId !== remembered.runId) return;
 
         if (historyResult.hasActiveRun) {
@@ -894,6 +926,7 @@ export function useChatController({
           return;
         }
         if (lastRunSignalAtRef.current > requestedAt) return;
+        if (historyResult.hasActiveRun !== false) return;
         const latestAssistant = latestVisibleAssistant(historyResult);
         const latestAssistantText = latestAssistant?.text ?? "";
         const latestAssistantTs = latestAssistant?.timestampMs ?? 0;
@@ -903,6 +936,11 @@ export function useChatController({
             dbg(
               `revalidate:no-assistant session=${sessionKey} reason=${reason}`,
             );
+          // This is an authoritative inactive response, unlike a timed-out or
+          // failed read. Empty-output turns may legitimately have no assistant.
+          if (Date.now() - lastRunSignalAtRef.current >= HISTORY_COMPLETION_IDLE_MS) {
+            clearActiveRunState(sessionKey, `revalidateRecoveredRun:${reason}:inactive`, remembered.runId);
+          }
           return;
         }
         const startedAt = remembered.startedAt || 0;
@@ -918,7 +956,8 @@ export function useChatController({
           appendIfMissing: true,
           minTimestampMs: startedAt,
         });
-        if (lastAdapterRef.current !== adapter || sessionKeyRef.current !== sessionKey
+        if (!scope.active || sendScopeRef.current !== scope
+          || lastAdapterRef.current !== adapter || sessionKeyRef.current !== sessionKey
           || sessionRunStateRef.current.get(sessionKey)?.runId !== remembered.runId) return;
         const liveRunStillActive = currentRunIdRef.current === remembered.runId;
         const idleMs = Date.now() - lastRunSignalAtRef.current;
@@ -988,6 +1027,7 @@ export function useChatController({
     },
     [dbg, revalidateRecoveredRun, showDebug],
   );
+  requestPendingRunRecoveryRef.current = requestRunRecovery;
 
   const requestVisibleHistoryReload = useCallback(
     async (sessionKey: string, reason: string) => {
@@ -1143,6 +1183,8 @@ export function useChatController({
     history.onRefresh,
     history.sessionKey,
   ]);
+  const autoRefreshRef = useRef(autoRefresh);
+  autoRefreshRef.current = autoRefresh;
 
   const clearForegroundRunRecoveryTimer = useCallback(() => {
     if (!foregroundRunRecoveryTimerRef.current) return;
@@ -1178,7 +1220,7 @@ export function useChatController({
       ) {
         foregroundRefreshTimerRef.current = setTimeout(() => {
           foregroundRefreshTimerRef.current = null;
-          autoRefresh();
+          autoRefreshRef.current();
         }, delayMs);
         return;
       }
@@ -1188,18 +1230,18 @@ export function useChatController({
       foregroundRefreshTimerRef.current = setTimeout(() => {
         foregroundRefreshTimerRef.current = null;
         void (async () => {
-          const ok = await adapter?.probe(
+          const ok = await recoverAdapterConnection(adapter,
             FOREGROUND_REFRESH_AFTER_RECONNECT_TIMEOUT_MS,
+            'foreground',
           );
           if (foregroundRefreshProbeSeqRef.current !== probeSeq) return;
           if (ok) {
-            autoRefresh();
+            autoRefreshRef.current();
           }
         })();
       }, delayMs);
     },
     [
-      autoRefresh,
       clearForegroundRefreshWait,
       connectionState,
       dbg,
@@ -1274,10 +1316,7 @@ export function useChatController({
         dbg(
           `foregroundRecovery:start session=${sessionKeySnapshot} runId=${runIdSnapshot.slice(0, 8)} idleMs=${idleMs}`,
         );
-      void adapter?.probe().then((healthy) => {
-        if (!healthy && lastAdapterRef.current === adapter && currentRunIdRef.current === runIdSnapshot
-          && sessionKeyRef.current === sessionKeySnapshot) reconnectAdapter(adapter);
-      }).catch(() => {});
+      void recoverAdapterConnection(adapter, FOREGROUND_REFRESH_AFTER_RECONNECT_TIMEOUT_MS, 'foreground').catch(() => {});
       void requestRunRecovery(sessionKeySnapshot, "foreground");
 
       setTimeout(() => {
@@ -1309,6 +1348,49 @@ export function useChatController({
     showDebug,
   ]);
 
+  // Render-time callbacks may change as history or draft state updates. They
+  // must not tear down lifecycle listeners and cancel a scheduled recovery.
+  const foregroundLifecycleRef = useRef({
+    connectionState, scheduleForegroundRefresh, requestRunRecovery,
+    recoverForegroundRunIfStuck, sessionKey: history.sessionKey,
+  });
+  foregroundLifecycleRef.current = {
+    connectionState, scheduleForegroundRefresh, requestRunRecovery,
+    recoverForegroundRunIfStuck, sessionKey: history.sessionKey,
+  };
+
+  const pathRecoveryRef = useRef(history.refreshCurrentSessionHistory);
+  pathRecoveryRef.current = history.refreshCurrentSessionHistory;
+  useEffect(() => {
+    if (!adapter || !history.sessionKey || !isFocused) return;
+    let current = true;
+    let refreshing = false;
+    let pendingRefresh = false;
+    let lastRecoveryGeneration = -1;
+    const sessionKey = history.sessionKey;
+    const isCurrent = () => current && appStateRef.current === 'active'
+      && sessionKeyRef.current === sessionKey && adapter.state === 'ready';
+    const unsubscribe = onAdapterPathRecovered(adapter, generation => {
+      if (!isCurrent() || generation <= lastRecoveryGeneration) return;
+      lastRecoveryGeneration = generation;
+      pendingRefresh = true;
+      if (refreshing) return;
+      refreshing = true;
+      // Merge authoritative history in place: preserve the draft, rows and
+      // viewport, and let native run/echo evidence reconcile uncertain sends.
+      // One bit retains a newer genuine path recovery during a slow read; no
+      // parallel reads, replay queue or timer retry is introduced.
+      void (async () => {
+        while (pendingRefresh && isCurrent()) {
+          pendingRefresh = false;
+          setReceiptRecoveryEpoch(epoch => epoch + 1);
+          await pathRecoveryRef.current({ afterInFlight: true, isCurrent }).catch(() => undefined);
+        }
+      })().finally(() => { refreshing = false; });
+    });
+    return () => { current = false; unsubscribe(); };
+  }, [adapter, history.sessionKey, isFocused]);
+
   useEffect(() => {
     const showEvt =
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -1326,9 +1408,12 @@ export function useChatController({
       (nextState: AppStateStatus) => {
         const prevState = appStateRef.current;
         appStateRef.current = nextState;
+        if (prevState !== nextState) setReceiptRecoveryEpoch(epoch => epoch + 1);
 
         if (nextState === "background" || nextState === "inactive") {
           backgroundedAtRef.current = Date.now();
+          clearForegroundRefreshWait();
+          clearForegroundRunRecoveryTimer();
           return;
         }
         if (nextState !== "active" || prevState === "active") return;
@@ -1337,21 +1422,22 @@ export function useChatController({
           ? Date.now() - backgroundedAtRef.current
           : 0;
         backgroundedAtRef.current = null;
+        // Even a brief network switch invalidates the send fast-path evidence.
+        lastConfirmedTransportAtRef.current = 0;
+        forceSendProbeUntilRef.current = Date.now() + SEND_FORCE_PROBE_GRACE_MS;
         const hasRunningChat = !!currentRunIdRef.current;
+        const latest = foregroundLifecycleRef.current;
         // Refresh visible history after transport freshness has been re-established.
-        scheduleForegroundRefresh(awayMs, hasRunningChat);
+        latest.scheduleForegroundRefresh(awayMs, hasRunningChat);
         if (hasRunningChat) {
-          if (awayMs >= 12_000 || connectionState !== "ready") {
-            void adapter?.probe();
+          if (awayMs >= 12_000 || latest.connectionState !== "ready") {
+            void recoverAdapterConnection(adapter, FOREGROUND_REFRESH_AFTER_RECONNECT_TIMEOUT_MS, 'foreground');
           }
-          if (history.sessionKey) {
-            void requestRunRecovery(history.sessionKey, "app-active");
+          if (latest.sessionKey) {
+            void latest.requestRunRecovery(latest.sessionKey, "app-active");
           }
-          recoverForegroundRunIfStuck();
+          latest.recoverForegroundRunIfStuck();
         }
-        return;
-
-        // unreachable
       },
     );
     return () => {
@@ -1366,12 +1452,8 @@ export function useChatController({
     clearForegroundRefreshWait,
     clearForegroundRunRecoveryTimer,
     clearPendingRunTimeout,
-    connectionState,
     adapter,
     history.sessionKey,
-    recoverForegroundRunIfStuck,
-    requestRunRecovery,
-    scheduleForegroundRefresh,
   ]);
 
   // Auto-refresh when Chat tab gains focus (switching from Console/My tab)
@@ -1429,10 +1511,7 @@ export function useChatController({
           dbg(
             `watchdog:reconnect session=${sessionKey} runId=${runId.slice(0, 8)} idleMs=${idleMs}`,
           );
-        void adapter?.probe().then((healthy) => {
-          if (!healthy && lastAdapterRef.current === adapter && currentRunIdRef.current === runId
-            && sessionKeyRef.current === sessionKey) reconnectAdapter(adapter);
-        }).catch(() => {});
+        void recoverAdapterConnection(adapter).catch(() => {});
       }
     }, 4_000);
 
@@ -1797,13 +1876,16 @@ export function useChatController({
     switch (update.type) {
       case "history_reconciled": {
         if (!matchesCurrentSession(update.sessionKey)) return;
-        history.setMessages((previous) => {
-          const retained = retireAliasedTools(previous, update.messages, update.history.toolCallAliases);
-          return preserveMessagePresentation(retained, preserveOptimisticAssistantMessage(retained, update.messages));
-        });
-        history.historyRawCountRef.current = update.history.messages.length;
-        history.setHistoryLoaded(true);
-        history.setHasMoreHistory(Boolean(update.nextCursor));
+        const cursorHistoryApplied = history.applyReconciledHistory?.({ ...update.history, nextCursor: update.nextCursor });
+        if (!cursorHistoryApplied) {
+          history.setMessages((previous) => {
+            const retained = retireAliasedTools(previous, update.messages, update.history.toolCallAliases);
+            return preserveMessagePresentation(retained, preserveOptimisticAssistantMessage(retained, update.messages));
+          });
+          history.historyRawCountRef.current = update.history.messages.length;
+          history.setHistoryLoaded(true);
+          history.setHasMoreHistory(Boolean(update.nextCursor));
+        }
         if (!update.hasActiveRun) {
           const activeRunId = currentRunIdRef.current;
           clearSessionRunState(
@@ -2294,8 +2376,8 @@ export function useChatController({
         if (!adapter) return false;
         const ok =
           connectionState === "ready"
-            ? await adapter.probe(SEND_FAST_PROBE_TIMEOUT_MS)
-            : await adapter.probe();
+            ? await recoverAdapterConnection(adapter, SEND_FAST_PROBE_TIMEOUT_MS)
+            : await recoverAdapterConnection(adapter);
         if (!isCurrent()) return false;
         if (ok) {
           markTransportConfirmed();
@@ -2568,6 +2650,9 @@ export function useChatController({
   );
 
   const {
+    hasRuntimeSettings, runtimeSettingsBusy, runtimeSettingsPendingRef, runtimeSettingsUnconfirmed, runtimeSettingsUnconfirmedRef,
+    fastMode, permissions, permissionPickerVisible, setPermissionPickerVisible,
+    onSelectFastMode, onSelectPermissions, openPermissionPicker,
     availableModels,
     availableProviders,
     configuredDefaultModel,
@@ -2678,7 +2763,7 @@ export function useChatController({
   });
 
   const onSend = useCallback((voiceText?: string) => {
-    if (readOnlyRef.current || sendPreflightInFlightRef.current) return;
+    if (readOnlyRef.current || sendPreflightInFlightRef.current || runtimeSettingsPendingRef.current || runtimeSettingsUnconfirmedRef.current) return;
     void (async () => {
       const text = (voiceText ?? input).trim();
       const images = [...pendingImages];
@@ -2810,6 +2895,8 @@ export function useChatController({
     openCommandPicker,
     openModelPicker,
     currentModelSupportsImages,
+    runtimeSettingsPendingRef,
+    runtimeSettingsUnconfirmedRef,
     t,
     pendingImages,
     releaseSendTriggerGuard,
@@ -2852,7 +2939,7 @@ export function useChatController({
     }).finally(() => { steeringBusyRef.current = false; });
   }, [adapter, connectionState, history.sessionKey, history.setMessages, input, pendingImages.length, readOnly, t]);
 
-  const queueDeliveryReady = !readOnly
+  const queueDeliveryReady = !readOnly && !runtimeSettingsBusy && !runtimeSettingsUnconfirmed
     && history.historyLoaded
     && canSendMessage({
       connectionState,
@@ -2867,7 +2954,7 @@ export function useChatController({
     : null;
   const queueDeliveryInFlightRef = useRef(false);
   useEffect(() => {
-    if (!nextQueuedMessage || queueDeliveryInFlightRef.current) return;
+    if (!nextQueuedMessage || queueDeliveryInFlightRef.current || runtimeSettingsPendingRef.current || runtimeSettingsUnconfirmedRef.current) return;
     const item = nextQueuedMessage;
     const { scopeKey, store } = messageQueue;
     const stillQueued = () => store.read(scopeKey).items.some((entry) => entry.id === item.id);
@@ -2898,7 +2985,7 @@ export function useChatController({
         }
       }
     })();
-  }, [adapter, messageQueue, nextQueuedMessage, submitMessageWithConnectionCheck]);
+  }, [adapter, messageQueue, nextQueuedMessage, submitMessageWithConnectionCheck, runtimeSettingsPendingRef, runtimeSettingsUnconfirmedRef]);
 
   const editQueuedMessage = useCallback((id: string) => {
     const item = messageQueue.remove(id);
@@ -3349,7 +3436,7 @@ export function useChatController({
 
   const handleRefresh = useCallback(async () => {
     if (connectionState !== "ready") {
-      const ok = await adapter?.probe();
+      const ok = await recoverAdapterConnection(adapter);
       if (!ok) return;
     }
     await history.onRefresh();
@@ -3377,6 +3464,8 @@ export function useChatController({
     refreshingSessions: history.refreshingSessions,
     hasMoreHistory: history.hasMoreHistory,
     loadingMoreHistory: history.loadingMoreHistory,
+    historyLoadMoreError: history.historyLoadMoreError,
+    retryLoadMoreHistory: history.retryLoadMoreHistory,
     historyLoaded: history.historyLoaded,
     scrollToBottomRequestAt,
     messageSubmittedAt,
@@ -3402,7 +3491,7 @@ export function useChatController({
     showAgentAvatar: showAgentAvatar ?? false,
     onRefresh: handleRefresh,
     onLoadMoreHistory: history.onLoadMoreHistory,
-    canSend,
+    canSend: canSend && !runtimeSettingsBusy && !runtimeSettingsUnconfirmed,
     onSend,
     onSteer,
     activeRunId: currentRunIdRef.current,
@@ -3424,6 +3513,8 @@ export function useChatController({
     showSlashSuggestions,
     onSelectSlashCommand,
     dismissSlashSuggestions,
+    hasRuntimeSettings, runtimeSettingsBusy, runtimeSettingsUnconfirmed, fastMode, permissions,
+    permissionPickerVisible, setPermissionPickerVisible, onSelectFastMode, onSelectPermissions, openPermissionPicker,
     modelPickerVisible,
     setModelPickerVisible,
     modelPickerLoading,
@@ -3439,7 +3530,7 @@ export function useChatController({
     currentModelDisplayName,
     currentModelSupportsImages,
     currentModelProvider,
-    thinkingLevel: nativeThinkingLevel ?? history.thinkingLevel,
+    thinkingLevel: hasRuntimeSettings ? nativeThinkingLevel : nativeThinkingLevel ?? history.thinkingLevel,
     openThinkPicker: openStaticThinkPicker,
     staticThinkPickerVisible,
     closeStaticThinkPicker,

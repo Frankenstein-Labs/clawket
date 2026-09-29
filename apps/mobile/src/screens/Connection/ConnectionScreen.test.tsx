@@ -238,6 +238,22 @@ describe('ConnectionScreen', () => {
     expect(onResume).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a failure notice in place while the next attempt runs and clears it only on success', async () => {
+    let finish!: () => void;
+    const onReconnect = jest.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const view = render(<ConnectionScreen {...props({ onReconnect })} />);
+    await flush();
+    await act(async () => { fireEvent.press(view.getByTestId('connection-reconnect')); });
+    expect(view.getByText('Please try again later.')).toBeTruthy();
+    await act(async () => { fireEvent.press(view.getByTestId('connection-reconnect')); });
+    expect(onReconnect).toHaveBeenCalledTimes(2);
+    expect(view.getByText('Please try again later.')).toBeTruthy();
+    await act(async () => { finish(); });
+    expect(view.queryByText('Please try again later.')).toBeNull();
+  });
+
   it('keeps Reconnect quiet while online and makes the needed action the ink one', async () => {
     const view = render(<ConnectionScreen {...props({ active: true, state: 'ready' })} />);
     await flush();

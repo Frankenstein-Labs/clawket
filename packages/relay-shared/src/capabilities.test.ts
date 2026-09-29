@@ -4,6 +4,9 @@ import {
   HERMES_MULTI_SESSION_V2,
   KNOWN_HANDSHAKE_CAPABILITIES,
   RELAY_CLIENT_PONG_V1_CAPABILITY,
+  RELAY_CLIENT_PING_V1_CAPABILITY,
+  RELAY_TRANSFER_HINT_V1_CAPABILITY,
+  RELAY_OWNER_PONG_V1_CAPABILITY,
   RELAY_FRAME_LIMIT_V2,
   normalizeHandshakeCapabilities,
   parseHandshakeMeta,
@@ -19,12 +22,18 @@ describe('handshake capabilities', () => {
       RELAY_FRAME_LIMIT_V2,
       BRIDGE_CAPABILITIES_V2,
       HERMES_MULTI_SESSION_V2,
+      RELAY_OWNER_PONG_V1_CAPABILITY,
+      RELAY_CLIENT_PING_V1_CAPABILITY,
+      RELAY_TRANSFER_HINT_V1_CAPABILITY,
     ]);
     expect(RELAY_CLIENT_PONG_V1_CAPABILITY).toBe('relay.client-pong.v1');
     expect(SECURE_PAIRING_V2_CAPABILITY).toBe('pairing.secure-short-code.v2');
     expect(RELAY_FRAME_LIMIT_V2).toBe('relay.frame-limit.v2');
     expect(BRIDGE_CAPABILITIES_V2).toBe('bridge.capabilities.v2');
     expect(HERMES_MULTI_SESSION_V2).toBe('hermes.multi-session.v2');
+    expect(RELAY_OWNER_PONG_V1_CAPABILITY).toBe('relay.owner-pong.v1');
+    expect(RELAY_CLIENT_PING_V1_CAPABILITY).toBe('relay.client-ping.v1');
+    expect(RELAY_TRANSFER_HINT_V1_CAPABILITY).toBe('relay.transfer-hint.v1');
   });
 
   it.each([

@@ -70,6 +70,7 @@ describe('gateway scan Relay claim', () => {
     }, { current: new Map() });
 
     expect(RelayPairingService.claim).toHaveBeenCalledWith({
+      backendKind: 'openclaw',
       serverUrl: 'https://registry.example.com',
       gatewayId: 'gw_123',
       accessCode: 'AB7K9Q',

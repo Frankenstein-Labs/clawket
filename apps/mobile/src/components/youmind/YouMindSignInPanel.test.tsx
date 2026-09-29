@@ -184,4 +184,23 @@ describe('YouMindSignInPanel', () => {
     expect(cardProps).toMatchObject({ otpSent: false, code: '', email: 'lucy@example.com' });
   });
 
+  it('keeps the last error in place during the next attempt and clears it with success', async () => {
+    let finish!: (session: unknown) => void;
+    const verifyOtp = jest.fn()
+      .mockRejectedValueOnce(new Error('Incorrect code'))
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const view = render(<YouMindSignInPanel client={{ sendOtp: jest.fn(async () => undefined), verifyOtp }} source="onboarding" />);
+    act(() => (cardProps!.onChangeEmail as Function)('lucy@example.com'));
+    await act(async () => { (cardProps!.onSendCode as Function)(); });
+    await act(async () => { await (cardProps!.onVerify as Function)('111111'); });
+    expect(view.getByText('Incorrect code')).toBeTruthy();
+    let pending!: Promise<boolean>;
+    act(() => { pending = (cardProps!.onVerify as Function)('222222'); });
+    expect(cardProps!.busy).toBe(true);
+    expect(view.getByText('Incorrect code')).toBeTruthy();
+    expect(cardProps!.invalid).toBe(false);
+    await act(async () => { finish({ token: 'session' }); await pending; });
+    expect(view.queryByTestId('youmind-sign-in-error')).toBeNull();
+  });
+
 });

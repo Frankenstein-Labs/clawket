@@ -31,6 +31,7 @@ const mockYouMindDiscard: jest.Mock = jest.fn();
 const mockClipboardSetString = jest.fn(async (_value: string) => true);
 const mockClipboardGetString = jest.fn(async () => '123456');
 const mockOpenUrl = jest.fn(async (_url: string) => true);
+const mockShowNoticeAlert = jest.fn();
 
 jest.mock('./WelcomeScreen', () => ({ WelcomeScreen: () => null }));
 
@@ -54,12 +55,22 @@ jest.mock('expo-linking', () => ({
   openURL: (url: string) => mockOpenUrl(url),
 }));
 
+jest.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
+jest.mock('../../utils/notice-alert', () => ({
+  showNoticeAlert: (...args: unknown[]) => mockShowNoticeAlert(...args),
+}));
+
 jest.mock('../../connection', () => ({
   getConnectionRuntime: () => mockCoordinator,
   useConnections: () => mockRuntime,
   connectBackendPairingCode: (...args: unknown[]) => mockConnectBackendPairingCode(...args),
   connectBackendPairingLink: (...args: unknown[]) => mockConnectBackendPairingLink(...args),
   connectBackendPairingPayload: (...args: unknown[]) => mockConnectBackendPairingPayload(...args),
+  // The real resolver is covered in gateway-scan-flow tests; the route only forwards its answer.
+  resolvePairingPayloadBackend: (payload: { backendKind?: string }) => payload.backendKind ?? null,
   createYouMindOnboardingConnection: (...args: unknown[]) => (
     mockCreateYouMindOnboardingConnection(...args)
   ),
@@ -191,6 +202,7 @@ describe('OnboardingRoute', () => {
     mockClipboardSetString.mockClear();
     mockClipboardGetString.mockClear();
     mockOpenUrl.mockClear();
+    mockShowNoticeAlert.mockClear();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation((message?: unknown) => {
       if (typeof message === 'string' && message.includes('react-test-renderer is deprecated')) return;
     });
@@ -453,6 +465,62 @@ describe('OnboardingRoute', () => {
         backendKind: 'hermes',
       });
     });
+  });
+
+  it('pairs a header-scanned QR with the backend the QR names', async () => {
+    const props = createProps({ route: { key: 'Onboarding-key', name: 'Onboarding', params: { presentation: 'modal' } } } as Partial<OnboardingRouteProps>);
+    render(<OnboardingRoute {...props} />);
+    expect(mockScreenProps?.initialBackend).toBeUndefined();
+    act(() => mockScreenProps?.onScanAnyQr?.());
+    const options = mockScanner.openGatewayScanner.mock.calls[0][0];
+    const qr = {
+      url: 'wss://relay.example/ws',
+      backendKind: 'codex' as const,
+      transportKind: 'relay' as const,
+      mode: 'relay' as const,
+      relay: { serverUrl: 'https://codex-registry.example', gatewayId: 'bridge-1', accessCode: 'secret' },
+    };
+    mockConnectBackendPairingPayload.mockReturnValueOnce(new Promise(() => {}));
+
+    await act(async () => {
+      void options.onScanned(qr);
+    });
+
+    expect(mockConnectBackendPairingPayload).toHaveBeenCalledWith({
+      runtime: mockCoordinator,
+      payload: qr,
+      backendKind: 'codex',
+      environment: 'production',
+      debugMode: false,
+    });
+    // The chooser moves to the scanned backend's step so its progress is visible.
+    expect(mockScreenProps?.initialBackend).toBe('codex');
+    expect(mockScreenProps?.status).toEqual({ kind: 'connecting', phase: 'relay_connected' });
+  });
+
+  it('rejects a header-scanned QR without backend identity before claiming it', async () => {
+    render(<OnboardingRoute {...createProps()} />);
+    act(() => mockScreenProps?.onScanAnyQr?.());
+    const options = mockScanner.openGatewayScanner.mock.calls[0][0];
+
+    await act(async () => {
+      await options.onScanned({ url: 'wss://unknown.example/ws' });
+    });
+
+    expect(mockShowNoticeAlert).toHaveBeenCalledWith('Invalid QR Code', 'This QR code does not contain valid connection info.');
+    expect(mockConnectBackendPairingPayload).not.toHaveBeenCalled();
+  });
+
+  it('gates the header scan behind the additional-connection paywall', () => {
+    mockRuntime = connectionSnapshot();
+    const onOpenPaywall = jest.fn();
+    render(<OnboardingRoute {...createProps({ onOpenPaywall })} />);
+    act(() => mockScreenProps?.onScanAnyQr?.());
+    expect(onOpenPaywall).toHaveBeenCalledWith('gatewayConnections', expect.any(Function));
+    expect(mockScanner.openGatewayScanner).not.toHaveBeenCalled();
+
+    act(() => onOpenPaywall.mock.calls[0]?.[1]?.());
+    expect(mockScanner.openGatewayScanner).toHaveBeenCalledTimes(1);
   });
 
   it('resumes an additional connection flow after the host Pro gate succeeds', () => {

@@ -1,4 +1,4 @@
-/** Points of downward travel before a drag on the composer means "put the keyboard away". */
+/** Points of downward travel before a drag on the composer toolbar means "put the keyboard away". */
 export const COMPOSER_KEYBOARD_DISMISS_DRAG_THRESHOLD = 10;
 
 export type ComposerKeyboardDismissGesture = Readonly<{
@@ -12,8 +12,8 @@ export type ComposerKeyboardDismissGesture = Readonly<{
 
 /**
  * Capture only a deliberate, mostly vertical, one-finger downward drag that
- * starts on the composer while its input owns the keyboard. Taps, text
- * selection drags and horizontal swipes keep their native behavior.
+ * starts on the toolbar while its input owns the keyboard. Attach this only
+ * outside the editor ancestry: direction alone cannot identify selection drags.
  */
 export function shouldCaptureComposerKeyboardDismiss({
   dx,

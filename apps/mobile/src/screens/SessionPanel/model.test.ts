@@ -282,3 +282,24 @@ it('uses recency across project conversations without pinning the landing sessio
   expect(oldMain).toBe(recent.length - 1);
   expect(buildSessionPanelRows(group, { now: 1_000_000 }).slice(0,2).every(r => r.kind === 'main')).toBe(true);
 });
+
+
+it('copies the native conversation ID and offers reversible archive only when negotiated', () => {
+  const group = roster();
+  const withNative = { ...group, agents: [{ ...group.agents[0], sessions: [{ ...group.agents[0].sessions[0], sessionId: 'native-id', allowedActions: { archive: true, rename: false, reset: false, delete: false, pin: false } }] }] };
+  const row = buildSessionPanelRows(withNative)[0];
+  expect(row.sessionId).toBe('native-id');
+  expect(availableSessionActions(row, { sessionRename: false, sessionReset: false, sessionDelete: false, sessionArchive: true })).toEqual(['export', 'copy_id', 'archive']);
+  expect(availableSessionActions({ ...row, archived: true }, { sessionRename: true, sessionReset: true, sessionDelete: true, sessionArchive: true })).toEqual(['copy_id', 'archive']);
+  expect(availableSessionActions(row, { sessionRename: false, sessionReset: false, sessionDelete: false })).toEqual(['export', 'copy_id']);
+  expect(availableSessionActions({ ...row, hasActiveRun: true }, { sessionRename: false, sessionReset: false, sessionDelete: false, sessionArchive: true })).toEqual(['copy_id']);
+});
+
+it('uses one reversible archive action instead of ambiguous delete when native archives are supported', () => {
+  const row = { ...buildSessionPanelRows(roster())[0], sessionId: 'native-thread',
+    project: { id: 'project', name: 'Project', path: '/project', available: true },
+    allowedActions: { archive: true, delete: true, rename: false, reset: false, pin: false } };
+  const capability = { sessionRename: false, sessionReset: false, sessionDelete: true, sessionArchive: true };
+  expect(availableSessionActions(row, capability)).toEqual(['export', 'copy_id', 'archive']);
+  expect(availableSessionActions(row, { ...capability, sessionArchive: false })).toEqual(['export', 'copy_id', 'delete']);
+});

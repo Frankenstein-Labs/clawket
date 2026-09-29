@@ -28,7 +28,7 @@ function room(sockets: Socket[], backend = 'claude-code') {
 }
 const request = (id: string, method = 'sessions.list') => JSON.stringify({ type: 'req', id, method });
 const response = (id: string) => JSON.stringify({ type: 'res', id, ok: true, payload: {} });
-const deliver = (runtime: RelayRuntime, gateway: Socket, id: string) => handleGatewayMessage(runtime, gateway.deserializeAttachment(), response(id), async () => {});
+const deliver = (runtime: RelayRuntime, gateway: Socket, id: string) => handleGatewayMessage(runtime, gateway as unknown as WebSocket, gateway.deserializeAttachment(), response(id), async () => {});
 
 describe('pending origin safety', () => {
   it('preserves markers through active-route and heartbeat changes, then consumes once across hibernation', async () => {

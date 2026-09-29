@@ -1,4 +1,6 @@
+import { AndroidChatKeyboardAvoider } from '../../components/chat/AndroidChatKeyboardAvoider';
 import { isIncomingParticipant, messageSenderLabel } from '../../chat/messageAttribution';
+import { localizeAgentSystemNotice } from '../../chat/agentSystemNotice';
 import { ParticipantIdentity } from '../../components/chat/ParticipantIdentity';
 import { useWorkspaceLayout } from '../../navigation/workspace-context';
 import { IPAD_CHAT_MAX_WIDTH } from '../../utils/ipad-layout';
@@ -12,6 +14,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Keyboard,
+  KeyboardAvoidingView as NativeKeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -21,7 +24,6 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { FlashList, type FlashListProps, type FlashListRef, type ListRenderItemInfo } from '@shopify/flash-list';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { EnrichedMarkdownText } from 'react-native-enriched-markdown';
 import Animated, {
   Easing,
@@ -46,6 +48,9 @@ import {
   Paperclip,
   MessagesSquare,
   Star,
+  Shield,
+  ShieldAlert,
+  ShieldQuestionMark,
 } from 'lucide-react-native';
 import { ChevronLeft } from '../../components/ui/DirectionalIcon';
 import type { PendingImage, UiMessage } from '../../types/chat';
@@ -329,6 +334,8 @@ export type ThreadViewProps = Readonly<{
   pendingReplyRenderKey?: string | null;
   canSend: boolean;
   loadingMoreHistory?: boolean;
+  historyLoadMoreError?: boolean;
+  onRetryHistory?: () => void;
   topInset?: number;
   bottomInset?: number;
   copy: ThreadCopy;
@@ -388,6 +395,10 @@ export type ThreadViewProps = Readonly<{
   thinkingLevel?: string | null;
   thinkingLevelOptions?: ThinkingLevel[];
   onSelectThinkingLevel?: (level: string) => void;
+  runtimeSettings?: boolean;
+  onReviewRuntimeSettings?: () => void;
+  permissionMode?: string | null;
+  onOpenPermissions?: () => void;
   onResolveApproval?: (
     approvalId: string,
     decision: 'allow-once' | 'allow-always' | 'deny' | 'approve' | 'reject',
@@ -454,6 +465,8 @@ export function ThreadView({
   pendingReplyRenderKey,
   canSend,
   loadingMoreHistory = false,
+  historyLoadMoreError = false,
+  onRetryHistory,
   topInset = 0,
   bottomInset = 0,
   copy,
@@ -498,9 +511,17 @@ export function ThreadView({
   thinkingLevel,
   thinkingLevelOptions,
   onSelectThinkingLevel,
+  runtimeSettings,
+  onReviewRuntimeSettings,
+  permissionMode,
+  onOpenPermissions,
   onResolveApproval,
   testID = 'thread-screen',
 }: ThreadViewProps): React.JSX.Element {
+  // Keep both component identities stable across message/keyboard commits.
+  // Android follows native frames; iOS retains its verified React padding path.
+  const KeyboardAvoidingView = Platform.OS === 'ios'
+    ? NativeKeyboardAvoidingView : AndroidChatKeyboardAvoider;
   const { theme } = useAppTheme();
   const { t } = useTranslation('common');
   const hasParticipants = messages.some(isIncomingParticipant);
@@ -647,7 +668,15 @@ export function ThreadView({
     ? messageStatusesRef.current
     : nextMessageStatuses;
   messageStatusesRef.current = messageStatuses;
-  const liveActivity = activityLabel?.trim() || copy.thinking;
+  const newestUserIndex = messages.findIndex(message => message.role === 'user'
+    && !message.delivery && !isIncomingParticipant(message));
+  // A locally accepted prompt can still be waiting in the socket's send queue.
+  // Real run/tool evidence takes precedence over that transport acknowledgement.
+  const awaitingSendAcknowledgement = !runAcknowledged && !activityLabel?.trim()
+    && newestUserIndex >= 0 && unconfirmedMessageIds?.has(messages[newestUserIndex]!.id)
+    && !messages.slice(0, newestUserIndex).some(message => message.role === 'tool'
+      || (message.role === 'assistant' && message.text.trim().length > 0));
+  const liveActivity = awaitingSendAcknowledgement ? copy.sending ?? t('Sending…', { ns: 'chat' }) : activityLabel?.trim() || copy.thinking;
   const rhythmRows = useMemo(() => withThreadRhythm(groupThreadTools(buildThreadTimelineItems({
     messages: timelineMessages,
     runs: runCards,
@@ -1034,13 +1063,16 @@ export function ThreadView({
     </View>
   ) : null), [compactionNotice, testID]);
   const previewUpgrade = sessionPreview?.hasHiddenHistory ? sessionPreview.onUpgrade : undefined;
-  const timelineHeader = useMemo(() => (previewUpgrade ? <SessionPreviewNotice onUpgrade={previewUpgrade} /> : loadingMoreHistory && historyBrowsed ? (
+  const timelineHeader = useMemo(() => (previewUpgrade ? <SessionPreviewNotice onUpgrade={previewUpgrade} /> : historyLoadMoreError ? (
+    <Banner testID={`${testID}-history-error`} message={t('Could not load older messages', { ns: 'chat' })}
+      actionLabel={copy.retry} onAction={onRetryHistory} style={styles.historyRetry} />
+  ) : loadingMoreHistory && historyBrowsed ? (
     <Skeleton
       testID={`${testID}-history-more`}
       accessibilityLabel={copy.loadingHistory}
       style={styles.historyMore}
     />
-  ) : null), [copy.loadingHistory, historyBrowsed, loadingMoreHistory, previewUpgrade, styles.historyMore, testID]);
+  ) : null), [copy.loadingHistory, copy.retry, historyBrowsed, historyLoadMoreError, loadingMoreHistory, onRetryHistory, previewUpgrade, styles.historyMore, styles.historyRetry, t, testID]);
 
   return (
     <ChatPresentationProvider value={presentation}>
@@ -1165,7 +1197,7 @@ export function ThreadView({
                 keyExtractor={getTimelineRowKey}
                 renderItem={renderMessage}
                 contentContainerStyle={timelineContentStyle}
-                onStartReached={onLoadMoreHistory}
+                onStartReached={historyLoadMoreError ? undefined : onLoadMoreHistory}
                 onStartReachedThreshold={0.3}
                 ListFooterComponent={timelineFooter}
                 ListHeaderComponent={timelineHeader}
@@ -1309,19 +1341,30 @@ export function ThreadView({
                 onChooseFile={onChooseFile}
               />
             ) : null}
-            notice={selectedSkill || (composerExpanded && offline ? (
+            notice={onReviewRuntimeSettings ? <>{selectedSkill}<Banner
+              testID="thread-settings-unconfirmed"
+              message={t('Confirm settings before sending.', { ns: 'chat' })}
+              actionLabel={t('Review settings', { ns: 'chat' })}
+              onAction={onReviewRuntimeSettings}
+            /></> : selectedSkill || (composerExpanded && offline ? (
               <ConnectionStatusPill placement="inline" status="offline" message={copy.offline}
                 actionLabel={onRetry ? copy.reconnect : undefined} onAction={onRetry} />
             ) : undefined)}
             testID={`${testID}-composer`}
             accessory={capabilities.models ? (
               <View style={styles.composerOptions}>
+                {capabilities.sessionPermissions && onOpenPermissions ? <Pressable testID="thread-permissions" accessibilityRole="button"
+                  accessibilityLabel={`${t('Permissions', { ns: 'common' })}: ${permissionMode == null ? t('Unknown', { ns: 'common' }) : t(permissionMode === 'full-access' ? 'Full access' : permissionMode === 'workspace' ? 'Workspace access' : permissionMode === 'read-only' ? 'Read only' : 'Computer settings', { ns: 'chat' })}`}
+                  accessibilityHint={permissionMode == null ? t('Retry', { ns: 'common' }) : undefined}
+                  onPress={onOpenPermissions} style={styles.permissionOption}>
+                  {permissionMode == null ? <ShieldQuestionMark size={19} color={theme.colors.inkSecondary} strokeWidth={1.75} /> : permissionMode === 'full-access' ? <ShieldAlert size={19} color={theme.colors.warn} strokeWidth={1.75} /> : <Shield size={19} color={theme.colors.inkSecondary} strokeWidth={1.75} />}
+                </Pressable> : null}
                 {onOpenModelPicker ? <Pressable testID="thread-model-picker" accessibilityRole="button"
                   onPress={onOpenModelPicker} style={styles.modelOption}>
                   <ModelIcon compact id={model} testID="thread-model-icon" />
                   <Text testID="thread-model-label" numberOfLines={1} ellipsizeMode="tail" maxFontSizeMultiplier={1.3} style={[styles.thinkingText, styles.modelLabel]}>{modelDisplayName || model?.split('/').pop() || copy.chooseModel}</Text>
                 </Pressable> : null}
-                {thinkingLevel && onSelectThinkingLevel ? <ThinkingLevelMenu current={thinkingLevel}
+                {!runtimeSettings && thinkingLevel && onSelectThinkingLevel ? <ThinkingLevelMenu current={thinkingLevel}
                   onSelect={onSelectThinkingLevel} options={thinkingLevelOptions} style={styles.thinkingMenu}>
                   <View testID={`${testID}-thinking-level`} style={styles.thinkingChip}>
                     <Brain size={16} color={theme.colors.inkSecondary} strokeWidth={1.75} />
@@ -1597,6 +1640,7 @@ const ThreadMessageTimelineItem = React.memo(function ThreadMessageTimelineItem(
   queuedTapOpensActions = false,
   onResolveApproval,
 }: ThreadMessageTimelineItemProps): React.JSX.Element | null {
+  const { t } = useTranslation('chat');
   const rowRef = useRef<View>(null);
   // FlashList may reuse this row for another message; a stale measurement
   // closure must notice and report nothing rather than the wrong frame.
@@ -1647,7 +1691,7 @@ const ThreadMessageTimelineItem = React.memo(function ThreadMessageTimelineItem(
   } else if (message.role === 'system') {
     content = (
       <View style={stylesStatic.timelineItem}>
-        <SystemEventRow icon={Info} label={message.text} />
+        <SystemEventRow icon={Info} label={localizeAgentSystemNotice(message.text, t)} />
       </View>
     );
   } else if (message.role === 'assistant' || message.role === 'user') {
@@ -2285,6 +2329,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
       justifyContent: 'center',
       paddingHorizontal: Space.lg,
     },
+    historyRetry: { marginHorizontal: Space.lg, marginVertical: Space.sm },
     historyMore: {
       alignSelf: 'center',
       width: '24%',
@@ -2317,6 +2362,7 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
       paddingHorizontal: Space.md,
     },
     composerOptions: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, marginLeft: Space.sm },
+    permissionOption: { width: ControlSize.floatingButton, minHeight: ControlSize.floatingButton, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
     modelOption: { minHeight: ControlSize.floatingButton, flexDirection: 'row', alignItems: 'center', gap: Space.xs, paddingHorizontal: Space.xs, maxWidth: 160, minWidth: 0, flexShrink: 1 },
     modelLabel: { flexShrink: 1, minWidth: 0 },
     thinkingText: {

@@ -10,6 +10,7 @@ import {
   WEB_SOCKET_OPEN,
   createNativeWebSocket,
   type TransportError,
+  type TransportDiagnostic,
   type TransportState,
   type TransportStateChange,
   type WebSocketCloseEventLike,
@@ -32,6 +33,7 @@ export type WebSocketTransportOptions = {
   reconnectJitter?: boolean;
   openTimeoutMs?: number;
   random?: () => number;
+  onDiagnostic?: (diagnostic: TransportDiagnostic) => void;
 };
 
 type Listener<T> = (value: T) => void;
@@ -58,6 +60,7 @@ export abstract class BaseWebSocketTransport {
   private readonly errorListeners = new Set<Listener<TransportError>>();
   private readonly closeListeners = new Set<Listener<WebSocketCloseEventLike>>();
   private readonly openListeners = new Set<Listener<void>>();
+  private readonly retiredListeners = new Set<Listener<WebSocketCloseEventLike>>();
 
   private currentState: TransportState = 'idle';
   private reconnectAttempts = 0;
@@ -66,6 +69,9 @@ export abstract class BaseWebSocketTransport {
   private manuallyClosed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private openTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly onDiagnostic?: (diagnostic: TransportDiagnostic) => void;
+  private socketAttemptStartedAt = 0;
+  private reportedAttemptError = false;
 
   protected constructor(options: WebSocketTransportOptions) {
     const url = options.url.trim();
@@ -79,6 +85,7 @@ export abstract class BaseWebSocketTransport {
     this.reconnectJitter = options.reconnectJitter !== false;
     this.openTimeoutMs = readPositiveNumber(options.openTimeoutMs, WS_OPEN_TIMEOUT_MS);
     this.random = options.random ?? Math.random;
+    this.onDiagnostic = options.onDiagnostic;
   }
 
   public get state(): TransportState {
@@ -113,6 +120,11 @@ export abstract class BaseWebSocketTransport {
     return addListener(this.openListeners, listener);
   }
 
+  /** Every socket incarnation ends here, including locally initiated replacement. */
+  public onSocketRetired(listener: Listener<WebSocketCloseEventLike>): () => void {
+    return addListener(this.retiredListeners, listener);
+  }
+
   public connect(): void {
     if (this.opening || this.reconnectTimer) return;
     if (
@@ -145,12 +157,19 @@ export abstract class BaseWebSocketTransport {
   }
 
   public send(data: unknown): void {
-    assertWebSocketFrameWithinLimit(data);
+    const bytes = assertWebSocketFrameWithinLimit(data);
     if (!this.socket || this.socket.readyState !== WEB_SOCKET_OPEN) {
       throw new Error('WebSocket is not open');
     }
-    this.socket.send(data);
+    const socket = this.socket;
+    socket.send(data);
+    if (this.socket === socket) this.onFrameSent(bytes);
   }
+
+  /** Direct and older Relay transports retain their ordinary request deadlines. */
+  public getTransferGraceMs(): number { return 0; }
+
+  protected onFrameSent(_bytes: number): void {}
 
   protected setHandshaking(): void {
     this.setState('handshaking');
@@ -171,6 +190,10 @@ export abstract class BaseWebSocketTransport {
   }
 
   protected emitError(error: TransportError): void {
+    if (!this.reportedAttemptError) {
+      this.reportedAttemptError = true;
+      this.reportDiagnostic('error', error.code);
+    }
     emitTo(this.errorListeners, error);
   }
 
@@ -193,6 +216,8 @@ export abstract class BaseWebSocketTransport {
     if (this.opening) return;
     this.opening = true;
     this.attemptId += 1;
+    this.socketAttemptStartedAt = Date.now();
+    this.reportedAttemptError = false;
     const attemptId = this.attemptId;
     this.setState('connecting');
     if (this.manuallyClosed || this.attemptId !== attemptId) {
@@ -245,9 +270,11 @@ export abstract class BaseWebSocketTransport {
 
     nextSocket.onclose = (event = {}) => {
       if (!this.isCurrentSocket(nextSocket, attemptId)) return;
+      this.reportDiagnostic('close', 'unknown', event.code);
       this.socket = null;
       this.clearOpenTimer();
       this.onSocketTerminated();
+      emitTo(this.retiredListeners, event);
       if (this.manuallyClosed) {
         this.setState('closed', event.reason);
         emitTo(this.closeListeners, event);
@@ -256,6 +283,15 @@ export abstract class BaseWebSocketTransport {
       this.scheduleReconnect(event.reason);
       emitTo(this.closeListeners, event);
     };
+  }
+
+  private reportDiagnostic(event: TransportDiagnostic['event'], code: string, closeCode?: number): void {
+    try {
+      this.onDiagnostic?.({ event, phase: this.currentState, code,
+        ...(Number.isInteger(closeCode) && closeCode! >= 1000 && closeCode! <= 4999 ? { close_code: closeCode } : {}),
+        elapsed_ms: Math.min(86_400_000, Math.max(0, Date.now() - this.socketAttemptStartedAt)),
+      });
+    } catch { /* Observation cannot interrupt socket cleanup or retry. */ }
   }
 
   private rejectOversizedIncomingFrame(data: unknown): boolean {
@@ -318,10 +354,15 @@ export abstract class BaseWebSocketTransport {
     const current = this.socket;
     if (!current) return;
     this.socket = null;
-    current.onopen = null;
+    // Android RN can finish native Upgrade after close() while CONNECTING.
+    // Retain only disposal for that retired socket, never handshake callbacks.
+    current.onopen = current.readyState === WEB_SOCKET_CONNECTING
+      ? closeRetiredSocketOnLateOpen(current)
+      : null;
     current.onmessage = null;
     current.onerror = null;
     current.onclose = null;
+    emitTo(this.retiredListeners, { code, reason: reason ?? 'Connection replaced' });
     try {
       current.close(code, reason);
     } catch {
@@ -360,4 +401,19 @@ function emitTo<T>(listeners: Set<Listener<T>>, value: T): void {
 
 function readPositiveNumber(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Captures only the retired socket, never its transport or replacement. */
+function closeRetiredSocketOnLateOpen(socket: WebSocketLike): () => void {
+  let handled = false;
+  return () => {
+    if (handled) return;
+    handled = true;
+    socket.onopen = null;
+    try {
+      socket.close(1000, 'retired_socket');
+    } catch {
+      // The retired peer cannot interrupt its successor's lifecycle.
+    }
+  };
 }
