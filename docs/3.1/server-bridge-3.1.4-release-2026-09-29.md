@@ -1,28 +1,42 @@
-# Server and Bridge 3.1.4 release
+# Server and Bridge 3.1.4 release · 2026-09-29
 
-The owner authorized releasing the server and Bridge first, preserving existing users and older clients. This candidate contains the tested additive Relay recovery controls, local WebSocket admission safeguards, Codex native settings/continuation/history improvements, and bounded SDK session catalogs and prompt receipts. Mobile distribution is separate. The existing Mobile analytics type accepts the additive `archive` action so the shared contract remains type-compatible; no Mobile UI or runtime changes are included.
+The owner authorized releasing the server and Bridge first while preserving existing users and older clients. The fixed production candidate is `800befa999d013a55d9333ae8ff1ff02e7691e8a` ([PR #47](https://github.com/p697/clawket/pull/47)). Five Relay services are deployed and verified. **npm publication: awaiting the owner's npm security-key verification.** Mobile distribution is separate.
 
-## Scope
+## Scope and compatibility
 
-- Five Relay deployments: OpenClaw, Hermes, Pi, Codex and Claude Code, each retaining its current independent resources.
-- Bridge npm package `@p697/clawket@3.1.4`; internal unpublished workspace versions remain unchanged.
-- No Registry deployment, database/DO migration, pairing reset, secret rotation, DNS/WAF change, local-model Relay deployment or App release.
-- The isolated candidate excludes concurrent Mobile, CLI naming/re-pairing and Registry diagnostics changes. Its backend source is copied from the validated development candidate; publish guard/version changes are separately checked.
+The candidate adds capability-negotiated Relay recovery/presence and large-frame controls, local WebSocket admission safeguards, Codex native settings/continuation/history improvements, bounded session catalogs and prompt receipts. Legacy clients retain heartbeat/routing compatibility and array-shaped `sessions.list`. Old installations are not forced to upgrade or re-pair.
 
-## Compatibility and rollout
+No Registry deployment, database/DO migration, pairing reset, secret rotation, DNS/WAF change, local-model Relay deployment or App release occurred. Independent resources, all existing Relay bindings/vars, compatibility dates and sanitized logging settings were checked before and after each deployment. OpenClaw/Hermes Registry code bytes and deployment IDs remained unchanged. Only isolated QA pairing records were added for production transport probes; user pairing records and local user Agent processes were not altered.
 
-New owner/client round-trip controls, presence and large-frame hints require capability negotiation. Legacy heartbeat handling, OpenClaw routing and array-shaped `sessions.list` remain available. Existing App/Bridge installations are not forced to upgrade. Deploying a Relay may cause a brief reconnect; backward compatibility is not a promise of uninterrupted sockets.
+Concurrent Mobile UI, CLI naming/re-pairing and Registry diagnostics work is excluded. One Mobile analytics union accepts the additive `archive` action to keep the shared contract type-compatible; it introduces no runtime/UI behavior. The internal unpublished package versions remain unchanged.
 
-Before deployment, verify the fixed commit's CI, v1 replay, current-production bundle rollout matrix and package provenance. Record each current deployment and preserve configuration/bindings. Deploy one backend at a time, check readback and scoped smoke before advancing, and stop on a regression. No new DO migration is involved; use the recorded compatible service version if recovery is needed. npm dist-tag rollback affects future installs only; an installed Bridge requires explicit version installation/restart.
+## Release evidence
 
-Known non-blocking risks remain in the development acceptance report: selective periodic stalls have not been attributed, original Desktop GUI recovery lacks actual-window closure, and one transient settings display degradation was not reproduced. Native settings/continuation probes and scoped recovery passed; do not claim these unknowns are eliminated, performance percentiles or competitive superiority.
+- Fixed-commit [CI](https://github.com/p697/clawket/actions/runs/36562701069): all four jobs passed, including macOS/Windows Bridge and Relay compatibility, required checks, and secret scanning. Required checks include 363 Mobile suites / 3,953 cases. This is not a claim that all dependency advisories are absent.
+- v1 replay: five files / 41 tests passed locally and before each Relay deployment. Publish guard: six cases; docs: seven instruction pairs / five checker cases.
+- Production rollout matrix: four cases / 24 upgrade/recovery phases passed against current production bytes, refetched and SHA-verified before rollout. The historical matrix includes published 0.7.0 Bridges. Cloudflare actual rollback was not exercised.
+- Package build, package provenance (83 runtime modules / 123 inputs), npm dry-run and fixed tarball verification passed. Tarball SHA-256: `9fbed8665a8ca12ecb05986755d4767e2fbe66b75b11da77926efcfc0d0ad796`; npm shasum: `80c7fb73f01ce1918cf7df1f9233646c48654135`.
+- Live Production: all five backend paths passed authenticated health, sessions, controlled message/history requests and saved-token reconnect. OpenClaw/Hermes used published 3.0.0 Bridge transports and previously claimed credentials; both retained legacy non-pong clients for 130 seconds, followed by successful health. Pi and Claude also passed a 130-second non-pong probe.
+- Additional old-client recovery: eight adapter/transport files match pre-change commit `a7c76b7a` byte-for-byte. Codex/Claude/Pi adapters recovered automatically after a forced owner restart, with single-run recovery measurements of 4,718 / 5,380 / 5,121 ms, then successful history reads. Codex was followed for 150 seconds; Claude/Pi for 30 seconds. These are actual client networking code run in Node with only native ID generation replaced, **not device UI measurements or latency percentiles**. Backend/model replies are controlled in these production transport checks; prior actual model/device acceptance is separate.
 
-## Evidence and status
+## Exceptions retained
 
-- Isolated candidate v1 replay: five files / 41 tests passed.
-- Publish guard tests: six passed after updating both accepted and rejected version fixtures for 3.1.4.
-- Documentation: seven instruction pairs / five checker cases passed.
-- Previous validated backend development candidate: 24/24 local rollout phases using current Production bytes; rerun against the selected release candidate before deployment.
-- Package build, immutable candidate CI, deployment anchors, production smoke and npm publication: pending. Nothing is published by this document.
+Two initial raw-socket probes failed: Claude closed during its first 130-second window (close code not captured); Codex observed an owner heartbeat timeout, owner recovery in about 0.7 seconds, and a later stale-client request timeout. Rollout stopped both times. These failures are preserved, not counted as passes or attributed conclusively to the network.
 
-Private evidence: `~/.clawket/testing/server-bridge-release-20260929/`. No credentials or pairing payloads belong in this document.
+A forced owner restart then confirmed Relay explicitly retires the old socket with `4011 gateway_unavailable`, and the pre-change mobile transport automatically reconnects and re-handshakes. A raw socket without that recovery behavior is not a complete App acceptance test. Claude's instrumented 130-second repeat and all three old-adapter recovery checks passed; an unchanged Codex Relay control also passed 130 seconds. This supports compatibility and controlled release, but does not prove periodic stalls are eliminated. A live connection may briefly reconnect during deployment or owner recovery. Original Desktop GUI recovery and the transient settings-display observation remain the previously documented verification limits.
+
+## Production anchors and recovery
+
+All five live source hashes match the candidate bundle: `22afaffeb4c5cf65710ff4fc83f965cf30c23f7fd4c9668f05151e4aef33ff91`. Each service is at 100% of its recorded version.
+
+| Backend | Released Relay version | Previous compatible version |
+|---|---|---|
+| pi | `8e217727-cc74-4acd-94e5-36b57b73741a` | `38f7594d-2f32-4580-81c7-4252ffd39b1a` |
+| claude-code | `2c5f88d0-f452-413c-a778-a98b70ca589b` | `1bdb5a0a-4c01-40f7-b411-c6d79ae12864` |
+| codex | `218bc62c-3b34-4b16-b027-1b43dc0643e7` | `d758c10d-489b-45c8-abd4-a297dd2594ac` |
+| hermes | `89f3acdd-5956-4267-ae0a-d88ccd2f442f` | `f1abfdaa-6e3f-4030-9faf-b652b4a1ab42` |
+| openclaw | `267ef8c2-ef47-4e24-a2b1-dbf509fb9fdc` | `185208b4-3573-4352-8b6e-455b3e09108e` |
+
+If a regression is confirmed, stop rollout and restore the recorded version for that backend with its existing local deployment configuration; no new DO migration was introduced. Preserve bindings, credentials and logs. npm dist-tag recovery only changes future installs; installed Bridges require explicit version installation/restart. Server publication does not automatically update a user's installed Bridge, and client UI changes still require a separate App release.
+
+Private evidence: `~/.clawket/testing/server-bridge-release-20260929/` (source/deployment snapshots, CI logs, rollout matrix, raw failures, recovery traces and immutable package). No credentials or pairing payloads belong in this document.
