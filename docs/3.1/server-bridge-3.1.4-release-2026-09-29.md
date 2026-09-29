@@ -1,6 +1,6 @@
 # Server and Bridge 3.1.4 release · 2026-09-29
 
-The owner authorized releasing the server and Bridge first while preserving existing users and older clients. The fixed production candidate is `800befa999d013a55d9333ae8ff1ff02e7691e8a` ([PR #47](https://github.com/p697/clawket/pull/47)). Five Relay services are deployed and verified. **npm publication: awaiting the owner's npm security-key verification.** Mobile distribution is separate.
+The owner authorized releasing the server and Bridge first while preserving existing users and older clients. The fixed production candidate is `800befa999d013a55d9333ae8ff1ff02e7691e8a` ([PR #47](https://github.com/p697/clawket/pull/47)). Five Relay services are deployed and verified. **Bridge `@p697/clawket@3.1.4` is publicly available; npm `latest=3.1.4`.** Public registry metadata and the downloaded tarball were verified at 2026-09-29 12:34 UTC against the immutable candidate (SHA-256, npm SHA-1 and SHA-512 integrity all match). npm first accepted the upload asynchronously; publication was not declared complete until public verification succeeded. Mobile distribution is separate.
 
 ## Scope and compatibility
 
@@ -18,6 +18,8 @@ Concurrent Mobile UI, CLI naming/re-pairing and Registry diagnostics work is exc
 - Package build, package provenance (83 runtime modules / 123 inputs), npm dry-run and fixed tarball verification passed. Tarball SHA-256: `9fbed8665a8ca12ecb05986755d4767e2fbe66b75b11da77926efcfc0d0ad796`; npm shasum: `80c7fb73f01ce1918cf7df1f9233646c48654135`.
 - Live Production: all five backend paths passed authenticated health, sessions, controlled message/history requests and saved-token reconnect. OpenClaw/Hermes used published 3.0.0 Bridge transports and previously claimed credentials; both retained legacy non-pong clients for 130 seconds, followed by successful health. Pi and Claude also passed a 130-second non-pong probe.
 - Additional old-client recovery: eight adapter/transport files match pre-change commit `a7c76b7a` byte-for-byte. Codex/Claude/Pi adapters recovered automatically after a forced owner restart, with single-run recovery measurements of 4,718 / 5,380 / 5,121 ms, then successful history reads. Codex was followed for 150 seconds; Claude/Pi for 30 seconds. These are actual client networking code run in Node with only native ID generation replaced, **not device UI measurements or latency percentiles**. Backend/model replies are controlled in these production transport checks; prior actual model/device acceptance is separate.
+
+The subsequent documentation-only CI run `36567908958` passed required checks, Windows and secret scanning, but failed the existing macOS local-model supervisor concurrent-start case (`command failed: 1`). That script is unchanged and is not included in the npm tarball. The failure is retained for follow-up; source-candidate CI above was fully green. Final documentation CI must pass before merging the release PR.
 
 ## Exceptions retained
 

@@ -1,6 +1,6 @@
 # PROGRESS · Clawket 3.0 进度日志
 
-- 2026-09-29 服务端先行发布：固定候选 `800befa9` 的CI四项全绿，v1回放41例、当前生产快照升级/恢复矩阵24阶段通过；五套Relay已逐项部署，线上代码SHA、全部绑定、兼容日期与日志设置核对通过，OpenClaw/Hermes Registry源码与部署不变。旧3.0.0 Bridge及原配对凭据实连、130秒空闲通过；Codex/Claude/Pi旧App适配器连接代码接生产Relay，强制owner重连后自动恢复（单次4.718/5.380/5.121秒）及后续历史通过。保留两次裸socket失败与原因未明风险，未宣称周期性停滞消失。Bridge3.1.4固定包已验，npm等待负责人安全密钥验证，尚未公开发布；客户端未发布。详见[发布记录](../3.1/server-bridge-3.1.4-release-2026-09-29.md)。
+- 2026-09-29 服务端先行发布：固定候选 `800befa9` 的CI四项全绿，v1回放41例、当前生产快照升级/恢复矩阵24阶段通过；五套Relay已逐项部署，线上代码SHA、全部绑定、兼容日期与日志设置核对通过，OpenClaw/Hermes Registry源码与部署不变。旧3.0.0 Bridge及原配对凭据实连、130秒空闲通过；Codex/Claude/Pi旧App适配器连接代码接生产Relay，强制owner重连后自动恢复（单次4.718/5.380/5.121秒）及后续历史通过。保留两次裸socket失败与原因未明风险，未宣称周期性停滞消失。Bridge3.1.4已公开发布，npm latest=3.1.4，公开下载包SHA-256/SHA-1/SHA-512与固定候选完全一致（12:34 UTC）；客户端未发布。详见[发布记录](../3.1/server-bridge-3.1.4-release-2026-09-29.md)。
 
 - 2026-09-28 Bridge 3.1.3 已按负责人授权发布：源码 `4d483b91`，包含 Codex 摘要预览、认证生命周期恢复与 macOS 桌面端自动发现。固定提交隔离构建，CI 四项全绿、发布门禁/包验证通过；npm `latest=3.1.3`，公开下载包 SHA-256 `d02c1525ef238825efe2bba02a2b6da641f44f8dce2fff4aeeeda4c23bb4052d` 与候选一致。客户端/Worker 未发布，已有本机进程与配对未改动。详见 [发布记录](../3.1/bridge-3.1.3-release-2026-09-28.md)。
 
@@ -1108,7 +1108,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
-| HT-NPM-314-0929 | Bridge 3.1.4 npm 发布安全密钥验证 | 在已打开的 npm 官方页面完成安全密钥/Touch ID，无需提供密钥。 | npm发布成功，公开latest及下载包SHA与固定候选一致。 | 待负责人验证；五Relay已发布并核验，Bridge上传等待npm验证。 |
+| HT-NPM-314-0929 | Bridge 3.1.4 npm 发布安全密钥验证 | 在已打开的 npm 官方页面完成安全密钥/Touch ID，无需提供密钥。 | npm发布成功，公开latest及下载包SHA与固定候选一致。 | 已完成：五Relay已发布并核验；npm latest=3.1.4，公开下载包三项哈希与固定候选一致。 |
 | HT-31-STORE-0927 | 固定 3.1 候选的物理 iPhone 与商店升级/订阅验收 | 本轮只有 Android 真机与 iOS 模拟器；正式签名/分发阶段按独立发布授权执行，用真实商店账号验证升级、购买/恢复与权限。 | 固定版本、保留旧配对/历史、真实 entitlement 与物理 iPhone 后台/键盘/语音证据。 | 未完成；不能用开发 Pro 开关或模拟器代替。夜间功能/稳定性报告见 ../3.1/overnight-acceptance-2026-09-26.md，当前仍 HOLD。 |
 | HT-CLAUDE-AUTH-0926 | 独立 Claude Code CLI 的真实模型测试认证 | Owner 已选择通过官方 `claude auth login` 登录并测试未修改的 CLI；不从 Desktop 提取令牌。 | CLI 自身认证成功后，在专用 QA 项目完成真实响应。 | 已授权产品实现；官方 CLI 登录已完成；隔离 QA 项目真实响应与同 ID 恢复通过，持久双轮对话及真实 AskUserQuestion 单选/多选通过。DeepSeek 官方教程与 Anthropic 的非 Claude 模型支持范围存在差异，Owner 因此改选官方登录，未创建 DeepSeek Key 或调用该 provider。见 ../research/claude-code-desktop-cli-feasibility-2026-09-26.md。 |
 | HT-CODEX-0926 | Codex 物理 iPhone 与负责人观感验收 | 本机 iOS 模拟器和 Android 真机已测；有物理 iPhone 时复查键盘、照片、后台恢复和审批，负责人检查最终观感。 | 实际设备操作与界面确认。 | 实现、双版本真实 Codex、隔离 Preview、自动门禁通过；非发布授权。见 ../3.1/codex-qa-2026-09-26.md。 |
