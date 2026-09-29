@@ -1,5 +1,7 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-09-29 负责人授权收口本地改动并 PR 合并：整理 307 个源码/测试/文档文件，整合已发布 Bridge 3.1.4 基线与发布守卫，形成 [PR #48](https://github.com/p697/clawket/pull/48)（包含 #47 提交历史）。三处冲突保留最新命名/诊断规则、copy_id/archive analytics 与双方进度记录。整合后补验 analytics 15、CLI Pi 33/lifecycle 7/Codex 11/Claude 6、Registry 13，以及 Mobile 类型、docs 与 diff；完整 Required/Windows/macOS/v1 门禁交 CI，全部通过后才合并。根目录误生成的三份 Expo 文件已移至本机 testing 备份，未纳入 Git；既有忽略文件保留。此轮仅代码合并授权，不新增 npm/客户端/Worker 发布；既有真机证据与 UI 待验边界保留。
+
 - 2026-09-29 服务端先行发布：固定候选 `800befa9` 的CI四项全绿，v1回放41例、当前生产快照升级/恢复矩阵24阶段通过；五套Relay已逐项部署，线上代码SHA、全部绑定、兼容日期与日志设置核对通过，OpenClaw/Hermes Registry源码与部署不变。旧3.0.0 Bridge及原配对凭据实连、130秒空闲通过；Codex/Claude/Pi旧App适配器连接代码接生产Relay，强制owner重连后自动恢复（单次4.718/5.380/5.121秒）及后续历史通过。保留两次裸socket失败与原因未明风险，未宣称周期性停滞消失。Bridge3.1.4已公开发布，npm latest=3.1.4，公开下载包SHA-256/SHA-1/SHA-512与固定候选完全一致（12:34 UTC）；客户端未发布。详见[发布记录](../3.1/server-bridge-3.1.4-release-2026-09-29.md)。
 - 2026-09-29 Review 阻塞修复：确认 OpenClaw 设备令牌 mismatch 在异步删除期间发出 unauthorized，导致协调器提前断开；修前回归失败。协议层改为仅对实际使用的旧设备令牌做一次有界清理/重连，保留 adapter 握手等待；失败/重复拒绝终止自动重试，不放宽共享认证拦截。补真实协议+adapter fixture 的成功握手、scope/旧文案、存储失败、远端断线期间清理、连接切换/主动断开等回归。3 个 Mobile 窄文件 387 项、Registry 合约 16 项、v1 live replay 8 项、Mobile 类型、docs 7 对/5例与 scoped diff 通过；保留现有 Registry 脱敏断言修复。串行测试前暂停本轮持有的 Metro。未修改真实令牌/生产配置，未做真实凭据吊销实验，未提交/升版/发布；需要客户端更新。详见 [设备令牌恢复](../3.1/openclaw-device-token-recovery.md)。
 
