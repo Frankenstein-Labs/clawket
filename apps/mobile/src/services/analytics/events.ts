@@ -527,7 +527,7 @@ export const analyticsEvents = {
     });
   },
 
-  sessionAction(properties: { action: 'pin' | 'rename' | 'reset' | 'delete' | 'create' | 'export' }): void {
+  sessionAction(properties: { action: 'pin' | 'rename' | 'reset' | 'delete' | 'create' | 'export' | 'archive' }): void {
     captureAnalyticsEvent('session_action', properties);
   },
 

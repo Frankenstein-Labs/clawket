@@ -1,6 +1,6 @@
 # Server and Bridge 3.1.4 release
 
-The owner authorized releasing the server and Bridge first, preserving existing users and older clients. This candidate contains the tested additive Relay recovery controls, local WebSocket admission safeguards, Codex native settings/continuation/history improvements, and bounded SDK session catalogs and prompt receipts. Mobile distribution is separate.
+The owner authorized releasing the server and Bridge first, preserving existing users and older clients. This candidate contains the tested additive Relay recovery controls, local WebSocket admission safeguards, Codex native settings/continuation/history improvements, and bounded SDK session catalogs and prompt receipts. Mobile distribution is separate. The existing Mobile analytics type accepts the additive `archive` action so the shared contract remains type-compatible; no Mobile UI or runtime changes are included.
 
 ## Scope
 
