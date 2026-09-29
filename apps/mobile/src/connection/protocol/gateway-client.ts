@@ -69,6 +69,7 @@ import {
   readRelayControlError,
   readString,
   RELAY_CONTROL_PREFIX,
+  RELAY_CLIENT_CAPABILITIES,
   relaySupportsBootstrapV2,
   selectConnectAuth,
   type RelayBootstrapCredential,
@@ -1990,6 +1991,7 @@ function buildConfiguredRelayUrl(
     token,
     clientId,
     relayIdQueryParam,
+    capabilities: RELAY_CLIENT_CAPABILITIES,
   });
 }
 

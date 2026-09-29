@@ -1,5 +1,7 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-09-29 PR #48 CI 补修：完整 Mobile 382 文件/4,641 项发现 NodeClient 能力声明回退（仅 1 项失败）。核对确认原始 NodeClient socket 只实现 server pong，不应随 URL helper 声明 client ping/transfer hint；保留原测试断言，改为共享 URL helper 默认仅旧 pong，完整 Gateway transport 显式 opt-in 三能力。未扩大 NodeClient 权限或修改线上服务；以最终提交 CI 为合并门禁。
+
 - 2026-09-29 负责人授权收口本地改动并 PR 合并：整理 307 个源码/测试/文档文件，整合已发布 Bridge 3.1.4 基线与发布守卫，形成 [PR #48](https://github.com/p697/clawket/pull/48)（包含 #47 提交历史）。三处冲突保留最新命名/诊断规则、copy_id/archive analytics 与双方进度记录。整合后补验 analytics 15、CLI Pi 33/lifecycle 7/Codex 11/Claude 6、Registry 13，以及 Mobile 类型、docs 与 diff；完整 Required/Windows/macOS/v1 门禁交 CI，全部通过后才合并。根目录误生成的三份 Expo 文件已移至本机 testing 备份，未纳入 Git；既有忽略文件保留。此轮仅代码合并授权，不新增 npm/客户端/Worker 发布；既有真机证据与 UI 待验边界保留。
 
 - 2026-09-29 服务端先行发布：固定候选 `800befa9` 的CI四项全绿，v1回放41例、当前生产快照升级/恢复矩阵24阶段通过；五套Relay已逐项部署，线上代码SHA、全部绑定、兼容日期与日志设置核对通过，OpenClaw/Hermes Registry源码与部署不变。旧3.0.0 Bridge及原配对凭据实连、130秒空闲通过；Codex/Claude/Pi旧App适配器连接代码接生产Relay，强制owner重连后自动恢复（单次4.718/5.380/5.121秒）及后续历史通过。保留两次裸socket失败与原因未明风险，未宣称周期性停滞消失。Bridge3.1.4已公开发布，npm latest=3.1.4，公开下载包SHA-256/SHA-1/SHA-512与固定候选完全一致（12:34 UTC）；客户端未发布。详见[发布记录](../3.1/server-bridge-3.1.4-release-2026-09-29.md)。

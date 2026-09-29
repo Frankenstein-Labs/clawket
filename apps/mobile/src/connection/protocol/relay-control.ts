@@ -40,6 +40,7 @@ export function buildRelayClientWsUrl(input: {
   token: string;
   clientId: string;
   relayIdQueryParam: 'gatewayId' | 'bridgeId';
+  capabilities?: string;
 }): string {
   const url = new URL(normalizeWsUrl(input.relayUrl));
   if (!url.pathname || url.pathname === '/') url.pathname = '/ws';
@@ -47,7 +48,8 @@ export function buildRelayClientWsUrl(input: {
   url.searchParams.set('role', 'client');
   url.searchParams.set('clientId', input.clientId);
   url.searchParams.set('token', input.token);
-  url.searchParams.set('capabilities', RELAY_CLIENT_CAPABILITIES);
+  // Raw node sockets only implement server-initiated pong. Full transports opt in.
+  url.searchParams.set('capabilities', input.capabilities ?? RELAY_CLIENT_PONG_CAPABILITY);
   return url.toString();
 }
 
