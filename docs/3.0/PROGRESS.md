@@ -2645,3 +2645,8 @@ Android screenshot/native-layout checks now confirm an empty Composer collapses 
 - 协商客户端探活 Mobile 172 项与类型/文档检查通过；五套 Preview 各通过 41 项 v1 回放后部署。真实 fetch 未持久新能力的问题先被门禁拦住并修复，没有跳过红灯。大帧弱网与权限冷恢复还在收口，不作发布结论。
 - iOS 正常 Preview 扫码、项目选择、新建、真实回复和设置展示已通过；剩余交互待后续窗口。安卓 Claude 冷模型名称/图标通过。两原生 Codex 版本匿名权限冷恢复问题已实际复现，修复与真实验证进行中。
 - 仅代码、私有 QA 与隔离 Preview；未提交、改版本、准备商店分发包或发布 Production。
+
+
+### 2026-09-30 — Bridge 3.1.5 release preparation
+
+Owner explicitly authorized publishing the Bridge. Isolated `codex/bridge-3-1-5` contains the five-backend attachment runtime/shared contracts plus the existing merged CLI fixes; uncommitted Mobile changes remain in the original checkout. Publish guard, CLI manifest and lockfile advance to 3.1.5. Pre-release review preserves original wire text for legacy clients with additive attachment display metadata. No cloud deployment or App release is authorized by this workflow. See [release record](../3.1/bridge-3.1.5-release.md) for final gates/public verification.

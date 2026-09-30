@@ -326,3 +326,18 @@ it('restores a pending extension input after older history without persisting or
   children[0].emit('event', { type: 'agent_settled' });
   expect((await request('chat.history', { sessionKey: key })).hasActiveRun).toBe(false);
 });
+
+it('projects assistant-delivered files from the Pi project and serves authenticated session-scoped chunks', async () => {
+  setup(); const key = (await request('sessions.list'))[0].key;
+  writeFileSync(join(root!, 'report.txt'), 'Pi attachment');
+  await request('chat.history', { sessionKey: key });
+  children[0].entries = [{ id: 'reply', parentId: null, message: { role: 'assistant', content: '[Report](report.txt)' } }]; children[0].leafId = 'reply';
+  const history = await request('chat.history', { sessionKey: key });
+  const artifactId = history.messages[0].attachments[0].artifactId;
+  expect(await request('health')).toMatchObject({ artifacts: true });
+  const file = await request('clawket.artifacts.open', { sessionKey: key, artifactId });
+  expect(Buffer.from((await request('clawket.artifacts.read', { sessionKey: key, id: file.id, offset: 0 })).data, 'base64').toString()).toBe('Pi attachment');
+  await expect(request('clawket.artifacts.read', { sessionKey: 'other', id: file.id, offset: 0 })).rejects.toThrow();
+  await request('sessions.reset', { sessionKey: key });
+  await expect(request('clawket.artifacts.read', { sessionKey: key, id: file.id, offset: 0 })).rejects.toThrow();
+});
