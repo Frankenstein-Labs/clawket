@@ -224,7 +224,7 @@ export class PiService extends EventEmitter {
       }
       case 'clawket.artifacts.open': return this.artifacts.resolve(p.sessionKey, p.artifactId, cursor => this.history(String(p.sessionKey), cursor));
       case 'clawket.artifacts.read': return this.artifacts.read(p.sessionKey, p.id, p.offset);
-      case 'chat.history': return this.history(p.sessionKey, p.cursor);
+      case 'chat.history': return this.history(p.sessionKey, p.cursor, p.artifacts === true);
       case 'chat.send': return this.prompt(this.record(p.sessionKey), p as unknown as PromptInput);
       case 'chat.abort': {
         const record = this.record(p.sessionKey), live = this.processes.get(record.id);
@@ -270,7 +270,7 @@ export class PiService extends EventEmitter {
       default: throw new Error('Unsupported Pi operation');
     }
   }
-  private async history(key: unknown, cursor: unknown): Promise<SessionHistory> {
+  private async history(key: unknown, cursor: unknown, artifactProjection = true): Promise<SessionHistory> {
     const artifactEpoch = this.artifacts.epoch;
     let entries: any[], live: Running | undefined, state: any;
     const native = this.native.get(String(key));
@@ -313,7 +313,16 @@ export class PiService extends EventEmitter {
     let start = end, bytes = 0;
     while (start > Math.max(0, end - 40)) { const size = Buffer.byteLength(JSON.stringify(messages[start - 1])); if (bytes + size > 7 * 1024 * 1024) break; bytes += size; start--; }
     if (start === end && end > 0) throw new Error('This message exceeds the history transfer limit');
-    return { key: String(key), messages: this.artifacts.project(String(key), messages.slice(start, end), [this.project], artifactEpoch, cursor), nextCursor: start ? String(start) : undefined, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, sessionAbortable: true } : undefined, sessionId: state?.sessionId, thinkingLevel: state?.thinkingLevel };
+    const page = messages.slice(start, end);
+    const projected = this.artifacts.project(String(key), page, [this.project], artifactEpoch, cursor);
+    // Old Pi clients already render native inline assistant images. Keep those
+    // bytes until the reader explicitly opts into opaque artifact references.
+    if (!artifactProjection) for (let i = 0; i < page.length; i++) {
+      if (page[i].role !== 'assistant' || !page[i].attachments?.some(a => a.content)) continue;
+      projected[i] = { ...projected[i], attachments: [...page[i].attachments!,
+        ...(projected[i].attachments ?? []).filter(a => a.artifactId?.startsWith('file_'))] };
+    }
+    return { key: String(key), messages: projected, nextCursor: start ? String(start) : undefined, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, sessionAbortable: true } : undefined, sessionId: state?.sessionId, thinkingLevel: state?.thinkingLevel };
   }
   private prompt(record: RecordEntry, input: PromptInput): Promise<{ runId: string }> {
     return this.serial(record, async live => {

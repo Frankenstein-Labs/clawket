@@ -253,3 +253,5 @@ Negotiated `chat.promptStatus` is a read-only lookup of a bounded, durable input
 ## SDK and Hermes delivered attachments
 
 `src/delivered-artifacts.ts` projects explicit assistant file references inside the session's verified project (Hermes: configured local cwd/outputs). Exclude fenced examples, user/tool arguments, private paths and filesystem links. Only a successful native Codex image-generation result or an assistant image block may supply inline image bytes; ordinary tool screenshots are not delivery. Negotiate artifact operations separately from image-input support, retain opaque session-scoped IDs, bounded chunk reads and mutation checks, and retire handles on reset/delete/stop. Keep cloud storage unchanged; RAM buffers and native-page recovery metadata are bounded. Keep legacy wire text intact; only the additive `artifactDisplayText` projection strips links actually converted to attachments. See `../../docs/3.1/backend-attachments.md`.
+
+Pi history retains legacy inline assistant image bytes unless the reader explicitly sends `artifacts: true`; new-client handle projection must not remove an older client's existing image display.
