@@ -1173,6 +1173,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-NPM-315-0930 | Bridge 3.1.5 npm 发布两步验证 | 在 npm 官方浏览器流程完成验证，不在聊天中发送密码或验证码。 | npm 发布成功，公开 latest=3.1.5，公开包与固定候选逐字节一致。 | 已完成：npm 两步验证成功；公开 latest=3.1.5，下载包逐字节及 SHA-1/SHA-512 校验通过。 |
 | HT-NPM-314-0929 | Bridge 3.1.4 npm 发布安全密钥验证 | 在已打开的 npm 官方页面完成安全密钥/Touch ID，无需提供密钥。 | npm发布成功，公开latest及下载包SHA与固定候选一致。 | 已完成：五Relay已发布并核验；npm latest=3.1.4，公开下载包三项哈希与固定候选一致。 |
 | HT-COMPOSER-PASTE-0928 | 输入框系统菜单与语音共存验收 | 在后续开发包分别测试 iOS/Android：空白框轻点进入编辑，再长按粘贴；已有草稿双击选词、全选、拖选择手柄、替换粘贴；展开/收起后重复。 | 文本/图片粘贴沿用原入口；不误开麦克风、不因向下拖选择手柄收键盘；空白未聚焦长按语音和麦克风点击/按住松手/上滑取消正常。 | 代码与回归用例已更新；原生菜单和语音触摸待设备验证。 |
 | HT-CODEX-DESKTOP-0929 | 原始 Desktop 恢复报错验收 | 在候选 Bridge 下，用 Codex Desktop 打开原先出现 null.settings 的会话，检查显示并继续一条无副作用消息。 | 不再出现恢复对话失败，原 ID/历史保留，消息成功；不能用 IPC 探针代替实际 GUI 验收。 | 完整设置契约、两个安装版本的真实 IPC 与同 ID 冷恢复已通过；本轮 Desktop GUI 自动化访问不可用，未绕过限制，仍待负责人窗口验收。 |
@@ -2650,3 +2651,8 @@ Android screenshot/native-layout checks now confirm an empty Composer collapses 
 ### 2026-09-30 — Bridge 3.1.5 release preparation
 
 Owner explicitly authorized publishing the Bridge. Isolated `codex/bridge-3-1-5` contains the five-backend attachment runtime/shared contracts plus the existing merged CLI fixes; uncommitted Mobile changes remain in the original checkout. Publish guard, CLI manifest and lockfile advance to 3.1.5. Pre-release review preserves original wire text for legacy clients with additive attachment display metadata. No cloud deployment or App release is authorized by this workflow. See [release record](../3.1/bridge-3.1.5-release.md) for final gates/public verification.
+
+
+### 2026-09-30 — Bridge 3.1.5 published
+
+Owner-authorized npm publication completed; public latest is 3.1.5. Downloaded tarball is byte-identical to the tested candidate (SHA-256 `24c5b832c2228ab58ea49eefa5b79fa0cd75af9a410fe36be70b5b8473a13716`). Candidate source `de5fc93c` passed all four CI jobs, serial v1 replay and the production-snapshot release matrix. Public registry installation/CLI smoke verified. Release source and evidence: [PR #49](https://github.com/p697/clawket/pull/49). No App publication, cloud deployment or existing user-service upgrade/restart.
