@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-01 聊天界面 A+ 第 4 步「动效与手感」第三批之二：发送时壁纸渐变挪一步（负责人：剩下 4 条动效全部落地；出自已定稿的动效原型）。
+  - 改法：图案壁纸的渐变改为原生绘制（`experimental_backgroundImage`），画在一块三倍屏幕大的图层上，SVG 只画涂鸦。每发一条消息，图层用 `Motion.wallpaper`（600ms，原型的曲线）挪到四个位置中的下一个；色标循环排列，任何位置看到的都是一段自然的渐变。顶部和输入栏的渐隐层取渐变在屏幕上下边缘的颜色（`chatWallpaperDriftScrims`），按同一曲线换色。减少动态效果时壁纸不动；照片和纯色不受影响。
+  - 真机验证：SM-A566B QA 包，逐帧采样屏幕左边缘的纯壁纸。浅色发送后约 500ms 内从 (224,233,249) 变到 (239,232,249)；深色从 (15,24,47) 变到 (17,20,42)。顶部渐隐层和挪动后的渐变之间没有色带。
+  - 单测逐文件串行：chat-wallpaper 4、ChatBackgroundLayer 12、ChatAppearanceScreen 10、SupportScreens 12、ConversationEntry 28、ThreadScreen 68、ThreadView 142、theme 7、resolver 26、cubic-bezier 1。tsc、ui-style 通过。
+
 - 2026-10-01 聊天界面 A+ 第 4 步「动效与手感」第三批之四：弹层和页面切换（负责人：剩下 4 条动效全部落地）。在 SM-A566B QA 包上录屏逐帧测量，追踪弹层上边缘，并用 `dumpsys gfxinfo` 和 `atrace` 看慢帧的耗时分布。
   - 已经顺的不动：模型面板、「+」面板弹出约 300ms，跟手每帧，最多开头晚 1 帧；关闭同样顺。从对话返回首页的交叉淡出约 120fps。
   - 改了：打开对话。点击后 JS 挂载约 140ms，原生快速交叉淡入，然后是 250–340ms 的空对话页（等缓存消息和定时卡片一起读出，即 300ms 首帧等待，再由 FlashList 定位到最新一行），之后消息在一帧内突然出现。现在改为 `Motion.duration.normal` 淡入，约 120ms 到全不透明；减少动态效果时直接显示。首帧等待和定位逻辑不变。
