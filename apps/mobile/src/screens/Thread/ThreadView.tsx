@@ -340,6 +340,8 @@ export type ThreadViewProps = Readonly<{
   pendingQuestions?: React.ReactNode;
   readOnlyFooter?: React.ReactNode;
   isRunning: boolean;
+  /** A local send is leaving the device; the composer already shows Stop (A+ motion: send turns into stop). */
+  sendInFlight?: boolean;
   /** Identity of the live reply row the controller will add for the current run. */
   pendingReplyRenderKey?: string | null;
   canSend: boolean;
@@ -477,6 +479,7 @@ export function ThreadView({
   pendingQuestions,
   readOnlyFooter,
   isRunning,
+  sendInFlight = false,
   pendingReplyRenderKey,
   canSend,
   loadingMoreHistory = false,
@@ -683,7 +686,7 @@ export function ThreadView({
   // Whether the previous render showed this session as an authoritative empty
   // conversation: its first message then enters like any later one.
   const emptyConversationRef = useRef(false);
-  const { entranceIds, claimEntrance } = useThreadMessageEntrance(timelineMessages, sessionKey, emptyConversationRef.current);
+  const { claimEntrance, isEntrancePending } = useThreadMessageEntrance(timelineMessages, sessionKey, emptyConversationRef.current);
   emptyConversationRef.current = state.kind === 'empty';
   const runEntranceKeys = useMemo(() => runCards.map((run) => `run:${run.kind}:${run.id}`), [runCards]);
   const runEntrance = useThreadRunEntrance(runEntranceKeys, sessionKey, state.kind === 'ready');
@@ -1014,7 +1017,9 @@ export function ThreadView({
   // one row does not hand every visible cell a new renderer.
   const hasMessageActions = Boolean(messageActions);
   const queuedTapOpensActions = Boolean(messageActions && queuedMessageActions);
-  const { entranceKeys: runEntranceKeysArmed, claimEntrance: claimRunEntrance } = runEntrance;
+  // Rows ask whether their entrance is still to play without claiming it, so
+  // a row that will move starts from its first frame and a played row never hides.
+  const { claimEntrance: claimRunEntrance, isEntrancePending: isRunEntrancePending } = runEntrance;
   const renderMessage = useCallback(
     ({ item, target }: ListRenderItemInfo<ThreadTimelineRow>) => {
       if (item.type === 'tools') {
@@ -1038,7 +1043,7 @@ export function ThreadView({
             <MessageEntrance
               testID={`thread-entrance-${item.key}`}
               animationKey={`run:cron:${oldest.id}`}
-              animate={target === 'Cell' && runEntranceKeysArmed.has(`run:cron:${oldest.id}`)}
+              animate={target === 'Cell' && isRunEntrancePending(`run:cron:${oldest.id}`)}
               claimEntrance={claimRunEntrance}
               motion="reply"
             >
@@ -1065,7 +1070,7 @@ export function ThreadView({
             run={item.run}
             gapAbove={item.gapAbove}
             copy={copy}
-            animateEntrance={target === 'Cell' && runEntranceKeysArmed.has(item.key)}
+            animateEntrance={target === 'Cell' && isRunEntrancePending(item.key)}
             claimEntrance={claimRunEntrance}
             onOpenSession={onOpenRunSession}
             onOpenCronRun={onOpenCronRun}
@@ -1083,7 +1088,7 @@ export function ThreadView({
           capabilities={capabilities}
           copy={copy}
           status={messageStatuses.get(item.message.id) ?? null}
-          animateEntrance={target === 'Cell' && entranceIds.has(item.message.renderKey ?? item.message.id)}
+          animateEntrance={target === 'Cell' && isEntrancePending(item.message.renderKey ?? item.message.id)}
           claimEntrance={claimEntrance}
           onOpenAttachments={onOpenAttachments}
           onLongPress={hasMessageActions ? handleMessageLongPress : undefined}
@@ -1096,8 +1101,8 @@ export function ThreadView({
     [
       capabilities,
       copy,
-      entranceIds,
       claimEntrance,
+      isEntrancePending,
       favoriteMessageIds,
       handleMessageLongPress,
       hasMessageActions,
@@ -1110,8 +1115,8 @@ export function ThreadView({
       onOpenRunSession,
       onRerunCron,
       onResolveApproval,
-      runEntranceKeysArmed,
       claimRunEntrance,
+      isRunEntrancePending,
     ],
   );
   const timelineContentStyle = useMemo(() => [
@@ -1441,7 +1446,8 @@ export function ThreadView({
             }}
             onChangeText={onChangeInput}
             onSend={() => { onSend(); setComposerExpanded(false); }}
-            onStop={canCancel ? onCancel : undefined}
+            // While the message is still leaving there is no run to stop yet; Stop shows, dimmed.
+            onStop={canCancel && (isRunning || !sendInFlight) ? onCancel : undefined}
             onAddPress={canOpenAddMenu ? onOpenAddMenu : undefined}
             onVoicePress={canUseVoice ? onVoice : undefined}
             onVoiceStart={onVoiceStart}
@@ -1457,7 +1463,7 @@ export function ThreadView({
             onPasteFailed={capabilities.attachments ? onPasteFailed : undefined}
             canSend={!offline && state.kind !== 'reconnecting' && canSend}
             hasAttachments={pendingAttachments.length > 0}
-            isRunning={isRunning}
+            isRunning={isRunning || sendInFlight}
             expanded={composerExpanded}
             onExpandedChange={setComposerExpanded}
             appearance={wallpaperActive ? 'glass' : 'surface'}
@@ -2356,7 +2362,7 @@ function ThinkingPill({ testID }: Readonly<{ testID: string }>): React.JSX.Eleme
   const time = elapsed !== undefined && elapsed >= 1000 ? formatActivityDuration(elapsed, t) : undefined;
   return (
     <View testID={`${testID}-row`} accessibilityLiveRegion="polite" accessibilityState={{ busy: true }}>
-      <ServicePill testID={testID} busy label={live.label} trailing={time}
+      <ServicePill testID={testID} busy label={live.label} stepKey={live.label} trailing={time}
         accessibilityLabel={[live.label, time].filter(Boolean).join(', ')} />
     </View>
   );

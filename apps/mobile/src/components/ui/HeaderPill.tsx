@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react-native';
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleProp, StyleSheet, Text, type ViewStyle, View } from 'react-native';
-import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, FadeOut, withTiming, type EntryExitAnimationFunction } from 'react-native-reanimated';
 import { useAppTheme } from '../../theme';
 import { createChatGlassStyle, resolveChatPresenceColors } from '../../features/chat-appearance/resolver';
 import { useConversationTheme } from '../chat/ChatPresentation';
@@ -17,6 +17,7 @@ import {
 import { AgentAvatar, type AgentAttentionTone, type AgentAvatarStatus } from './AgentAvatar';
 import type { PlatformKind } from './PlatformMark';
 import { PresenceRing, type PresenceRingTone } from './PresenceRing';
+import { SwapEntrance } from './SwapEntrance';
 
 /** The header avatar's diameter (`AgentAvatar` header variant). */
 const HEADER_AVATAR_SIZE = ControlSize.pill - Space.md;
@@ -79,20 +80,13 @@ export function HeaderPill({
   const presenceColors = useMemo(() => resolveChatPresenceColors(conversation), [conversation]);
   const subtitleColor = presence === 'working' || (!presence && online) ? presenceColors.working
     : presence === 'attention' ? presenceColors.attentionText : theme.colors.inkSecondary;
-  const subtitleOpacity = useSharedValue(1);
+  // The sentence shown when the header appears stays still; a new one enters.
+  const [subtitleReady, setSubtitleReady] = useState(false);
+  useEffect(() => { setSubtitleReady(true); }, []);
   const chrome = useMemo(
     () => (material === 'glass' ? createChatGlassStyle(theme) : { backgroundColor: theme.colors.surface }),
     [material, theme],
   );
-  const subtitleAnimatedStyle = useAnimatedStyle(() => ({ opacity: subtitleOpacity.value }));
-
-  useEffect(() => {
-    cancelAnimation(subtitleOpacity);
-    subtitleOpacity.value = 0;
-    subtitleOpacity.value = withTiming(1, { duration: Motion.duration.fast });
-    return () => cancelAnimation(subtitleOpacity);
-  }, [subtitle, subtitleOpacity]);
-
   const content = (
     <>
       <View style={styles.avatarSlot}>
@@ -108,27 +102,33 @@ export function HeaderPill({
           attentionTone={attentionTone}
         />}
         {presence ? (
-          <PresenceRing
-            testID={testID ? `${testID}-${presence}` : undefined}
-            tone={presence}
-            avatarSize={HEADER_AVATAR_SIZE}
-            color={presence === 'working' ? presenceColors.working : presenceColors.attentionRing}
-          />
+          <Animated.View key={presence} style={styles.ringLayer} pointerEvents="none"
+            entering={FadeIn.duration(Motion.status.duration)} exiting={FadeOut.duration(Motion.status.duration)}>
+            <PresenceRing
+              testID={testID ? `${testID}-${presence}` : undefined}
+              tone={presence}
+              avatarSize={HEADER_AVATAR_SIZE}
+              color={presence === 'working' ? presenceColors.working : presenceColors.attentionRing}
+            />
+          </Animated.View>
         ) : null}
       </View>
       <View style={styles.labels}>
         <Text style={[styles.name, { color: theme.colors.ink }]} numberOfLines={1} maxFontSizeMultiplier={1.2}>
           {name}
         </Text>
-        {subtitle.trim() ? <Animated.Text
-          testID={testID ? `${testID}-subtitle` : undefined}
-          style={[styles.subtitle, { color: subtitleColor }, subtitleAnimatedStyle]}
-          numberOfLines={1}
-          maxFontSizeMultiplier={1}
-          ellipsizeMode={subtitleEllipsizeMode}
-        >
-          {subtitle}
-        </Animated.Text> : null}
+        {subtitle.trim() ? <SwapEntrance swapKey={subtitle} ready={subtitleReady} entering={statusRiseIn}
+          reducedEntering={statusFadeIn} testID={testID ? `${testID}-subtitle-motion` : undefined}>
+          <Text
+            testID={testID ? `${testID}-subtitle` : undefined}
+            style={[styles.subtitle, { color: subtitleColor }]}
+            numberOfLines={1}
+            maxFontSizeMultiplier={1}
+            ellipsizeMode={subtitleEllipsizeMode}
+          >
+            {subtitle}
+          </Text>
+        </SwapEntrance> : null}
       </View>
     </>
   );
@@ -152,6 +152,26 @@ export function HeaderPill({
   );
 }
 
+const STATUS_DURATION = Motion.status.duration;
+const STATUS_RISE = Motion.status.rise;
+/**
+ * A new status sentence fades in as it rises a few points (A+ motion, 200 ms).
+ * It enters as its own view, so its first frame is already transparent: a
+ * shared value reset after the text changed showed the new words for a few
+ * frames before they faded in (device recording 2026-10-01).
+ */
+const statusRiseIn: EntryExitAnimationFunction = () => {
+  'worklet';
+  return {
+    initialValues: { opacity: 0, transform: [{ translateY: STATUS_RISE }] },
+    animations: {
+      opacity: withTiming(1, { duration: STATUS_DURATION, easing: Easing.out(Easing.quad) }),
+      transform: [{ translateY: withTiming(0, { duration: STATUS_DURATION, easing: Easing.out(Easing.quad) }) }],
+    },
+  };
+};
+const statusFadeIn = FadeIn.duration(STATUS_DURATION);
+
 const styles = StyleSheet.create({
   pill: {
     height: ControlSize.pill,
@@ -168,6 +188,10 @@ const styles = StyleSheet.create({
     height: HEADER_AVATAR_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // The ring centres itself on its parent, so its fade layer covers the avatar box.
+  ringLayer: {
+    ...StyleSheet.absoluteFill,
   },
   labels: {
     flexShrink: 1,
