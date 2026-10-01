@@ -77,6 +77,7 @@ jest.mock('react-native', () => {
   return {
     Platform: { OS: 'android', select: (options: Record<string, unknown>) => options.android ?? options.default },
     Keyboard: { dismiss: jest.fn() },
+    AppState: { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) },
     Pressable: host('Pressable'),
     ScrollView: host('ScrollView'),
     useWindowDimensions: () => ({ width: 393, height: 852, fontScale: 1 }),
@@ -1032,4 +1033,40 @@ describe('project and archive scope chips', () => {
     expect(within(view.getByTestId('session-panel-chips')).getByTestId('session-panel-archived')).toBeTruthy();
     expect(view.queryByTestId('session-panel-scope')).toBeNull();
   });
+});
+
+
+it('shows the same working arc on ordinary Codex tiles while retaining unread and accessibility status', () => {
+  const direct = rows.find(row => row.kind === 'direct')!;
+  const working = { ...direct, hasActiveRun: true, unread: true, attention: null, kind: 'direct' as const };
+  const view = render(<SessionPanelView {...props({ rows: [working], currentSessionKey: 'other', platform: 'codex' })} />);
+  expect(view.getByTestId(`session-panel-row-${working.id}-running`, { includeHiddenElements: true })).toBeTruthy();
+  expect(view.getByTestId(`session-panel-row-${working.id}-unread`)).toBeTruthy();
+  expect(view.getByTestId(`session-panel-row-${working.id}`).props.accessibilityLabel).toContain('Working');
+  view.rerender(<SessionPanelView {...props({ rows: [working], currentSessionKey: 'other', activityLive: false })} />);
+  expect(view.queryByTestId(`session-panel-row-${working.id}-running`, { includeHiddenElements: true })).toBeNull();
+});
+it('clears a live roster arc when its connection is no longer the active connection', () => {
+  const activeAdapter = { state: 'ready', connection: { id: 'connection' }, capabilities };
+  const snapshot = { initialized: true, activeConnectionId: 'connection', activeAdapter, activeState: 'ready', error: null };
+  jest.mocked(useConnections).mockReturnValue(snapshot as unknown as ReturnType<typeof useConnections>);
+  jest.mocked(useRoster).mockReturnValue([source]);
+  const panelProps = { connectionId: 'connection', visible: true, currentAgentId: 'main', currentSessionKey: 'agent:main:main', onClose: jest.fn(), onSelectSession: jest.fn() };
+  const view = render(<SessionPanel {...panelProps} />);
+  const id = `session-panel-row-${rows.find(row => row.hasActiveRun)!.id}-running`;
+  expect(view.getByTestId(id, { includeHiddenElements: true })).toBeTruthy();
+  jest.mocked(useConnections).mockReturnValue({ ...snapshot, activeConnectionId: 'other', activeAdapter: { ...activeAdapter, connection: { id: 'other' } } } as unknown as ReturnType<typeof useConnections>);
+  view.rerender(<SessionPanel {...panelProps} />);
+  expect(view.queryByTestId(id, { includeHiddenElements: true })).toBeNull();
+});
+it('shows approval/input/ambiguous waiting distinctly from running', () => {
+  const original = rows.find(row => row.kind === 'direct')!;
+  for (const [attention, text] of [['approval', 'Waiting for your approval'], ['input', 'Agent needs your input'], [null, 'Needs attention']] as const) {
+    const waiting = { ...original, hasActiveRun: true, activityState: 'waiting' as const, attention };
+    const view = render(<SessionPanelView {...props({ rows: [waiting] })} />);
+    expect(view.queryByTestId(`session-panel-row-${waiting.id}-running`, { includeHiddenElements: true })).toBeNull();
+    expect(view.getByText(text)).toBeTruthy();
+    expect(view.getByTestId(`session-panel-row-${waiting.id}`).props.accessibilityLabel).toContain(text);
+    view.unmount();
+  }
 });
