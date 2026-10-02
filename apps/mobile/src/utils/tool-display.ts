@@ -43,16 +43,33 @@ export function toolCategory(name: string): ToolCategory {
  * name the command itself; the detail sheet keeps the raw input.
  */
 export function unwrapShellCommand(command: string): string {
-  const match = /^(?:\/usr)?(?:\/bin\/)?(?:ba|z)?sh\s+-l?c\s+(["'])([\s\S]*)\1\s*$/.exec(command.trim());
+  const match = /^(?:\/usr)?(?:\/bin\/)?(?:ba|z)?sh\s+-l?c\s+(?:(["'])([\s\S]*)\1|([^\s"']+))\s*$/.exec(command.trim());
   if (!match) return command;
-  const [, quote, inner] = match;
+  const [, quote, inner, bare] = match;
+  // A one-word command needs no quotes: `/bin/zsh -lc pwd`.
+  if (bare !== undefined) return bare;
   return quote === '"' ? inner!.replace(/\\(["\\$`])/g, '$1') : inner!.replace(/'\\''/g, "'");
+}
+
+/** Longest plain-text preview a step shows as its target. */
+const RAW_PREVIEW_LIMIT = 160;
+
+/**
+ * Hermes previews a call's input as plain text (the command, the path)
+ * rather than JSON: that line is the step's target.
+ */
+function rawPreview(name: string, raw: string): string | undefined {
+  let line = raw.replace(/\s+/g, ' ').trim();
+  if (!line || /^[[{]/.test(line)) return undefined;
+  if (toolCategory(name) === 'command') line = unwrapShellCommand(line);
+  line = line.replace(/^\/Users\/[^/]+\//, '~/').replace(/^\/home\/[^/]+\//, '~/');
+  return line.length > RAW_PREVIEW_LIMIT ? `${line.slice(0, RAW_PREVIEW_LIMIT - 1)}…` : line;
 }
 
 export function resolveToolDetail(name: string, args?: unknown): string | undefined {
   if (typeof args === 'string') {
     const raw = args;
-    try { args = JSON.parse(raw); } catch { return undefined; }
+    try { args = JSON.parse(raw); } catch { return rawPreview(name, raw); }
   }
   if (!args || typeof args !== 'object') return undefined;
   const a = args as Record<string, unknown>;
@@ -95,6 +112,34 @@ export function resolveToolDetail(name: string, args?: unknown): string | undefi
   return detail
     .replace(/^\/Users\/[^/]+\//, '~/')
     .replace(/^\/home\/[^/]+\//, '~/');
+}
+
+/** Steps that ask the user something and wait for the answer (Claude Code AskUserQuestion). */
+export function isQuestionTool(name: string): boolean {
+  return name.replace(/^mcp__.+?__/, '').toLowerCase() === 'askuserquestion';
+}
+
+/**
+ * What a question step asked and what the user answered: the first question
+ * of its input and the matching `"question"="answer"` pair of its result.
+ * Undefined for any other tool.
+ */
+export function resolveQuestionExchange(name: string, args?: unknown, result?: string): { question?: string; answer?: string } | undefined {
+  if (!isQuestionTool(name)) return undefined;
+  if (typeof args === 'string') {
+    try { args = JSON.parse(args); } catch { args = undefined; }
+  }
+  const questions = args && typeof args === 'object' ? (args as { questions?: unknown }).questions : undefined;
+  const first = Array.isArray(questions) ? questions[0] as { question?: unknown } | undefined : undefined;
+  const question = typeof first?.question === 'string' ? first.question.replace(/\s+/g, ' ').trim() || undefined : undefined;
+  let answer: string | undefined;
+  for (const match of (result ?? '').matchAll(/"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"/g)) {
+    if (!question || match[1]!.replace(/\s+/g, ' ').trim() === question) {
+      answer = match[2]!.trim() || undefined;
+      break;
+    }
+  }
+  return { question, answer };
 }
 
 /** Input keys an Agent fills with what one call is for, in order of preference. */
@@ -141,6 +186,10 @@ export function formatToolDisplayName(name: string, t?: Translate): string {
   if (lower === 'web_fetch' || lower === 'webfetch') return t('Web Fetch', { ns: 'chat' });
   if (lower === 'browser') return t('Browse', { ns: 'chat' });
   if (lower === 'message') return t('Message', { ns: 'chat' });
+  // Claude Code and Codex steps that talk to the user or keep their plan.
+  if (lower === 'askuserquestion') return t('Question for you', { ns: 'chat' });
+  if (lower === 'todowrite' || lower === 'update_plan') return t('Plan', { ns: 'chat' });
+  if (lower === 'exitplanmode') return t('Plan for approval', { ns: 'chat' });
   return localName.replace(/_+/g, ' ').trim();
 }
 
@@ -157,6 +206,9 @@ export function formatToolActivity(
   if (lower === 'web_fetch') return t('Web fetching', { ns: 'chat' });
   if (lower === 'browser') return t('Browsing', { ns: 'chat' });
   if (lower === 'message') return t('Messaging', { ns: 'chat' });
+  if (lower === 'askuserquestion') return t('Asking you a question', { ns: 'chat' });
+  if (lower === 'todowrite' || lower === 'update_plan') return t('Updating the plan', { ns: 'chat' });
+  if (lower === 'exitplanmode') return t('Presenting a plan', { ns: 'chat' });
   // Backends name the same step differently (Hermes runs commands as `terminal`).
   switch (toolCategory(name)) {
     case 'command': return t('Running command', { ns: 'chat' });

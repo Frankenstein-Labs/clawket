@@ -7,6 +7,7 @@ import {
   resolveToolTitle,
   stripToolStatusPrefix,
   unwrapShellCommand,
+  resolveQuestionExchange,
   unwrapToolCall,
 } from './tool-display';
 
@@ -108,8 +109,10 @@ describe('formatToolOneLiner', () => {
     expect(formatToolOneLiner('exec', null)).toBe('exec');
   });
 
-  it('returns name only when args is not an object', () => {
-    expect(formatToolOneLiner('exec', 'string')).toBe('exec');
+  it('reads a plain-text input as the target and ignores other shapes', () => {
+    // Hermes previews a call's input as plain text rather than JSON.
+    expect(formatToolOneLiner('terminal', 'ls -la')).toBe('terminal ls -la');
+    expect(formatToolOneLiner('exec', '{"truncated": ')).toBe('exec');
     expect(formatToolOneLiner('exec', 42)).toBe('exec');
   });
 
@@ -195,6 +198,9 @@ describe('unwrapShellCommand', () => {
       .toBe('git ls-files -z | python3 -c "print(1)"');
     expect(unwrapShellCommand("bash -lc 'echo it'\\''s done'")).toBe("echo it's done");
     expect(unwrapShellCommand('/usr/bin/sh -c "ls -la"')).toBe('ls -la');
+    // Codex leaves a one-word command unquoted.
+    expect(unwrapShellCommand('/bin/zsh -lc pwd')).toBe('pwd');
+    expect(unwrapShellCommand('/bin/zsh -lc ls -la')).toBe('/bin/zsh -lc ls -la');
     expect(resolveToolDetail('exec', { command: '/bin/zsh -lc "git status"' })).toBe('git status');
     expect(resolveToolDetail('terminal', { command: '/bin/zsh -lc "npm test"' })).toBe('npm test');
   });
@@ -264,5 +270,19 @@ describe('stripToolStatusPrefix', () => {
     expect(stripToolStatusPrefix('Command ~/foo abgeschlossen', deT)).toBe('Command ~/foo');
     expect(stripToolStatusPrefix('Command ls fehlgeschlagen', deT)).toBe('Command ls');
     expect(stripToolStatusPrefix('Command ls wird ausgeführt', deT)).toBe('Command ls');
+  });
+});
+
+describe('resolveQuestionExchange', () => {
+  const args = JSON.stringify({ questions: [{ question: '你更喜欢红色还是蓝色？', header: '颜色偏好', options: [{ label: '红色' }, { label: '蓝色' }] }] });
+  it('reads what a Claude Code question asked and what the user answered', () => {
+    const result = 'Your questions have been answered: "你更喜欢红色还是蓝色？"="蓝色". You can now continue with these answers in mind.';
+    expect(resolveQuestionExchange('AskUserQuestion', args, result)).toEqual({ question: '你更喜欢红色还是蓝色？', answer: '蓝色' });
+    expect(resolveQuestionExchange('AskUserQuestion', args)).toEqual({ question: '你更喜欢红色还是蓝色？', answer: undefined });
+  });
+
+  it('ignores other tools and malformed input', () => {
+    expect(resolveQuestionExchange('Bash', args, '"a"="b"')).toBeUndefined();
+    expect(resolveQuestionExchange('AskUserQuestion', '{broken', '')).toEqual({ question: undefined, answer: undefined });
   });
 });

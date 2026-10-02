@@ -1,5 +1,5 @@
 import { UiMessage } from '../types/chat';
-import { preserveHydratedMessageKeys, preserveMessagePresentation, preserveOptimisticAssistantMessage, prependOlderCachedMessages, retireAliasedTools } from './historyMergePolicy';
+import { preserveApprovalRows, preserveHydratedMessageKeys, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, prependOlderCachedMessages, retireAliasedTools } from './historyMergePolicy';
 
 describe('preserveHydratedMessageKeys', () => {
   const cached: UiMessage = { id: 'cached-row', historyMessageId: 'server-row', renderKey: 'stable-row', role: 'assistant', text: 'Outdated text', timestampMs: 1000 };
@@ -544,4 +544,74 @@ it('keeps a local extension command before its newer canonical result notices', 
     expect(preserveOptimisticAssistantMessage([before, command], [before, unknown]).map(row => row.id))
       .toEqual(['ast-before', 'notice', 'usr_123']);
   }
+});
+
+describe('preserveApprovalRows', () => {
+  const card = (id: string, status: 'pending' | 'allowed' = 'allowed'): UiMessage => ({
+    id, role: 'system', text: '', timestampMs: 9_999_999,
+    approval: { id, kind: 'exec', command: 'curl --head https://example.com', status, expiresAtMs: null },
+  });
+  const ask: UiMessage = { id: 'ask', role: 'user', text: 'Fetch it' };
+  const said: UiMessage = { id: 'live-said', renderKey: 'said', role: 'assistant', text: 'I will use curl.' };
+  const call: UiMessage = { id: 'toolcall_1', role: 'tool', text: '', toolName: 'exec', toolStatus: 'running' };
+
+  it('keeps an answered card beside the row it followed when history drops it', () => {
+    const approval = card('approval_1');
+    // Newest first: the card arrived after the Agent's words.
+    const previous = [approval, call, said, ask];
+    const next: UiMessage[] = [
+      { id: 'answer', role: 'assistant', text: 'HTTP/2 200' },
+      { ...call, id: 'toolresult_1', toolStatus: 'success' },
+      { id: 'history-said', renderKey: 'said', role: 'assistant', text: 'I will use curl.' },
+      ask,
+    ];
+    expect(preserveApprovalRows(previous, next).map(message => message.id))
+      .toEqual(['answer', 'toolresult_1', 'approval_1', 'history-said', 'ask']);
+  });
+
+  it('returns the same list when nothing is missing and never keeps pairing requests', () => {
+    const next = [card('approval_2'), ask];
+    expect(preserveApprovalRows([card('approval_2'), ask], next)).toBe(next);
+    const pairing: UiMessage = {
+      id: 'approval_pair_device_1', role: 'system', text: '',
+      approval: { id: '1', kind: 'pair', target: 'device', displayName: null, platform: null, receivedAtMs: 1, status: 'pending' },
+    };
+    const plain = [ask];
+    expect(preserveApprovalRows([pairing, ask], plain)).toBe(plain);
+  });
+
+  it('puts a card with no surviving neighbour first rather than dropping it', () => {
+    expect(preserveApprovalRows([card('approval_3', 'pending')], [ask]).map(message => message.id)).toEqual(['approval_3', 'ask']);
+  });
+});
+
+describe('preserveToolTiming', () => {
+  // Pi's live rows are `toolcall_<id>`; its history returns `toolresult_<id>` with only the record's clock.
+  const live: UiMessage = { id: 'toolcall_call_1', role: 'tool', text: '', toolName: 'bash', toolStatus: 'success', toolStartedAt: 10_000, toolFinishedAt: 35_000 };
+  const reloaded: UiMessage = { id: 'toolresult_call_1', role: 'tool', text: '', toolName: 'bash', toolStatus: 'success', toolFinishedAt: 7_000 };
+  const reply: UiMessage = { id: 'reply', role: 'assistant', text: 'done' };
+
+  it('keeps the times the phone measured when history has none of its own', () => {
+    expect(preserveToolTiming([live], [reply, reloaded])).toEqual([
+      reply,
+      { ...reloaded, toolStartedAt: 10_000, toolFinishedAt: 35_000, toolDurationMs: undefined },
+    ]);
+  });
+
+  it('leaves timed history, unfinished live rows and other calls alone', () => {
+    const timed = [{ ...reloaded, toolDurationMs: 2_000 }];
+    expect(preserveToolTiming([live], timed)).toBe(timed);
+    const running = { ...live, toolStatus: 'running' as const, toolFinishedAt: undefined };
+    const next = [reloaded];
+    expect(preserveToolTiming([running], next)).toBe(next);
+    const other = [{ ...reloaded, id: 'toolresult_call_2' }];
+    expect(preserveToolTiming([live], other)).toBe(other);
+    expect(preserveToolTiming([{ ...reply, toolStartedAt: 1, toolFinishedAt: 2 }], next)).toBe(next);
+  });
+
+  it('follows the snapshot alias for a call the live stream named differently', () => {
+    const aliased = { ...live, id: 'toolcall_live_7' };
+    expect(preserveToolTiming([aliased], [{ ...reloaded, id: 'toolcall_item_7' }], { live_7: 'item_7' })[0])
+      .toMatchObject({ id: 'toolcall_item_7', toolStartedAt: 10_000, toolFinishedAt: 35_000 });
+  });
 });

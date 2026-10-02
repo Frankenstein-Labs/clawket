@@ -43,6 +43,80 @@ export function retireAliasedTools(previous: UiMessage[], next: UiMessage[], ali
   });
 }
 
+/**
+ * Execution approval cards exist only on this phone: history never carries
+ * them, so a reload would drop a card the user just answered and its record
+ * with it. Each card absent from `next` keeps its place beside the row it
+ * followed — the phone's arrival clock cannot be ordered against a native
+ * history's turn-start stamps. Both lists are newest-first.
+ */
+export function preserveApprovalRows(previous: UiMessage[], next: UiMessage[]): UiMessage[] {
+  const present = new Set(next.map(message => message.id));
+  const missing: number[] = [];
+  previous.forEach((message, index) => {
+    if (message.approval && message.approval.kind !== 'pair' && !present.has(message.id)) missing.push(index);
+  });
+  if (missing.length === 0) return next;
+  const result = [...next];
+  const same = (left: UiMessage, right: UiMessage) => left.id === right.id
+    || (left.renderKey !== undefined && left.renderKey === right.renderKey);
+  // Oldest first, so a card's older neighbour (possibly an earlier card) is already placed.
+  for (const index of missing.reverse()) {
+    const card = previous[index]!;
+    let placed = false;
+    for (let older = index + 1; older < previous.length && !placed; older += 1) {
+      const at = result.findIndex(message => same(message, previous[older]!));
+      if (at >= 0) {
+        result.splice(at, 0, card);
+        placed = true;
+      }
+    }
+    for (let newer = index - 1; newer >= 0 && !placed; newer -= 1) {
+      const at = result.findIndex(message => same(message, previous[newer]!));
+      if (at >= 0) {
+        result.splice(at + 1, 0, card);
+        placed = true;
+      }
+    }
+    if (!placed) result.unshift(card);
+  }
+  return result;
+}
+
+function toolCallKey(message: UiMessage): string | undefined {
+  return message.role === 'tool' ? /^tool(?:call|result)_(.+)$/.exec(message.id)?.[1] ?? message.id : undefined;
+}
+
+function hasStepTiming(message: UiMessage): boolean {
+  return typeof message.toolDurationMs === 'number'
+    || (typeof message.toolStartedAt === 'number' && typeof message.toolFinishedAt === 'number');
+}
+
+/**
+ * Only OpenClaw's history says how long each step took; Codex, Claude Code
+ * and Pi history does not, so a reload would erase the times this phone
+ * measured while it watched the steps run. A history row without timing of
+ * its own keeps a finished live row's, matched by exact tool call ID or the
+ * snapshot's alias for it, and all three fields come from that one clock.
+ */
+export function preserveToolTiming(previous: UiMessage[], next: UiMessage[], aliases?: Readonly<Record<string, string>>): UiMessage[] {
+  const measured = new Map<string, UiMessage>();
+  for (const message of previous) {
+    const key = toolCallKey(message);
+    if (key && hasStepTiming(message)) measured.set(aliases?.[key] ?? key, message);
+  }
+  if (measured.size === 0) return next;
+  let changed = false;
+  const merged = next.map(message => {
+    const key = toolCallKey(message);
+    const live = key && !hasStepTiming(message) ? measured.get(key) : undefined;
+    if (!live) return message;
+    changed = true;
+    return { ...message, toolStartedAt: live.toolStartedAt, toolFinishedAt: live.toolFinishedAt, toolDurationMs: live.toolDurationMs };
+  });
+  return changed ? merged : next;
+}
+
 /** Carry local row identity across exact echoes; wire IDs still drive reconciliation/actions. */
 export function preserveMessagePresentation(previous: UiMessage[], next: UiMessage[]): UiMessage[] {
   const timestampForEcho = userEchoTimestamp(previous, next);
