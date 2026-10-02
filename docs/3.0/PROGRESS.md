@@ -1,5 +1,12 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-02 工作记录里的工具步骤显示 Agent 写的标题（负责人：Codex 的「Used 4 tools」点开后四步都叫「js」，太草率；详情里明明有 title）。
+  - 调研（本机真实会话，只统计参数字段）：Codex 的 `js` 工具 1377 次调用全部带 `title`；Claude Code 的 Bash 99.7% 带 `description`，Agent（子任务）也带；Hermes（terminal、read_file、skill_view）和 Pi（read、bash、edit、write）没有这类字段。
+  - 改法（`resolveToolTitle`）：输入里有 `title` / `description` / `summary` 时，这句话当工作记录这一行的主行，下一行是工具名和命令 / 路径。详情弹层标题改用它，工具名放到状态行。运行中和失败的胶囊在没有命令、路径或查询可显示时也用它，不再是「Using js」。没有这类字段的工具显示不变。
+  - 顺手：Codex 每条命令都套着 `/bin/zsh -lc "…"`，工作记录和胶囊里只显示里面的命令，详情里的原始输入不变（真机看到真正的命令被挤到后面截断）。搜索类工具显示要找的内容（Claude Code Grep/Glob、Pi grep、Hermes search_files 的 `pattern`）；Hermes `terminal` 显示为「命令」、`patch` 和 Claude Code `MultiEdit` 显示为「写入文件」，Claude Code `WebFetch` / `WebSearch` 用本地化名称。
+  - 真机（SM-A566B QA 包）：Claude Code 的 Bash 步骤显示「显示当前目录并列出文件」，下一行「命令 · pwd && ls -la」；详情标题同句，状态行「命令 · ✓ 已完成」。手机上的 Codex 连接只有命令工具，js 由单测覆盖。
+  - 单测逐文件串行：tool-display 37、ToolDetailModal 6、tool-activity-model 11、useAdapterChatEvents 17、historyLineage 8、chat-cache 42、ThreadView 定向 9。tsc、ui-style 通过。
+
 - 2026-10-02 依赖审计加一条有期限的例外，恢复所有 PR 的合并（负责人选定方案 1）。
   - 起因：GHSA-86w9-cpqp-85rv（node-forge ≤1.4.0，高危，没有修复版本）进入 npm 审计库，经 `expo → @expo/cli → @expo/code-signing-certificates` 带入两份 lockfile。必需检查「Typecheck and dependency audit」因此对所有 PR 失败（#103–#106 都被卡住）。这条依赖只在打包的电脑上用到，App 和 Bridge 都不含它。
   - 改法：CI 改跑 `scripts/ci/dependency-audit.mjs`。两份 lockfile 里任何高危 / 严重公告照样失败，只放过例外清单里写明的“编号 + 包名”。每条例外必须有原因和到期日；过期或已经不再出现都会失败；审计结果读不出来也按失败处理。当前唯一的例外：GHSA-86w9-cpqp-85rv / node-forge，到 2026-11-01。

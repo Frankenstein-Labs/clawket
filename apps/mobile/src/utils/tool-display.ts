@@ -37,6 +37,18 @@ export function toolCategory(name: string): ToolCategory {
   return 'other';
 }
 
+/**
+ * Codex reports a command as the shell invocation that ran it
+ * (`/bin/zsh -lc "git status"`), so every row would start alike. Summaries
+ * name the command itself; the detail sheet keeps the raw input.
+ */
+export function unwrapShellCommand(command: string): string {
+  const match = /^(?:\/usr)?(?:\/bin\/)?(?:ba|z)?sh\s+-l?c\s+(["'])([\s\S]*)\1\s*$/.exec(command.trim());
+  if (!match) return command;
+  const [, quote, inner] = match;
+  return quote === '"' ? inner!.replace(/\\(["\\$`])/g, '$1') : inner!.replace(/'\\''/g, "'");
+}
+
 export function resolveToolDetail(name: string, args?: unknown): string | undefined {
   if (typeof args === 'string') {
     const raw = args;
@@ -61,6 +73,14 @@ export function resolveToolDetail(name: string, args?: unknown): string | undefi
     detail = typeof a.url === 'string' ? a.url : undefined;
   } else if (lowerName === 'browser' || lowerName === 'message') {
     detail = typeof a.action === 'string' ? a.action : undefined;
+  } else if (toolCategory(name) === 'search') {
+    // Grep, Glob and their kin name what they look for in `pattern`.
+    for (const key of ['pattern', 'query', 'path']) {
+      if (typeof a[key] === 'string') {
+        detail = a[key] as string;
+        break;
+      }
+    }
   } else {
     for (const key of ['path', 'file_path', 'command', 'query', 'url', 'action', 'name']) {
       if (typeof a[key] === 'string') {
@@ -71,9 +91,34 @@ export function resolveToolDetail(name: string, args?: unknown): string | undefi
   }
 
   if (!detail) return undefined;
+  if (toolCategory(name) === 'command') detail = unwrapShellCommand(detail);
   return detail
     .replace(/^\/Users\/[^/]+\//, '~/')
     .replace(/^\/home\/[^/]+\//, '~/');
+}
+
+/** Input keys an Agent fills with what one call is for, in order of preference. */
+const TOOL_TITLE_KEYS = ['title', 'description', 'summary'] as const;
+const TOOL_TITLE_LIMIT = 120;
+
+/**
+ * What the Agent says one call is for, when its input carries it: Codex's
+ * `js` cells name a `title`, Claude Code's Bash and Agent calls a
+ * `description`. One line, or absent, so the tool's own name stays the label.
+ */
+export function resolveToolTitle(args?: unknown): string | undefined {
+  if (typeof args === 'string') {
+    try { args = JSON.parse(args); } catch { return undefined; }
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined;
+  const record = args as Record<string, unknown>;
+  for (const key of TOOL_TITLE_KEYS) {
+    const value = record[key];
+    if (typeof value !== 'string') continue;
+    const line = value.replace(/\s+/g, ' ').trim();
+    if (line) return line.length > TOOL_TITLE_LIMIT ? `${line.slice(0, TOOL_TITLE_LIMIT - 1)}…` : line;
+  }
+  return undefined;
 }
 
 function withTrimmedDetail(base: string, detail?: string): string {
@@ -88,11 +133,12 @@ export function formatToolDisplayName(name: string, t?: Translate): string {
   const localName = name.replace(/^mcp__.+?__/, '');
   const lower = localName.toLowerCase();
   if (lower === 'session_status') return t('Session status', { ns: 'chat' });
-  if (lower === 'exec' || lower === 'bash') return t('Command', { ns: 'chat' });
+  // Backends name the same tools differently (Hermes `terminal` and `patch`, Claude Code `WebFetch`).
+  if (/^(exec|bash|shell|terminal|run_command|local_shell)$/.test(lower)) return t('Command', { ns: 'chat' });
   if (lower === 'read' || lower === 'read_file') return t('Read file', { ns: 'chat' });
-  if (lower === 'write' || lower === 'edit' || lower === 'apply_patch' || lower === 'write_file' || lower === 'edit_file') return t('Write file', { ns: 'chat' });
-  if (lower === 'web_search') return t('Web Search', { ns: 'chat' });
-  if (lower === 'web_fetch') return t('Web Fetch', { ns: 'chat' });
+  if (/^(write|edit|multiedit|apply_patch|patch|write_file|edit_file)$/.test(lower)) return t('Write file', { ns: 'chat' });
+  if (lower === 'web_search' || lower === 'websearch') return t('Web Search', { ns: 'chat' });
+  if (lower === 'web_fetch' || lower === 'webfetch') return t('Web Fetch', { ns: 'chat' });
   if (lower === 'browser') return t('Browse', { ns: 'chat' });
   if (lower === 'message') return t('Message', { ns: 'chat' });
   return localName.replace(/_+/g, ' ').trim();
