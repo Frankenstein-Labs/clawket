@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-03 Bridge 3.1.11 补丁发布（负责人明确授权基于最新 main 发布小版本）。
+  - 从 `1ecad2e4` 新建发布工作树；公开 latest 为 3.1.10，3.1.11 尚未占用。仅 CLI manifest / lock / 发布版本守卫升到 3.1.11，内部包版本不变。
+  - 包含统一 update、受管实例保留配对的版本切换、Hermes 陈旧受管 gateway 恢复、跨后端诊断及旧 Codex / Claude 配置名称补齐。发布不自动升级或重启现有进程；不包含 App 分发或 Worker 部署。
+  - 发布门禁、固定 tarball、CI、现网快照兼容矩阵及公开无认证安装核验进行中；证据见 `../3.1/bridge-3.1.11-release.md`。
+
+
 - 2026-10-03 Bridge 统一升级与设置页版本入口（负责人授权按调研方案直接落地并测试）。
   - `npx ... pair choose` 不更新已运行进程；正常升级无需删除手机连接或重新配对。新增 `clawket update`：核验官方稳定版本与发布支持标记，安装到独立不可变目录，保留配置/凭据/历史及原项目、设备、Production/Preview 范围，再更新全部已保存且可验证的受管实例。旧全局 CLI 不感知新 manifest，后续运维使用最新版 npx；独立 Windows local-model supervisor、Docker/自定义部署明确报告人工更新，不假称全部完成。
   - 私有认证本机 IPC 核验真实 PID/版本/来源/范围；原生活跃/排队请求阻止关闭，idle admission 同步封闭后才退出，确认旧 PID 退出再起新进程。OpenClaw 先停共享服务/watchdog，再恢复 Hermes Bridge→Relay→共享服务；本地就绪和版本核验后才确认成功，失败按捕获的旧来源尝试恢复，关闭不确定不另起 owner。已停止实例保持停止；已有停止的自启注册只刷新启动入口，可回滚，不新增自启。旧 owner 首次迁移要求可验证来源与空闲证据；无法证明时拒绝替换。
@@ -1020,7 +1026,7 @@
 
 | 里程碑 | 状态 | 完成日期 | 验证结果 | 提交 |
 |---|---|---|---|---|
-| HT-BRIDGE-UPDATE-1003 | Bridge 统一升级交付与现有手机连接验收 | 负责人决定后续 Bridge / App 发布版本；发布含 updateProtocol 标记的 Bridge 后，在有旧配对的电脑执行统一 update，保持手机连接和原配置；独立 supervisor 按原部署方法更新。 | 设置显示真实旧/新版本与更新提示；活跃任务不被打断，原有连接重连后继续聊天，配置/凭据/历史保留；验证两环境、多项目、停止实例、失败回滚及手机/Relay 往返。 | 本地定向自动化与 v1 live replay 已通过；完整 CI 随本条 PR。未发布、未打分发包、未重启本机现有 Bridge；待负责人授权交付及手机验收。 |
+| HT-BRIDGE-UPDATE-1003 | Bridge 统一升级交付与现有手机连接验收 | 负责人已授权 Bridge 3.1.11；App 交付仍待决定。发布含 updateProtocol 标记的 Bridge 后，在有旧配对的电脑执行统一 update，保持手机连接和原配置；独立 supervisor 按原部署方法更新。 | 设置显示真实旧/新版本与更新提示；活跃任务不被打断，原有连接重连后继续聊天，配置/凭据/历史保留；验证两环境、多项目、停止实例、失败回滚及手机/Relay 往返。 | 实现 PR #125 完整 CI 全绿并已合并；Bridge 3.1.11 已获发布授权，交付核验进行中。未打 App 分发包、未重启本机现有 Bridge；App 交付及真实手机验收仍待负责人。 |
 | M0 基线与护栏 | 已完成 | 2026-09-05 | 干净 `npm ci`；required 全绿；compat 5 files / 34 tests；双 lock audit 0 high/critical；LOC 已记录 | `717f265bd3ca15fcbed4207c653c6c56e920bd6d` |
 | M1 契约与包骨架 | 已完成 | 2026-09-05 | required 全绿；协议包 3 files / 23 tests、四项覆盖率 100%；Mobile 162 suites / 1361 tests；compat 5 files / 34 tests；Android Metro 与 Bridge/CLI bundle 验证通过 | `ef8ae596d031d891a4263fa4a3c04d192f8658a1` |
 | M2 Relay / Registry 合一与安全口子 | 已完成 | 2026-09-05 | M2a compat 字节等价；M2b required、35 compat、4 integration、20 配置 dry-run；四 Preview 服务部署成功，OpenClaw 9/9、Hermes 7/7 | M2a `f0ac6d2f676e6a9ade4f4dfb23d3c748f832c9fd`；M2b `4d4f9f88f344e8a91038cc678300d1e5be26369c` |

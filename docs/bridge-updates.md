@@ -4,7 +4,7 @@ A normal upgrade retains pairing, tokens, conversation history and each backend'
 
 ## Unified command
 
-After a release advertising package metadata `clawket.updateProtocol: 1` is published:
+Bridge 3.1.11 is the first release advertising package metadata `clawket.updateProtocol: 1`. Once published, upgrade with:
 
 ```sh
 npx -y @p697/clawket@latest update
@@ -41,4 +41,4 @@ Latest release checks cache for 24 hours and can be retried manually. Failure pr
 
 ## Release boundary
 
-This implementation does not bump/publish the Bridge package, ship the phone UI or change a live service. Existing public 3.1.10 does not contain the updater. Owner-authorized subsequent Bridge and App releases are required before installed users can use this flow. Keep old protocol frames additive, and pass the v1 replay and desktop gates before releasing.
+The owner authorized Bridge 3.1.11 publication; delivery evidence is recorded in [the release log](3.1/bridge-3.1.11-release.md). Public 3.1.10 does not contain the updater. The phone settings UI requires a separate authorized App release. Publishing the package does not update existing processes or change a live service. Keep old protocol frames additive, and pass the v1 replay and desktop gates before releasing.
