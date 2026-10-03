@@ -89,6 +89,9 @@ let mockScheme: 'light' | 'dark' = 'light';
 let mockReducedMotion = false;
 let mockPacedText: string | undefined;
 let mockRenderMessageClone = false;
+let mockNativeMarkdownDeferred = false;
+const mockNativeMarkdownJobs: Array<() => void> = [];
+let mockRecycledTimelineMessageId: string | null = null;
 const mockScrollToEnd = jest.fn();
 /** Geometry the FlashList mock reports from its imperative handle. */
 const mockListLayout = { content: 0, viewport: 0 };
@@ -171,11 +174,18 @@ jest.mock('react-native-enriched-markdown', () => {
   const ReactRuntime = require('react');
   const { Text } = require('react-native');
   return {
-    EnrichedMarkdownText: ({ markdown, ...props }: { markdown: string }) => ReactRuntime.createElement(
-      Text,
-      { ...props, markdown },
-      markdown,
-    ),
+    EnrichedMarkdownText: ({ markdown, ...props }: { markdown: string }) => {
+      // Android's native view retains its painted text while its executor
+      // parses new props. Detaching a view prevents that work painting again.
+      const [painted, setPainted] = ReactRuntime.useState(mockNativeMarkdownDeferred ? '' : markdown);
+      ReactRuntime.useLayoutEffect(() => {
+        if (!mockNativeMarkdownDeferred) return;
+        let attached = true;
+        mockNativeMarkdownJobs.push(() => { if (attached) setPainted(markdown); });
+        return () => { attached = false; };
+      }, [markdown]);
+      return ReactRuntime.createElement(Text, { ...props, markdown }, mockNativeMarkdownDeferred ? painted : markdown);
+    },
   };
 });
 
@@ -247,9 +257,11 @@ jest.mock('@shopify/flash-list', () => {
       return ReactRuntime.createElement(
       View,
       { ...props, data },
-      ...data.map((item, index) => ReactRuntime.createElement(
+      ...data.map((item, index) => ({ item, index })).filter(({ item }) => !mockRecycledTimelineMessageId
+        || (item as { message?: UiMessage }).message?.id === mockRecycledTimelineMessageId)
+        .map(({ item, index }, holder) => ReactRuntime.createElement(
         ReactRuntime.Fragment,
-        { key: (item as { key?: string }).key ?? index },
+        { key: mockRecycledTimelineMessageId ? `recycled:${holder}` : (item as { key?: string }).key ?? index },
         renderItem({ item, index, target: 'Cell' }),
       )),
       ListHeaderComponent,
@@ -513,6 +525,9 @@ describe('ThreadView', () => {
     mockPacedText = undefined;
     mockReducedMotion = false;
     mockRenderMessageClone = false;
+    mockNativeMarkdownDeferred = false;
+    mockNativeMarkdownJobs.length = 0;
+    mockRecycledTimelineMessageId = null;
     require('react-native').Linking.openURL.mockClear();
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation((message?: unknown) => {
       if (typeof message === 'string' && message.includes('react-test-renderer is deprecated')) return;
@@ -1473,6 +1488,52 @@ describe('ThreadView', () => {
     expect(view.getByTestId('thread-markdown-canonical-table')).toBe(markdown);
     expect(markdown.props.markdown).toContain('Cloudy');
     expect(view.getAllByTestId(/^thread-markdown-/)).toHaveLength(1);
+  });
+
+  it.each([[12, 24], [1, 8]])('never paints assistant %s inside a recycled row for assistant %s while native parsing waits', (oldNumber, nextNumber) => {
+    mockNativeMarkdownDeferred = true;
+    const oldMessage: UiMessage = { id: `assistant-${oldNumber}`, role: 'assistant', text: `QA_HIST_${oldNumber}` };
+    const nextMessage: UiMessage = { id: `assistant-${nextNumber}`, role: 'assistant', text: `QA_HIST_${nextNumber}` };
+    const messages = [oldMessage, nextMessage];
+    // FlashList first lays out the prepended page at its old offset, then
+    // reuses that same holder for the restored reading window. Both messages
+    // stay in data; only the engaged window changes.
+    mockRecycledTimelineMessageId = oldMessage.id;
+    const props = createProps({ messages });
+    const view = render(<ThreadView {...props} />);
+    act(() => mockNativeMarkdownJobs.splice(0).forEach(job => job()));
+    expect(view.getByText(oldMessage.text)).toBeTruthy();
+    const oldNative = view.getByTestId(`thread-markdown-${oldMessage.id}`);
+    mockRecycledTimelineMessageId = nextMessage.id;
+    view.rerender(<ThreadView {...props} messages={[...messages]} />);
+    const nextNative = view.getByTestId(`thread-markdown-${nextMessage.id}`);
+    expect(view.queryByText(oldMessage.text)).toBeNull();
+    expect(nextNative).not.toBe(oldNative);
+    act(() => mockNativeMarkdownJobs.splice(0).forEach(job => job()));
+    expect(view.getByText(nextMessage.text)).toBeTruthy();
+    view.unmount();
+  });
+
+  it('keeps native parser identity across same-message stream completion and history aliases', () => {
+    mockNativeMarkdownDeferred = true;
+    const stream: UiMessage = { id: 'stream-native', historyMessageId: 'native-reply', renderKey: 'stable-reply', role: 'assistant', text: 'First words', streaming: true };
+    mockRecycledTimelineMessageId = stream.id;
+    const props = createProps({ messages: [stream], isRunning: true });
+    const view = render(<ThreadView {...props} />);
+    act(() => mockNativeMarkdownJobs.splice(0).forEach(job => job()));
+    const native = view.getByTestId(`thread-markdown-${stream.id}`);
+    const final = { ...stream, id: 'final-native', text: 'First words complete', streaming: false };
+    mockRecycledTimelineMessageId = final.id;
+    view.rerender(<ThreadView {...props} messages={[final]} isRunning={false} />);
+    expect(view.getByTestId(`thread-markdown-${final.id}`)).toBe(native);
+    act(() => mockNativeMarkdownJobs.splice(0).forEach(job => job()));
+    expect(view.getByText(final.text)).toBeTruthy();
+    const history = { ...final, id: 'history-native', renderKey: undefined };
+    mockRecycledTimelineMessageId = history.id;
+    view.rerender(<ThreadView {...props} messages={preserveHydratedMessageKeys([final], [history])} isRunning={false} />);
+    expect(view.getByTestId(`thread-markdown-${history.id}`)).toBe(native);
+    expect(view.getByText(history.text)).toBeTruthy();
+    view.unmount();
   });
 
   it.each(['drag', 'session', 'composer', 'unmount'])('cancels a pending layout correction on %s', (action) => {
