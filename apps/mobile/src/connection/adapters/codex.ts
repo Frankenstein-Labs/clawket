@@ -67,7 +67,7 @@ export class CodexAdapter implements AgentAdapter {
   private previouslyReady = false;
   private connectPromise: Promise<void> | null = null;
   private cancelConnect: (() => void) | null = null;
-  private pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason: Error) => void; cancelTimeout: () => void }>();
+  private pending = new Map<string, { method: string; resolve: (value: unknown) => void; reject: (reason: Error) => void; cancelTimeout: () => void }>();
   private listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { update: new Set(), state: new Set(), sessions: new Set() };
 
   constructor(private readonly record: ConnectionRecord, options: { isFreeSlot?: boolean; webSocketFactory?: WebSocketFactory } = {}) {
@@ -273,7 +273,7 @@ export class CodexAdapter implements AgentAdapter {
     const id = generateId();
     return new Promise<T>((resolve, reject) => {
       const cancelTimeout = scheduleRequestTimeout(this.transport, timeoutMs, () => { this.pending.delete(id); reject(new AdapterError('timeout', 'Codex request timed out')); });
-      this.pending.set(id, { resolve: value => resolve(value as T), reject, cancelTimeout });
+      this.pending.set(id, { method, resolve: value => resolve(value as T), reject, cancelTimeout });
       try { this.transport.send(JSON.stringify({ type: 'req', id, method, params })); }
       catch (error) { cancelTimeout(); this.pending.delete(id); reject(error); }
     });
@@ -286,6 +286,11 @@ export class CodexAdapter implements AgentAdapter {
       const pending = this.pending.get(frame.id); if (!pending) return;
       this.pending.delete(frame.id); pending.cancelTimeout();
       if (frame.ok) pending.resolve(frame.payload);
+      else if (pending.method === 'chat.send' && this.capabilities.sessionPermissions
+        && frame.error?.code === 'codex_error'
+        && frame.error.message === 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.') {
+        pending.reject(new AdapterError('server', frame.error.message, 'confirm_permissions'));
+      }
       else pending.reject(new AdapterError(frame.error?.code === 'BRIDGE_UNAVAILABLE' ? 'bridge_offline' : requiresConnectionAction(frame.error) ? 'unauthorized' : 'server', frame.error?.code === 'BRIDGE_UNAVAILABLE' ? 'Codex Bridge is offline. Keep the Bridge running on your computer.' : frame.error?.message ?? 'Codex request failed'));
     } else if (frame.type === 'event' && frame.event === 'codex.update') {
       let update = artifactUpdateDisplay(frame.payload as SessionUpdate);

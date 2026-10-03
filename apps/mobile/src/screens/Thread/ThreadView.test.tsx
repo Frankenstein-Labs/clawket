@@ -489,6 +489,12 @@ describe('ThreadView', () => {
     expect(props.onSend).not.toHaveBeenCalled();
     expect(props.onChangeInput).not.toHaveBeenCalled();
     expect(view.getByTestId('thread-screen-composer-primary').props.accessibilityState.disabled).toBe(true);
+    view.rerender(<ThreadView {...props} permissionsNeedConfirmation />);
+    expect(view.getByText('Choose permissions again before sending.')).toBeTruthy();
+    expect(view.queryByText('Confirm settings before sending.')).toBeNull();
+    fireEvent.press(view.getByTestId('thread-settings-unconfirmed-action'));
+    expect(onReviewRuntimeSettings).toHaveBeenCalledTimes(2);
+    expect(props.onSend).not.toHaveBeenCalled();
     view.rerender(<ThreadView {...props} canSend onReviewRuntimeSettings={undefined} />);
     expect(view.queryByTestId('thread-settings-unconfirmed')).toBeNull();
     expect(view.getByTestId('thread-screen-composer-primary').props.accessibilityState.disabled).toBe(false);

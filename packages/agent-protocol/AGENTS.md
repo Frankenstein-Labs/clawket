@@ -54,7 +54,7 @@ Optional `AgentDescriptor.entryMode: sessions` declares that an Agent has no pri
 
 Optional `fastMode`, `sessionPermissions` and `sessionArchive` are runtime-negotiated Codex refinements. Settings resolve with authoritative native state; `permissions.mode: custom | null` never authorizes a default override. `unencryptedTransport` is local transport evidence for the permission UI, not a server security claim. Archive is reversible through `archiveSession(key, false)` and `listArchivedSessions`; it must retain native IDs/history and remain absent on older peers.
 
-Optional `permissions.requiresConfirmation` retains an unresolved native permission restore across reconnects. A current readable mode is not confirmation; clients keep Send blocked until an explicit permission selection returns verified state with the flag cleared.
+`AdapterError.recoveryAction: confirm_permissions` is an optional adapter classification for a verified rejection before prompt dispatch, never a generic server failure or unknown receipt. It pauses sending for explicit permission review without replaying the input. Optional `permissions.requiresConfirmation` retains an unresolved native permission restore across reconnects. A current readable mode is not confirmation; clients keep Send blocked until an explicit permission selection returns verified state with the flag cleared.
 
 Optional `promptStatus` and `getPromptStatus` negotiate read-only receipt lookup. `recorded` identifies a durable Bridge receipt and run ID, not native dispatch, running or completion. `unknown` is not a rejection; neither result authorizes resending. Only exact native message identity reconciles an uncertain bubble. Missing capability preserves older peers.
 
