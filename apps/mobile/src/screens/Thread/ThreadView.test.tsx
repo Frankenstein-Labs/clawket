@@ -489,6 +489,12 @@ describe('ThreadView', () => {
     expect(props.onSend).not.toHaveBeenCalled();
     expect(props.onChangeInput).not.toHaveBeenCalled();
     expect(view.getByTestId('thread-screen-composer-primary').props.accessibilityState.disabled).toBe(true);
+    view.rerender(<ThreadView {...props} permissionsNeedConfirmation />);
+    expect(view.getByText('Choose permissions again before sending.')).toBeTruthy();
+    expect(view.queryByText('Confirm settings before sending.')).toBeNull();
+    fireEvent.press(view.getByTestId('thread-settings-unconfirmed-action'));
+    expect(onReviewRuntimeSettings).toHaveBeenCalledTimes(2);
+    expect(props.onSend).not.toHaveBeenCalled();
     view.rerender(<ThreadView {...props} canSend onReviewRuntimeSettings={undefined} />);
     expect(view.queryByTestId('thread-settings-unconfirmed')).toBeNull();
     expect(view.getByTestId('thread-screen-composer-primary').props.accessibilityState.disabled).toBe(false);
@@ -2421,7 +2427,7 @@ it('names Codex js calls by their titles in the work dock, the work record and t
 
     // The turn ended on a step: one pill stands for it.
     view.rerender(<ThreadView {...props} isRunning={false} messages={[js('b', '刷新审核状态', 'success'), js('a', '查看当前浏览器页面', 'success'), prompt]} />);
-    fireEvent.press(view.getByTestId('tools:a'));
+    fireEvent.press(view.getByTestId('tools:b'));
     const row = within(view.getByTestId('thread-run-a'));
     expect(row.getByText('查看当前浏览器页面')).toBeTruthy();
     expect(view.getByTestId('thread-run-a').props.accessibilityLabel).toBe('查看当前浏览器页面, js');
@@ -2438,9 +2444,9 @@ it('keeps a failure the Agent moved past quiet and gives a turn that ended on on
   const failed: UiMessage = { ...ok, id: 'b', toolArgs: JSON.stringify({ command: 'gh pr checks 50' }), toolStatus: 'error' };
   const view = render(<ThreadView {...createProps({ messages: [failed, ok, prompt] })} />);
   const keys = () => view.getByTestId('thread-screen-timeline').props.data.map((item: any) => item.key);
-  expect(keys()).toEqual(['message:ask', 'tools:a']);
-  expect(view.getByTestId('tools:a').props.accessibilityLabel).toBe('gh pr checks 50 failed');
-  fireEvent.press(view.getByTestId('tools:a'));
+  expect(keys()).toEqual(['message:ask', 'tools:b']);
+  expect(view.getByTestId('tools:b').props.accessibilityLabel).toBe('gh pr checks 50 failed');
+  fireEvent.press(view.getByTestId('tools:b'));
   expect(view.getByTestId('thread-run-a')).toBeTruthy();
   expect(view.getByTestId('thread-run-b').props.accessibilityLabel).toContain('Failed');
 

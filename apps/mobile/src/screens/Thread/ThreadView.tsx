@@ -436,6 +436,7 @@ export type ThreadViewProps = Readonly<{
   onSelectSlashCommand?: (command: SlashCommand) => void;
   onDismissSlashSuggestions?: () => void;
   onReviewRuntimeSettings?: () => void;
+  permissionsNeedConfirmation?: boolean;
   onResolveApproval?: (
     approvalId: string,
     decision: 'allow-once' | 'allow-always' | 'deny' | 'approve' | 'reject',
@@ -559,6 +560,7 @@ export function ThreadView({
   onSelectSlashCommand,
   onDismissSlashSuggestions,
   onReviewRuntimeSettings,
+  permissionsNeedConfirmation,
   onResolveApproval,
   testID = 'thread-screen',
 }: ThreadViewProps): React.JSX.Element {
@@ -1680,7 +1682,7 @@ export function ThreadView({
             ) : null}
             notice={onReviewRuntimeSettings ? <>{selectedSkill}<Banner
               testID="thread-settings-unconfirmed"
-              message={t('Confirm settings before sending.', { ns: 'chat' })}
+              message={t(permissionsNeedConfirmation ? 'Choose permissions again before sending.' : 'Confirm settings before sending.', { ns: 'chat' })}
               actionLabel={t('Review settings', { ns: 'chat' })}
               onAction={onReviewRuntimeSettings}
             /></> : selectedSkill || (composerExpanded && offline ? (
