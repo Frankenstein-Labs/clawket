@@ -98,6 +98,31 @@ it('keeps one correction owner after returning to the end and resumes with a new
   expect(f.result.current.isActive()).toBe(true);
 });
 
+it('ignores an older in-flight compensation event before the newest acknowledgement and keeps refining the reader row', () => {
+  const f = fixture();
+  const before = f.getViewportY('25');
+  f.list.scrollToOffset.mockImplementation(() => {}); // Native scroll commands acknowledge asynchronously.
+  act(() => f.result.current.capture());
+  f.setRows([message('09'), message('25'), message('26')], [0, 2060, 2220]);
+  act(() => f.result.current.restore()); // 2100 is in flight.
+  f.setRows(f.currentRows(), [0, 2460, 2620]);
+  act(() => f.result.current.restore()); // 2500 is in flight before 2100's event.
+  f.setFirst(0);
+  f.setOffset(2100);
+  act(() => { f.result.current.readerScrolled(2100); f.result.current.readerScrolled(2100); });
+  act(() => f.result.current.restore());
+  expect(f.list.scrollToOffset).toHaveBeenCalledTimes(2);
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2500, animated: false });
+  f.setOffset(2500);
+  act(() => f.result.current.readerScrolled(2500));
+  f.setRows(f.currentRows(), [0, 2660, 2820]);
+  act(() => f.result.current.restore());
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2700, animated: false });
+  f.setOffset(2700);
+  act(() => f.result.current.readerScrolled(2700, false));
+  expect(f.getViewportY('25')).toBe(before);
+});
+
 it('fences anchors across scope and native list replacement', () => {
   const f = fixture();
   act(() => f.result.current.capture());
