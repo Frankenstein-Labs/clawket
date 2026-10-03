@@ -244,7 +244,7 @@ jest.mock('../services/analytics/events', () => ({
 
 function createAdapter(
   connectionState: 'ready' | 'connecting' = 'ready',
-  backendKind: 'openclaw' | 'hermes' = 'openclaw',
+  backendKind: 'openclaw' | 'hermes' | 'codex' = 'openclaw',
 ) {
   const listeners: Record<string, Set<(...args: any[]) => void>> = {
     update: new Set(),
@@ -2350,6 +2350,66 @@ it('does not restore an old history snapshot after a live terminal event', async
   expect(result.current.isSending).toBe(false);
   expect(result.current.listData.some(message => message.text === 'stale')).toBe(false);
 });
+
+  it('recovers a cold active Codex transcript across two same-turn user guides', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    historyMock.messages = [{ id: 'main', role: 'user', text: 'Task', turnId: 'native-turn' },
+      { id: 'a', role: 'assistant', text: 'First paragraph.', turnId: 'native-turn', timestampMs: 1000 },
+      { id: 'toolcall_1', role: 'tool', text: '', toolName: 'exec', turnId: 'native-turn', toolStatus: 'success' },
+      { id: 'guide1', role: 'user', text: 'Same guide', turnId: 'native-turn' },
+      { id: 'b', role: 'assistant', text: 'Second paragraph.', turnId: 'native-turn', timestampMs: 2000 },
+      { id: 'toolcall_2', role: 'tool', text: '', toolName: 'exec', turnId: 'native-turn', toolStatus: 'running' },
+      { id: 'guide2', role: 'user', text: 'Same guide', turnId: 'native-turn' },
+      { id: 'c', role: 'assistant', text: 'Live tail.', turnId: 'native-turn', timestampMs: 3000 }];
+    historyMock.activitySnapshot = { key: 'agent:main:main', hasActiveRun: true, requestedAtMs: Date.now(), messages: [],
+      activeRun: { runId: 'run', text: 'First paragraph.\n\nSecond paragraph.\n\nLive tail.',
+        startedAtMs: 1000, turnId: 'native-turn', inputMessageId: 'main' } } as any;
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true }));
+    await act(async () => { await Promise.resolve(); });
+    const rows = [...result.current.listData].reverse();
+    expect(rows.filter(row => row.role === 'user').map(row => row.id)).toEqual(['main', 'guide1', 'guide2']);
+    expect(rows.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['toolcall_1', 'toolcall_2']);
+    expect(rows.filter(row => row.role === 'assistant').map(row => row.text)).toEqual(['First paragraph.', 'Second paragraph.', 'Live tail.']);
+    expect(new Set(rows.map(row => row.renderKey ?? row.id)).size).toBe(rows.length);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('keeps a live Codex run intact when its native anchor arrives after tools and stamps a delayed guide with the captured turn', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer, capabilities: { ...adapter.capabilities, steer: true } });
+    historyMock.messages = [{ id: 'main', role: 'user', text: 'Main task', idempotencyKey: 'original-key' }];
+    const { result, rerender } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    const run = { sessionKey: 'agent:main:main', runId: 'run', activeRunId: 'run', isSending: true as const };
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', ...run, startedAtMs: 1000 });
+      events.onUpdate?.({ type: 'agent_message_chunk', ...run, visible: true, textMode: 'snapshot', text: 'Before the tool.' });
+      events.onUpdate?.({ type: 'tool_call', ...run, toolCallId: 'tool', merge: false,
+        message: { id: 'toolcall_tool', role: 'tool', text: '', toolName: 'exec', toolStatus: 'running' } });
+      events.onUpdate?.({ type: 'run_started', ...run, startedAtMs: 2000, turnId: 'native-turn', inputMessageId: 'native-input', inputMessageKey: 'original-key' });
+      events.onUpdate?.({ type: 'agent_message_chunk', ...run, visible: true, textMode: 'snapshot', text: 'Before the tool.\n\nAfter the tool.' });
+      result.current.setInput('Same guide');
+    });
+    await act(async () => { result.current.onSteer('run'); });
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(result.current.listData.filter(row => row.id === 'toolcall_tool')).toHaveLength(1);
+    expect(result.current.listData.filter(row => row.text === 'Before the tool.')).toHaveLength(1);
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(historyMock.messages.find(row => row.text === 'Same guide')).toMatchObject({ role: 'user', turnId: 'native-turn' });
+    // A same-run snapshot from an older Bridge lacks additive metadata. It
+    // cannot erase the already proven native anchor or reset the accumulated body.
+    historyMock.activitySnapshot = { key: 'agent:main:main', hasActiveRun: true,
+      requestedAtMs: Date.now() + 1, messages: [], activeRun: { runId: 'run', text: 'Before the tool.\n\nAfter the tool.', startedAtMs: 1000 } } as any;
+    rerender({});
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.listData.filter(row => row.id === 'toolcall_tool')).toHaveLength(1);
+    expect(result.current.listData.filter(row => row.text === 'Before the tool.')).toHaveLength(1);
+    expect(result.current.listData.filter(row => row.text === 'Same guide')).toHaveLength(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
 
   it('restores unused steering only for the active run without replaying it', async () => {
     const adapter = createAdapter('ready', 'hermes');

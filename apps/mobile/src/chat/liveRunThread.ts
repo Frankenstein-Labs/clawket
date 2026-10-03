@@ -2,6 +2,7 @@ import { preserveCompletedRunPresentation } from './historyMergePolicy';
 import { finalReplyTail } from './streamText';
 import { UiMessage } from '../types/chat';
 import { isSilentReplyPrefixText, isSilentReplyText } from '../utils/chat-message';
+import { isNewUserTurn, originalRunUserIndex } from './turnIdentity';
 
 export { finalReplyTail } from './streamText';
 
@@ -20,16 +21,24 @@ export function liveReplyRenderKey(startedAt: number | null, runId: string, segm
 }
 
 /** Recover known text/tool boundaries from the current turn, never earlier turns. */
-export function recoverLiveRunPresentation(text: string, history: UiMessage[]): {
+export function recoverLiveRunPresentation(text: string, history: UiMessage[], turnId?: string, inputMessageId?: string, inputMessageKey?: string): {
   segments: StreamSegment[]; tools: UiMessage[]; tail: string;
 } {
-  const start = history.findLastIndex(message => message.role === 'user');
+  const original = originalRunUserIndex(history, turnId, inputMessageId, inputMessageKey);
+  if (turnId && inputMessageId && original < 0) return { segments: [], tools: [], tail: text };
+  const start = original >= 0 ? original : history.findLastIndex(message => message.role === 'user');
+  const originalUser = original >= 0 ? { ...history[start]!, turnId } : undefined;
   const segments: StreamSegment[] = [];
   const tools: UiMessage[] = [];
   let tail = text;
+  let committedSegments = 0;
   for (const message of history.slice(start + 1)) {
+    if (original >= 0 && (isNewUserTurn(message, originalUser!) || (message.turnId && message.turnId !== turnId))) break;
     if (message.role === 'tool') {
+      committedSegments = segments.length;
       tools.push(message);
+    } else if (original >= 0 && message.role === 'user') {
+      committedSegments = segments.length;
     } else if (message.role === 'assistant' && message.text.trim()) {
       const prefix = message.text.trim();
       if (!tail.trimStart().startsWith(prefix)) break;
@@ -38,9 +47,9 @@ export function recoverLiveRunPresentation(text: string, history: UiMessage[]): 
         text: message.text, timestampMs: message.timestampMs ?? Date.now(), afterToolCount: tools.length });
     }
   }
-  // A transcript can contain the still-growing assistant message. Only tools
-  // prove a committed boundary; keep the last message in the live tail.
-  while (segments.at(-1)?.afterToolCount === tools.length) segments.pop();
+  // The growing paragraph stays in the tail. Tools and proven same-turn
+  // guides commit earlier paragraphs without flattening their interleaving.
+  segments.splice(committedSegments);
   return { segments, tools, tail: finalReplyTail(text, segments) };
 }
 
@@ -109,9 +118,19 @@ export function buildLiveRunListData(params: {
   liveStreamText: string | null;
   liveStreamStartedAt: number | null;
   activeRunId: string | null;
+  activeTurnId?: string;
+  inputMessageId?: string;
+  inputMessageKey?: string;
   nowMs?: number;
   includePlaceholder?: boolean;
 }): UiMessage[] {
+  if (params.activeRunId && params.activeTurnId && params.inputMessageId
+    && !params.streamSegments.length && !params.toolMessages.length && params.liveStreamText) {
+    const recovered = recoverLiveRunPresentation(params.liveStreamText, params.historyMessages,
+      params.activeTurnId, params.inputMessageId, params.inputMessageKey);
+    if (recovered.segments.length) return buildLiveRunListData({ ...params,
+      streamSegments: recovered.segments, toolMessages: recovered.tools, liveStreamText: recovered.tail });
+  }
   const seen = new Set<string>();
   const dedupedHistory: UiMessage[] = [];
   const nowMs = params.nowMs ?? Date.now();
@@ -136,6 +155,7 @@ export function buildLiveRunListData(params: {
     if (segment.text.trim() && !shouldHideSilentStreamText(segment.text)) {
       transient.push({
         id: segment.id,
+        ...(params.activeTurnId ? { turnId: params.activeTurnId } : {}),
         ...(segment.renderKey ? { renderKey: segment.renderKey } : {}),
         role: 'assistant', text: segment.text,
         timestampMs: segment.timestampMs, streaming: false,
@@ -160,6 +180,7 @@ export function buildLiveRunListData(params: {
   if ((hasLiveStream || showPlaceholder) && !hasTerminalMessage && !shouldHideSilentStreamText(params.liveStreamText)) {
     transient.push({
       id: 'streaming',
+      ...(params.activeTurnId ? { turnId: params.activeTurnId } : {}),
       ...(params.includePlaceholder && params.activeRunId ? {
         renderKey: liveReplyRenderKey(params.liveStreamStartedAt, params.activeRunId, params.streamSegments.length),
       } : {}),
@@ -173,10 +194,16 @@ export function buildLiveRunListData(params: {
   if (params.activeRunId && transient.length > 0 && !hasTerminalMessage) {
     // History can catch up during tool execution. Reconcile within this user
     // turn instead of displaying both the transcript and its live projection.
-    const user = dedupedHistory.findLast(message => message.role === 'user');
+    const original = originalRunUserIndex(dedupedHistory, params.activeTurnId, params.inputMessageId, params.inputMessageKey);
+    if (params.activeTurnId && params.inputMessageId && original < 0) {
+      // A partial page can begin with a guide. Never treat that row as the
+      // original input; retain only independently identified unseen live rows.
+      return [...dedupedHistory, ...transient.filter(message => !seen.has(message.id))].reverse();
+    }
+    const user = original >= 0 ? { ...dedupedHistory[original]!, turnId: params.activeTurnId } : dedupedHistory.findLast(message => message.role === 'user');
     return preserveCompletedRunPresentation([
       ...(user ? [user] : []),
-      ...transient.map(message => ({ ...message, presentationRunId: params.activeRunId! })),
+      ...transient.map(message => ({ ...message, ...(params.activeTurnId ? { turnId: params.activeTurnId } : {}), presentationRunId: params.activeRunId! })),
     ], dedupedHistory, { live: true }).reverse();
   }
   return [...dedupedHistory, ...transient.filter(message => !seen.has(message.id))].reverse();
@@ -186,19 +213,19 @@ export function buildLiveRunListData(params: {
 /** Commit the same live rows in one state transition; don't rebuild a flat answer. */
 export function finishLiveRunPresentation(params: {
   segments: StreamSegment[]; tools: UiMessage[]; tail: string;
-  runId: string; startedAt: number | null; finalMessage?: UiMessage; cancelled?: boolean;
+  runId: string; startedAt: number | null; turnId?: string; finalMessage?: UiMessage; cancelled?: boolean;
 }): UiMessage[] {
   const rows = buildLiveRunListData({
     historyMessages: [], streamSegments: params.segments, toolMessages: params.tools,
     liveStreamText: null, liveStreamStartedAt: params.startedAt, activeRunId: null,
-  }).reverse().map(message => ({ ...message, streaming: false, presentationRunId: params.runId,
+  }).reverse().map(message => ({ ...message, streaming: false, presentationRunId: params.runId, ...(params.turnId ? { turnId: params.turnId } : {}),
     ...(message.role === 'tool' && message.toolStatus === 'running' ? { toolStatus: 'unknown' as const } : {}),
   }));
   if (params.tail.trim() || params.finalMessage?.artifactAttachments?.length || params.finalMessage?.imageUris?.length || params.finalMessage?.fileAttachments?.length) rows.push({
     ...params.finalMessage,
     id: params.finalMessage?.id ?? `${params.cancelled ? 'abort' : 'final'}_${params.runId}`,
     renderKey: liveReplyRenderKey(params.startedAt, params.runId, params.segments.length),
-    role: 'assistant', text: params.tail, streaming: false, presentationRunId: params.runId,
+    role: 'assistant', text: params.tail, streaming: false, presentationRunId: params.runId, ...(params.turnId ? { turnId: params.turnId } : {}),
     timestampMs: params.finalMessage?.timestampMs ?? Date.now(),
   });
   return rows;

@@ -62,6 +62,8 @@ export type UiMessage = {
   renderKey?: string;
   /** Completed live rows retain their order until the same turn is reconciled. */
   presentationRunId?: string;
+  /** Backend-authored execution group; distinct from the local presentation run ID. */
+  turnId?: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   attribution?: MessageAttribution;
   sentLocally?: true;

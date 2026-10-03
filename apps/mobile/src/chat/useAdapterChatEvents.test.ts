@@ -38,6 +38,18 @@ const session: SessionDescriptor = {
 };
 
 describe('mapAdapterChatMessage', () => {
+  it('preserves valid native turn identity for users, paragraphs and tools and rejects malformed metadata', () => {
+    for (const role of ['user', 'assistant', 'tool'] as const) {
+      expect(mapAdapterChatMessage({ id: role, role, text: '', turnId: 'native-turn' })?.turnId).toBe('native-turn');
+      for (const turnId of ['', ' padded ', 'x'.repeat(257), 42]) {
+        expect(mapAdapterChatMessage({ id: role, role, text: '', turnId } as any)?.turnId).toBeUndefined();
+      }
+    }
+    const message = mapAdapterSessionUpdate({ type: 'tool_call', sessionKey: 'chat', runId: 'run',
+      turnId: 'native-turn', inputMessageId: 'original', toolCallId: 'tool', title: 'exec' });
+    expect(message).toMatchObject({ turnId: 'native-turn', inputMessageId: 'original', message: { turnId: 'native-turn' } });
+  });
+
   it('preserves normalized history content in the existing UiMessage shape', () => {
     expect(mapAdapterChatMessage({
       id: 'message-1',

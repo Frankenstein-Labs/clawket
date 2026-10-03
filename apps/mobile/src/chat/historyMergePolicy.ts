@@ -1,6 +1,7 @@
 import { canMatchMessageAuthors } from './messageAttribution';
 import { UiMessage } from '../types/chat';
 import { finalReplyTail } from './streamText';
+import { isNewUserTurn } from './turnIdentity';
 
 const ASSISTANT_MATCH_GRACE_MS = 5_000;
 const SAME_TURN_REPLACEMENT_GRACE_MS = 60_000;
@@ -484,7 +485,13 @@ export function preserveOptimisticAssistantMessage(
 export function preserveCompletedRunPresentation(previous: UiMessage[], incoming: UiMessage[], options: { live?: boolean } = {}): UiMessage[] {
   if (!previous.some(message => message.presentationRunId)) return incoming;
   let next = incoming;
-  const boundaries = [-1, ...previous.flatMap((message, index) => message.role === 'user' ? [index] : []), previous.length];
+  const boundaries = [-1];
+  let original: UiMessage | undefined;
+  previous.forEach((message, index) => {
+    if (message.role !== 'user') return;
+    if (!original || isNewUserTurn(message, original)) { boundaries.push(index); original = message; }
+  });
+  boundaries.push(previous.length);
   for (let turn = 0; turn < boundaries.length - 1; turn++) {
     const start = boundaries[turn];
     const localRows = previous.slice(start + 1, boundaries[turn + 1]).filter(message => message.presentationRunId);
@@ -496,7 +503,9 @@ export function preserveCompletedRunPresentation(previous: UiMessage[], incoming
     )) : -1;
     if (user && anchor < 0) continue;
     if (!user && next.some(message => message.role === 'user')) continue;
-    const nextEnd = next.findIndex((message, index) => index > anchor && message.role === 'user');
+    const nextEnd = next.findIndex((message, index) => index > anchor && (user
+      ? isNewUserTurn(message, user) || Boolean(user.turnId && message.turnId && message.turnId !== user.turnId)
+      : message.role === 'user'));
     const boundary = nextEnd < 0 ? next.length : nextEnd;
     const remote = next.slice(anchor + 1, boundary);
     // Repair old cumulative live bubbles only when this turn's transcript
