@@ -32,6 +32,7 @@ export function recoverLiveRunPresentation(text: string, history: UiMessage[], t
   const tools: UiMessage[] = [];
   let tail = text;
   let committedSegments = 0;
+  const paragraphClocks: Array<number | undefined> = [];
   for (const message of history.slice(start + 1)) {
     if (original >= 0 && (isNewUserTurn(message, originalUser!) || (message.turnId && message.turnId !== turnId))) break;
     if (message.role === 'tool') {
@@ -43,13 +44,15 @@ export function recoverLiveRunPresentation(text: string, history: UiMessage[], t
       const prefix = message.text.trim();
       if (!tail.trimStart().startsWith(prefix)) break;
       tail = tail.trimStart().slice(prefix.length).trimStart();
+      const clock = finiteTimestamp(message);
+      paragraphClocks.push(clock !== undefined && clock > 0 ? clock : undefined);
       segments.push({ id: message.id, renderKey: message.renderKey ?? message.id,
         text: message.text, timestampMs: message.timestampMs ?? Date.now(), afterToolCount: tools.length });
     }
   }
   // The growing paragraph stays in the tail. Tools and proven same-turn
   // guides commit earlier paragraphs without flattening their interleaving.
-  const tailTimestampMs = segments[committedSegments]?.timestampMs;
+  const tailTimestampMs = paragraphClocks[committedSegments];
   segments.splice(committedSegments);
   return { segments, tools, tail: finalReplyTail(text, segments), tailTimestampMs };
 }
@@ -120,6 +123,7 @@ export function buildLiveRunListData(params: {
   liveStreamStartedAt: number | null;
   liveMessageTimestampMs?: number | null;
   activeRunId: string | null;
+  liveMessageTimestampMs?: number | null;
   activeTurnId?: string;
   inputMessageId?: string;
   inputMessageKey?: string;
@@ -131,7 +135,8 @@ export function buildLiveRunListData(params: {
     const recovered = recoverLiveRunPresentation(params.liveStreamText, params.historyMessages,
       params.activeTurnId, params.inputMessageId, params.inputMessageKey);
     if (recovered.segments.length) return buildLiveRunListData({ ...params,
-      streamSegments: recovered.segments, toolMessages: recovered.tools, liveStreamText: recovered.tail });
+      streamSegments: recovered.segments, toolMessages: recovered.tools, liveStreamText: recovered.tail,
+      liveMessageTimestampMs: recovered.tailTimestampMs ?? params.liveMessageTimestampMs });
   }
   const seen = new Set<string>();
   const dedupedHistory: UiMessage[] = [];
