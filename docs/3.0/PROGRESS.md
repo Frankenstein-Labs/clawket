@@ -1,5 +1,6 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+<<<<<<< HEAD
 - 2026-10-04 Codex Android QA continues; not accepted or complete.
   - Real second approval denied the original native command and preserved the first file line; three original turns/receipts, strict static code-mode command checks, no replay. Native emitted an incorrect success token after denial; App text agrees with Native. Cold QA launch recovered the first Allow completion with no new dispatch. The captured ShadowTree native crash remains unfixed. Recording 013 is fully transferred (2727.923s); timestamp-aligned samples prove at least 13 seconds of unchanged reply/layout/dock elapsed time while status rings continue moving before Android exits to Home. This supports a competing animation/commit path; it does not isolate a component or prove the candidate fix.
   - Combined Profile generation, session-action errors, local oversized-send retention and Android Markdown identity fixes: serial Controller queue 112, adapter 41, Thread, Profile 10, SessionPanel 45 and CodexService 211 passed. Protocol/Mobile/CLI types, local development CLI build and docs 9 pairs/5 cases passed. The adapter test now captures deterministic jitter only during construction and immediately restores global Math.random for error symbolication; no product error check was disabled.
@@ -80,6 +81,12 @@
   - 持 heavy 租约逐文件串行：desktop-follow 23、desktop-ipc 27、service 163、session-activity 7，共 220 项通过；Bridge 类型与 check:docs（7 指令对 / 5 检查器用例）通过。包含真实 framed socket 的断线、退休会话不重订阅与当前会话恢复；100 会话容量来自确定性 fixture，未冒称手机验收。完整门禁交本 PR CI；不重启用户 Bridge，不打分发包、不发布或部署。新代码仍需后续授权的 Bridge 更新及真机验收。
   - admission 补修持 heavy 串行再验证 service 167（新增 4 场景：实际 64 active follow、receipt 后观察写失败、warm local-owned 和 active snapshot 竞态），Bridge 类型与 check:docs 通过；其他三个未改文件保持上述结果。容量不足时两次同 key 均未接受、无 receipt/run/dispatch；容量恢复后显式新 send 只 dispatch 一次，已记录失败 key 不重放。
   - [PR #130](https://github.com/p697/clawket/pull/130) 首轮 CI 的 Mobile 三分片、types、tests/static、v1 replay、Windows/macOS Bridge 与 secret scan 通过；依赖审计唯一阻断为两份 lockfile 的 `GHSA-vfj7-8cjw-p6xm` / `braces`，required 汇总因此失败。未绕过安全门禁，PR 尚未合并，待 HT-AUDIT-BRACES-1003 的负责人决策。
+=======
+- 2026-10-04 Android PresenceRing 原生动画驱动（Codex 真机审批冻结/ShadowTree commit-exhaustion 调查中的独立减负）。
+  - Android 的共享状态环改用 RN Animated 原生旋转/透明度驱动；保留原 SVG、颜色、1.4 秒工作转圈、双 1.2 秒二次缓动呼吸、状态语义和无障碍，iOS 保持现有 Reanimated。后台/非活动、减少动态效果、卸载停止，状态切换重置，普通渲染不重启循环。
+  - RN 0.86.3 Stable 源码确认逐帧同步 View 属性路径不经过 ShadowTree commit；仅减少一个已知持续竞争源，不把真实审批冻结/SIGABRT 的根因或修复宣称已证实。不改 RN flag、依赖、原生代码、设备、用户服务或凭据，不打包/发布。
+  - 实际 PresenceRing 组件回归基线 8 项失败、4 项既有外观/iOS 通过；窄修改后 12 项通过，包含每个 60Hz 呼吸采样与原正反缓动对照。串行验证：PresenceRing 12、ThreadView 166、SessionActivityRing 2、SessionPanel 34，共 214 项通过；Mobile 类型、UI 样式 246 文件、文档 7 指令对/5 用例通过。真机审批复测见 HT-ANDROID-PRESENCE-1004。
+>>>>>>> 913ca07b (fix(mobile): animate Android presence rings with native driver)
 
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
@@ -1463,6 +1470,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+<<<<<<< HEAD
 | HT-CODEX-ACTIONS-AUDIT-1004 | Codex 会话操作拒绝修复的审计合并阻挡 | 负责人决定既有 braces GHSA-vfj7-8cjw-p6xm 的修复或经批准窄范围例外；代理不绕过门禁。 | required audit 全绿后才可合并；当前仅本机自动回归通过，手机验收继续由主 QA 任务执行。 | 待审计决定；未合并、未发布 |
 | HT-AUDIT-BRACES-1003 | 新 braces 高危公告阻挡 PR 的依赖门禁决策 | 当前 `GHSA-vfj7-8cjw-p6xm` / `braces` 3.0.3 无 npm 已发布修补版本；由负责人选择等待修补，或明确批准该单条 advisory 的有期限例外及理由。代理不自行加例外、改安全门禁或绕过合并保护。 | 两份 lockfile 的 dependency-audit 按选定方案通过；受影响 PR rebase fresh main 后 required 全绿才合并。 | PR #127 源码相关 CI 全通过，但依赖审计失败；尚未合并，待负责人决策。 |
 
@@ -1470,6 +1478,9 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | HT-AUDIT-BRACES-1003 | 新 braces 高危公告阻挡 PR 的依赖门禁决策 | 两份 lockfile 触发 `GHSA-vfj7-8cjw-p6xm` / `braces`；由负责人决定修补方案，或明确批准该单条 advisory 的有期限例外及理由。代理不自行加例外、改安全门禁或绕过合并保护。 | 两份 lockfile 的 dependency-audit 按选定方案通过；受影响 PR rebase fresh main 后 required 全绿才合并。 | PR #130 源码相关 CI 全通过，但依赖审计失败；尚未合并，待负责人决策。 |
 | HT-CODEX-REPLY-CLOCK-1004 | Codex 回复时间修复的 CI 审计合并门禁 | 由负责人处理既有 braces 高危公告 GHSA-vfj7-8cjw-p6xm；本任务没有例外授权，不扩大到依赖更新或绕过保护。 | 当前 main 上完整必需 CI 全绿后才能合并；组合开发候选的手机验收仍可独立继续。 | 代码、258 项窄回归与类型/文档已通过，PR CI 待确认；审计处理待负责人。 |
+=======
+| HT-ANDROID-PRESENCE-1004 | Android 审批切换原生崩溃减负复测 | 负责人在包含本修复的独立 QA App 上执行新建会话的审批允许→工具→正文/工作坞切换，并继续测试工作/等待环、后台恢复及减少动态效果；保留录像/原生日志。 | 外观节奏/状态/无障碍保持，循环后台停止；验证原冻结与 ShadowTree commit-exhaustion 是否仍复现。仅通过自动化或环继续转动不代表崩溃已解决。 | 源码窄修改与组件回归通过；待负责人串行组合验证和真机复测，未打包/发布。 |
+>>>>>>> 913ca07b (fix(mobile): animate Android presence rings with native driver)
 | HT-NATIVE-NAME-1002 | 新增原生连接电脑名修复的 Bridge 交付与手机验收 | 在另行授权的 Bridge 发布/更新后，用旧设备配置执行显式 Codex / Claude Code pair，再在手机新增连接；普通运行不会自行补名称，已有连接可在连接设置手动改名。 | 新连接显示 Product · 电脑名；旧手机继续连接，已有/手动名称不被重配覆盖。本次只改源码并由 CI 验证，不发布、不修改现有配对配置。 | 待负责人授权交付与验收 |
 | HT-USER-FOLD-1002 | 用户消息折叠的双端体验验收 | 在包含本轮代码的开发 App 或后续授权更新中，查看中英文长消息、连续换行、带图片 / 文件的消息；调整字号并在 iPad 分栏查看。 | 默认 6 行，展开 / 收起可达且阅读不被拉向页尾；时间和送达标记不盖文字；长按状态一致、复制 / 分享保留全文；短消息及助手回复照旧。 | 定向自动化已通过；待负责人真机视觉 / 手感验收，本轮未打包或发布。 |
 | HT-HERMES-GATEWAY-KEY-1002 | Hermes gateway 所有权恢复（#69）的发布决定 | 3.1.10 从 `accfe2f4` 起，不含本修复；由负责人决定随哪个 Bridge 版本发布 | 升级后用 `clawket pair --backend hermes --restart-hermes` 让新 bridge 启动并记录 gateway，再 `clawket reset` 后重新配对：手机应直接连上，`hermes-bridge.log` 出现 `owner=clawket`；没有记录的旧 gateway 应在配对时失败并提示 `--restart-hermes` | 待负责人决定；本轮不打包、不发布。 |
