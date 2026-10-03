@@ -1057,7 +1057,7 @@ export function ThreadView({
       offset: nativeEvent.contentOffset.y,
     };
     scrollMetricsRef.current = metrics;
-    if (readerScrollingRef.current) updateHistoryAnchor(metrics.offset);
+    updateHistoryAnchor(metrics.offset, readerScrollingRef.current);
     refreshScrollButton();
     // Rows inserted above a short top-anchored list (older history, a preview
     // unlocked) make the anchor correction push the offset past the end; iOS

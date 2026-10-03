@@ -9,21 +9,25 @@ type List = {
   scrollToOffset: (options: { offset: number; animated: boolean }) => void;
 };
 type Anchor = { scope: string; list: List; key: string; viewportY: number; correction: number | null };
+type Corrections = { scope: string; list: List; offsets: Array<{ offset: number; seen: boolean }> };
 
 /** A conditional date separator is not a surviving row when an earlier page joins its minute. */
 export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | null>, rows: ReadonlyArray<Row>) {
   const latest = useRef({ scope, rows });
   latest.current = { scope, rows };
   const anchor = useRef<Anchor | null>(null);
+  const corrections = useRef<Corrections | null>(null);
   const managedScope = useRef<string | null>(null);
   const [managed, setManaged] = useState<string | null>(null);
   const isActive = useCallback(() => anchor.current?.scope === latest.current.scope
     && anchor.current.list === listRef.current, [listRef]);
   const release = useCallback(() => {
     anchor.current = null;
+    corrections.current = null;
   }, []);
   useLayoutEffect(() => {
     if (anchor.current?.scope !== scope) anchor.current = null;
+    if (corrections.current?.scope !== scope) corrections.current = null;
     if (managedScope.current !== scope) {
       managedScope.current = null;
       setManaged(null);
@@ -68,22 +72,35 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
       if (!Number.isFinite(offset) || Math.abs(offset - saved.list.getAbsoluteLastScrollOffset()) < 0.5
         || (saved.correction !== null && Math.abs(offset - saved.correction) < 0.5)) return;
       saved.correction = offset;
+      if (corrections.current?.scope !== current.scope || corrections.current.list !== saved.list) {
+        corrections.current = { scope: current.scope, list: saved.list, offsets: [] };
+      }
+      const pending = corrections.current.offsets;
+      const existing = pending.find(value => Math.abs(value.offset - offset) < 0.5);
+      if (existing) existing.seen = false;
+      else pending.push({ offset, seen: false });
+      if (pending.length > 32) pending.splice(0, pending.length - 32);
       saved.list.scrollToOffset({ offset, animated: false });
     } catch {
       release();
     }
   }, [listRef, release]);
-  const readerScrolled = useCallback((offset: number) => {
-    if (!isActive()) return;
-    const saved = anchor.current!;
-    // A compensation's native event is not a new reading position.
-    if (saved.correction !== null && Math.abs(offset - saved.correction) < 0.5) {
-      saved.correction = null;
+  const readerScrolled = useCallback((offset: number, reading = true) => {
+    const pending = corrections.current;
+    const correction = pending?.scope === latest.current.scope && pending.list === listRef.current
+      ? pending.offsets.find(value => Math.abs(offset - value.offset) < 0.5) : undefined;
+    // Several estimated-height corrections may be in flight. An older native
+    // event (or its end-drag duplicate) must not replace the current reader anchor.
+    if (correction) {
+      correction.seen = true;
+      if (anchor.current?.correction !== null && anchor.current?.correction !== undefined
+        && Math.abs(offset - anchor.current.correction) < 0.5) anchor.current.correction = null;
       return;
     }
-    capture(offset);
-  }, [capture, isActive]);
+    if (reading && isActive()) capture(offset);
+  }, [capture, isActive, listRef]);
   const beginDrag = useCallback((pagePending: boolean) => {
+    if (corrections.current) corrections.current.offsets = corrections.current.offsets.filter(value => !value.seen);
     if (managedScope.current === latest.current.scope || (pagePending && isActive())) capture();
     else release();
   }, [capture, isActive, release]);
