@@ -1,9 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
-- 2026-10-03 Codex 工具完成状态与历史重载一致性（负责人要求全面真机测试中即时修复）。
-  - 原生 WebSearch 项可以没有 `status`；Desktop 恢复快照此前只比较原始 status，导致完成搜索实时仍显示进行中、历史刷新才变完成。同一完成状态的工具输出修正、非零退出码也被漏掉。改按 Codex 历史已有的状态/输出投影去重，保持同一工具行，重复快照不重复完成；未知非搜索工具和回合仍不推定结束。
-  - Bridge 所有的无 status 搜索通知只在进行中回合的内存覆盖中保留已确认 started/completed 生命周期，避免搜索刚开始就被历史刷新标成完成。原始原生项和文件保持只读；OpenClaw、Hermes、Pi 路径不变。
-  - 新增 5 项可观察协议/历史回归，覆盖无 status 成功/失败搜索的实时→活跃历史→Desktop follower→终态历史、Desktop 首次及重复快照、running→隐式完成，以及同 status 的输出/退出码修正。独立工作树 npm ci 后，逐文件串行 `src/codex/service.test.ts` 163 项、Bridge 类型检查、check:docs 7 指令对/5 用例通过；只读 peer review 无阻挡。未操作设备、重启现有 Bridge 或发布，Android 验收继续由本轮 Codex 实机任务完成。
+- 2026-10-03 Codex 工具状态与历史重载一致性（负责人要求全面真机测试中即时修复）。
+  - 原生 WebSearch/ImageView 可以没有 `status`；Desktop 恢复此前强制先发 running，之后又漏掉无 status 完成和未知工具更新，导致只剩一个真实工具时仍显示 11～15 步并行。按历史的状态/输出投影发送初始状态及变化，保留同一工具行、重复快照去重、同 status 输出/非零退出码修正；明确未知状态不推定运行或完成，回合不因工具结果而结束。
+  - 最低支持的官方原生代码证明 ImageView canonical 历史只在 completed 的 ViewImageToolCall 上写入；隔离 CODEX_HOME 生成当前 Desktop 0.160.0 schema，确认 ImageView 仅 id/path/type、搜索也无 status，元数据证据存入本轮共享 evidence。只有无 status 的已知历史契约可隐式成功，显式未知/运行/失败优先。Bridge 所有的搜索/图片查看通知只在 active run 的内存覆盖中保留已确认 started/completed；冷历史、活跃历史与 follower 保持一致，原生项/文件不改。
+  - 可选初始 `tool_call.status`、unknown update 与 history `statusReported` 向后兼容：缺字段仍按旧后端 live start；明确 unknown 不计并行、不建完成时钟、不触发 settled recovery，历史合并也不回填旧完成时钟。Claude/Pi 旧 missing-result fallback、OpenClaw/Hermes 缺省路径保留。回归覆盖十次已完成图片查看加一个正在执行命令、unknown↔running、冻结原生对象及 live/active/cold history。
+  - 独立工作树 npm ci 后逐文件串行：Bridge history 28、service 166；Mobile adapter-events 18、turn-work 15、history 157、controller contract 61、historyMergePolicy 57（共 502）；protocol/Mobile/Bridge 类型与 docs 通过，Bridge/Mobile 只读 peer review 无阻挡。未碰设备、重启用户 Bridge、发布或改账号；Android 组合候选验收由本轮根任务继续。PR131 既有 CI 仅未获批准的 braces 高危审计红，禁止绕过，更新后的 CI 继续等待。
 
 - 2026-10-03 Codex Desktop 跟随恢复时保留文本、工具和任务顺序（负责人授权全面 Android Codex 体验测试与修复）。
   - 原快照先把整轮助手文本拼完，再发全部工具，恢复正在运行的会话会把工具后的文字挤到首个工具前；现在每个新工具只先接收它之前的累计文本，最后再更新尾部。重复快照、普通尾部增长及较早文本校正不再临时回放缩短的前缀或重复工具。

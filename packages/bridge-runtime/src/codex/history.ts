@@ -42,7 +42,10 @@ export function codexTool(item: any): ChatMessage['tool'] | undefined {
   const names: Record<string, string> = { commandExecution: 'exec', fileChange: 'apply_patch', mcpToolCall: item.tool ?? 'MCP', dynamicToolCall: item.tool ?? 'tool', webSearch: 'web_search', collabAgentToolCall: item.tool ?? 'agent', imageView: 'view_image', imageGeneration: 'image_generation' };
   if (!names[item.type]) return undefined;
   const failed = ['failed', 'declined', 'interrupted'].includes(item.status) || (typeof item.exitCode === 'number' && item.exitCode !== 0) || !!item.error;
-  return { callId: item.id, name: names[item.type], status: failed ? 'error' : item.status === 'inProgress' ? 'running' : item.status === 'completed' || item.type === 'webSearch' ? 'success' : 'unknown',
+  // Native ImageView enters canonical history only after its completed event.
+  // Other tools without an execution status still lack outcome evidence.
+  const implicitCompleted = ['webSearch', 'imageView'].includes(item.type) && item.status === undefined;
+  return { callId: item.id, name: names[item.type], statusReported: true, status: failed ? 'error' : item.status === 'inProgress' ? 'running' : item.status === 'completed' || implicitCompleted ? 'success' : 'unknown',
     input: item.type === 'commandExecution' ? { command: item.command, cwd: item.cwd } : item.type === 'fileChange' ? { changes: item.changes } : item.arguments ?? { query: item.query, path: item.path },
     output: item.type === 'imageGeneration' ? (item.status === 'completed' && !item.failure ? 'Image generated' : '')
       : String(item.aggregatedOutput ?? (item.result ? JSON.stringify(item.result) : item.error ? JSON.stringify(item.error) : item.type === 'fileChange' ? JSON.stringify(item.changes) : '')).slice(0, 32000) };
