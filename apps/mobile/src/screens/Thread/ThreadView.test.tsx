@@ -92,6 +92,10 @@ let mockRenderMessageClone = false;
 const mockScrollToEnd = jest.fn();
 /** Geometry the FlashList mock reports from its imperative handle. */
 const mockListLayout = { content: 0, viewport: 0 };
+let mockHistoryGeometry: { first: number; offset: number; header: number; positions: number[] } | null = null;
+const mockScrollToOffset = jest.fn(({ offset }: { offset: number }) => {
+  if (mockHistoryGeometry) mockHistoryGeometry.offset = offset;
+});
 const originalRaf = global.requestAnimationFrame;
 const originalCancelRaf = global.cancelAnimationFrame;
 beforeAll(() => {
@@ -233,6 +237,12 @@ jest.mock('@shopify/flash-list', () => {
         getNativeScrollRef: () => ({ scrollToEnd: mockScrollToEnd }),
         getChildContainerDimensions: () => ({ width: 393, height: mockListLayout.content }),
         getWindowSize: () => ({ width: 393, height: mockListLayout.viewport }),
+        getFirstVisibleIndex: () => mockHistoryGeometry?.first ?? 0,
+        getLayout: (index: number) => mockHistoryGeometry?.positions[index] === undefined
+          ? undefined : { y: mockHistoryGeometry.positions[index] },
+        getFirstItemOffset: () => mockHistoryGeometry?.header ?? 0,
+        getAbsoluteLastScrollOffset: () => mockHistoryGeometry?.offset ?? 0,
+        scrollToOffset: mockScrollToOffset,
       }), []);
       return ReactRuntime.createElement(
       View,
@@ -497,6 +507,8 @@ describe('ThreadView', () => {
   let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    mockHistoryGeometry = null;
+    mockScrollToOffset.mockClear();
     mockScheme = 'light';
     mockPacedText = undefined;
     mockReducedMotion = false;
@@ -1136,7 +1148,10 @@ describe('ThreadView', () => {
     expect(props.onChangeInput).not.toHaveBeenCalled();
     view.rerender(<ThreadView {...props} historyLoadMoreError={false} />);
     expect(view.queryByTestId('thread-screen-history-retry')).toBeNull();
-    act(() => { view.getByTestId('thread-screen-timeline').props.onStartReached(); });
+    act(() => {
+      view.getByTestId('thread-screen-timeline').props.onScrollBeginDrag();
+      view.getByTestId('thread-screen-timeline').props.onStartReached();
+    });
     expect(props.onLoadMoreHistory).toHaveBeenCalledTimes(1);
   });
 
@@ -1217,6 +1232,7 @@ describe('ThreadView', () => {
     fireEvent.press(view.getByTestId('thread-screen-composer-add'));
     expect(view.queryByTestId('thread-screen-composer-voice')).toBeNull();
     fireEvent.press(view.getByTestId('thread-screen-composer-primary'));
+    view.getByTestId('thread-screen-timeline').props.onScrollBeginDrag();
     view.getByTestId('thread-screen-timeline').props.onStartReached();
     fireEvent.press(view.getByTestId('tools:tool-1'));
     fireEvent.press(view.getByTestId('thread-run-tool-1'));
@@ -2232,7 +2248,65 @@ describe('ThreadView', () => {
       expect(view.getByTestId('thread-screen-composer-input')).toBe(input);
     });
 
-  it('keeps following when a short conversation reaches its top on a layout change while the reader rests at the end', () => {
+  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const)(
+    'preserves a stable %s message screen position when paging removes the first date separator, without chaining pages', async backend => {
+      jest.useFakeTimers();
+      let complete!: () => void;
+      const page = new Promise<void>(resolve => { complete = resolve; });
+      const onLoadMoreHistory = jest.fn().mockImplementationOnce(() => page).mockResolvedValue(undefined);
+      const stamp = new Date('2026-10-03T10:14:00Z').getTime();
+      const props = createProps({ capabilities: CAPABILITY_MATRIX[backend], onLoadMoreHistory, messages: [
+        { id: '26', role: 'assistant', text: 'Reply 26', timestampMs: stamp + 1000 },
+        { id: '25', role: 'user', text: 'Read 25', timestampMs: stamp },
+      ] });
+      mockHistoryGeometry = { first: 0, offset: 100, header: 80, positions: [0, 60, 220] };
+      mockListLayout.content = 900;
+      mockListLayout.viewport = 600;
+      const view = render(<ThreadView {...props} />);
+      const timeline = () => view.getByTestId('thread-screen-timeline');
+      fireEvent(timeline(), 'load', { elapsedTimeInMs: 5 });
+      act(() => timeline().props.onCommitLayoutEffect());
+      const previousDate = timeline().props.data[0].key;
+      act(() => {
+        timeline().props.onScrollBeginDrag();
+        timeline().props.onScroll({ nativeEvent: { contentSize: { height: 900 },
+          layoutMeasurement: { height: 600 }, contentOffset: { y: 100 } } });
+        timeline().props.onStartReached();
+      });
+      expect(timeline().props.maintainVisibleContentPosition).toEqual({ disabled: true });
+      view.rerender(<ThreadView {...props} messages={[...props.messages,
+        { id: '09', role: 'user', text: 'Earlier 09', timestampMs: stamp - 1000 },
+      ]} />);
+      expect(timeline().props.data.some((row: { key: string }) => row.key === previousDate)).toBe(false);
+      mockHistoryGeometry.positions = [0, 60, 2060, 2220];
+      mockListLayout.content = 2900;
+      mockScrollToEnd.mockClear();
+      act(() => { timeline().props.onContentSizeChange(393, 2900); timeline().props.onCommitLayoutEffect(); });
+      expect(mockHistoryGeometry.positions[2]! + mockHistoryGeometry.header - mockHistoryGeometry.offset).toBe(40);
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 2100, animated: false });
+      await act(async () => { complete(); await page; });
+      act(() => { timeline().props.onStartReached(); timeline().props.onStartReached(); jest.advanceTimersByTime(50); });
+      expect(onLoadMoreHistory).toHaveBeenCalledTimes(1);
+      expect(mockScrollToEnd).not.toHaveBeenCalled();
+      // The composer and list retain their original instances.
+      expect(view.getAllByTestId('thread-screen-timeline')).toHaveLength(1);
+      mockHistoryGeometry.first = 2;
+      await act(async () => { timeline().props.onScrollBeginDrag(); timeline().props.onStartReached(); });
+      expect(onLoadMoreHistory).toHaveBeenCalledTimes(2);
+      act(() => {
+        timeline().props.onMomentumScrollEnd({ nativeEvent: { contentSize: { height: 2900 },
+          layoutMeasurement: { height: 600 }, contentOffset: { y: 2300 } } });
+      });
+      mockScrollToOffset.mockClear();
+      view.rerender(<ThreadView {...props} messages={[
+        { id: '27', role: 'assistant', text: 'New reply', timestampMs: stamp + 2000 }, ...props.messages,
+      ]} />);
+      mockListLayout.content = 3200;
+      act(() => timeline().props.onCommitLayoutEffect());
+      expect(mockScrollToOffset).not.toHaveBeenCalled(); // Returning to bottom retires the reading anchor.
+    });
+
+  it('keeps following without paging when a short conversation reaches its top on a layout change', () => {
     jest.useFakeTimers();
     const props = createProps({ messages: [{ id: 'newest', role: 'user', text: 'Run the tests' }] });
     const view = render(<ThreadView {...props} />);
@@ -2243,7 +2317,7 @@ describe('ThreadView', () => {
     act(() => timeline.props.onCommitLayoutEffect());
     // The work dock rising moves the viewport; FlashList reports its top again.
     act(() => { timeline.props.onStartReached(); });
-    expect(props.onLoadMoreHistory).toHaveBeenCalledTimes(1);
+    expect(props.onLoadMoreHistory).not.toHaveBeenCalled();
     mockScrollToEnd.mockClear();
     view.rerender(<ThreadView {...props} messages={[{ id: 'reply', role: 'assistant', text: 'All green.' }, ...props.messages]} />);
     mockListLayout.content = 700;
