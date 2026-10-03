@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 最终答复重载后时间回退（负责人真机 219→220 与视频 010：同一回复从完成时刻退回 31 分钟前的请求时刻，时间分隔随之消失）。
+  - 原因：实时成功 final 使用手机收到完成通知的时间，原生历史所有行却使用 turn.startedAt。已有 unknown 工具状态/时钟修复与这个正文时间问题无关。
+  - 依据：官方 Native Turn.completedAt 是 Unix 秒；last_agent_message 只认可最后一条非空 final_answer 或旧模型 absent/null phase。已完成 final 和生成图片附件统一原生完成时间；用户、commentary、plan、工具以及缺失/非法/未知原生时间的既有 fallback 保留。协议只增加可选 FinalMessage.timestampMs，不改变其它后端未提供此字段时的行为。
+  - 验证：Bridge 历史基线 3 红、实际 Mobile controller（普通/含工具）基线 2 红；修复后逐文件串行 history 35、service 171、Mobile adapter 26、controller 26，共 258 项通过，包含旧模型分页、未知 phase（包括 final 后追加 commentary/unknown 不借时钟）、非法时间、Desktop 完成先于 ACK、图片 final 与反复 canonical reload 的气泡/时间分隔不变。Protocol/Mobile/Bridge 类型、文档 7 组指令对/5 项检查器用例与 diff 检查通过。本任务不操作手机、Native、RPC、账户或运行中的服务；负责人随后集成验收，未发布。完整门禁交 PR CI；依赖审计 braces 公告仍等待负责人处理，不能绕过合并门禁。
+
 - 2026-10-04 Codex 全面 Android QA 中间验收（持续进行，未完成）。
   - 专用 Preview / QA App 保留原数据；新会话和六天前 QA 会话真实单次发送完成，八个模型均由实际 native turn/context/usage 验证。旧会话可能保留 warm owner，Fast 仅 settings 元数据，均不冒充 cold resume / actual tier。原 Production Bridge、商店 App 与其他后端服务未变。
   - 真实原生 Plan 阻塞请求两题：推荐选项、自定义答案在关闭 Sheet、后台与 force-stop/cold launch 后保留；手机一次 Submit 后唯一 same-call / original-turn output 证明两题答案收到，原回合完成。记录只读 live observer 与 native rollout 各自证据边界。
@@ -1441,6 +1446,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 | HT-BRACES-AUDIT-1003 | 新 braces 公告的临时审计例外决定 | 官方修复或负责人明确批准一条指定公告/包、有原因和到期日的临时例外；不能因 Codex QA 紧急或本地测试通过而绕过门禁。 | root 与 Mobile lockfile 的 GHSA-vfj7-8cjw-p6xm / braces high 消除或通过获批规则；各 PR 对齐 main 后完整门禁再绿。 | PR #128 的功能与类型/static/v1 CI 已通过；现有依赖审计阻塞合并，待负责人决定。 |
 
 | HT-AUDIT-BRACES-1003 | 新 braces 高危公告阻挡 PR 的依赖门禁决策 | 两份 lockfile 触发 `GHSA-vfj7-8cjw-p6xm` / `braces`；由负责人决定修补方案，或明确批准该单条 advisory 的有期限例外及理由。代理不自行加例外、改安全门禁或绕过合并保护。 | 两份 lockfile 的 dependency-audit 按选定方案通过；受影响 PR rebase fresh main 后 required 全绿才合并。 | PR #130 源码相关 CI 全通过，但依赖审计失败；尚未合并，待负责人决策。 |
+| HT-CODEX-REPLY-CLOCK-1004 | Codex 回复时间修复的 CI 审计合并门禁 | 由负责人处理既有 braces 高危公告 GHSA-vfj7-8cjw-p6xm；本任务没有例外授权，不扩大到依赖更新或绕过保护。 | 当前 main 上完整必需 CI 全绿后才能合并；组合开发候选的手机验收仍可独立继续。 | 代码、258 项窄回归与类型/文档已通过，PR CI 待确认；审计处理待负责人。 |
 | HT-NATIVE-NAME-1002 | 新增原生连接电脑名修复的 Bridge 交付与手机验收 | 在另行授权的 Bridge 发布/更新后，用旧设备配置执行显式 Codex / Claude Code pair，再在手机新增连接；普通运行不会自行补名称，已有连接可在连接设置手动改名。 | 新连接显示 Product · 电脑名；旧手机继续连接，已有/手动名称不被重配覆盖。本次只改源码并由 CI 验证，不发布、不修改现有配对配置。 | 待负责人授权交付与验收 |
 | HT-USER-FOLD-1002 | 用户消息折叠的双端体验验收 | 在包含本轮代码的开发 App 或后续授权更新中，查看中英文长消息、连续换行、带图片 / 文件的消息；调整字号并在 iPad 分栏查看。 | 默认 6 行，展开 / 收起可达且阅读不被拉向页尾；时间和送达标记不盖文字；长按状态一致、复制 / 分享保留全文；短消息及助手回复照旧。 | 定向自动化已通过；待负责人真机视觉 / 手感验收，本轮未打包或发布。 |
 | HT-HERMES-GATEWAY-KEY-1002 | Hermes gateway 所有权恢复（#69）的发布决定 | 3.1.10 从 `accfe2f4` 起，不含本修复；由负责人决定随哪个 Bridge 版本发布 | 升级后用 `clawket pair --backend hermes --restart-hermes` 让新 bridge 启动并记录 gateway，再 `clawket reset` 后重新配对：手机应直接连上，`hermes-bridge.log` 出现 `owner=clawket`；没有记录的旧 gateway 应在配对时失败并提示 `--restart-hermes` | 待负责人决定；本轮不打包、不发布。 |
