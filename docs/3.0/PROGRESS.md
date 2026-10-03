@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex Profile 返回页面后的迟到写入确认（完整连接体验测试中的独立修复）。
+  - Skill 切换等待确认时仍可打开 SKILL.md；返回后新读取的状态会被旧切换 ACK 覆盖，同一焦点往返也能让旧失败提示重新出现，或让之前的「使用 Skill」创建结果迟到导航。原逻辑只比较当前 focused 布尔值，无法区分离开前后两个页面代际。
+  - Profile mutation 增加按已提交 adapter/project/section/online/focus 状态更新的代际栅栏；旧成功、失败和导航结果不再覆盖返回后的读取。正常确认、写锁、原生 CAS 与不重放写入保持现有行为；未修改其它后端或 Bridge。
+  - 三条确定性回归在原代码上失败，修复后 NativeProfileScreen.test.tsx 10 项 in-band 通过；Mobile 类型、UI 样式（246 文件）、应用配置（7 项）、设计系统文档与 check:docs（7 指令对 / 5 项）通过。exact-head CI 结果在本任务 PR 记录，负责人实际手机 Profile 验收仍独立进行。未操作 Native/手机、重启运行服务、构建或发布。
+
 - 2026-10-04 Codex Android 深测继续：真实命令审批与分页录屏残留问题（未完成）。
   - 当前 QA JS / 独立 Preview Bridge 均来自 `8f502810`，Native 0.160.0。长等待答题后的 final 在 cold history 保持完成时刻/时间分隔；另一真实命令审批等待数分钟后 final 也显示完成时刻。五个 GPT-6-Luna effort、跨会话设置隔离与 archive/restore 已用原生完成记录和私有身份基线核对；Fast actual tier 仍未报告。
   - 两个 fresh Read-only 会话产生真实 command approval：手机单次拒绝后同 original item declined、原 turn 完成、文件不存在；单次仅允许一次后同 item completed/exit zero、原 turn 完成、测试文件恰好一行。后台返回仍保持原请求。Native rollout 缺少瞬时 command terminal 的边界保留，严格 code-mode 包装核对与第二次写入重新审批仍待完成，不能仅靠卡片消失判断授权。
