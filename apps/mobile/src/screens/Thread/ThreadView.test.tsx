@@ -2306,6 +2306,69 @@ describe('ThreadView', () => {
       expect(mockScrollToOffset).not.toHaveBeenCalled(); // Returning to bottom retires the reading anchor.
     });
 
+  it.each([false, true])('preserves 25 when an old zero-offset end-drag arrives between the prepend commit and native size growth (fresh old-child drag: %s)', freshDrag => {
+    jest.useFakeTimers();
+    const originalScroll = mockScrollToOffset.getMockImplementation()!;
+    let nativeMaximum = 1500;
+    mockScrollToOffset.mockImplementation(({ offset }) => {
+      if (mockHistoryGeometry) mockHistoryGeometry.offset = Math.min(offset, nativeMaximum);
+    });
+    const stamp = new Date('2026-10-03T10:14:00Z').getTime();
+    const props = createProps({ capabilities: CAPABILITY_MATRIX.codex, messages: [
+      { id: '26', role: 'assistant', text: 'Reply 26', timestampMs: stamp + 1000 },
+      { id: '25', role: 'user', text: 'Read 25', timestampMs: stamp },
+    ] });
+    mockHistoryGeometry = { first: 0, offset: 0, header: 80, positions: [0, 60, 220] };
+    mockListLayout.content = 2100;
+    mockListLayout.viewport = 600;
+    const view = render(<ThreadView {...props} />);
+    try {
+      const timeline = () => view.getByTestId('thread-screen-timeline');
+      const scroll = (offset: number, height = 2100) => ({ nativeEvent: { contentSize: { height },
+        layoutMeasurement: { height: 600 }, contentOffset: { y: offset } } });
+      fireEvent(timeline(), 'load', { elapsedTimeInMs: 5 });
+      act(() => timeline().props.onCommitLayoutEffect());
+      act(() => {
+        timeline().props.onScrollBeginDrag(scroll(0));
+        timeline().props.onScroll(scroll(0));
+        timeline().props.onStartReached();
+      });
+      view.rerender(<ThreadView {...props} messages={[...props.messages,
+        { id: '09', role: 'user', text: 'Earlier 09', timestampMs: stamp - 1000 },
+      ]} />);
+      mockHistoryGeometry.positions = [0, 60, 2060, 2220];
+      mockListLayout.content = 4900;
+      act(() => timeline().props.onCommitLayoutEffect());
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 2000, animated: false });
+      // The gesture reached the old page head before its response; its delayed
+      // release still carries offset 0 and the old native content height.
+      mockHistoryGeometry.first = 0;
+      mockHistoryGeometry.offset = 0;
+      act(() => timeline().props.onScrollEndDrag(scroll(0)));
+      act(() => jest.advanceTimersByTime(160));
+      if (freshDrag) {
+        act(() => timeline().props.onScrollBeginDrag(scroll(0)));
+        act(() => timeline().props.onScroll(scroll(0)));
+      }
+      nativeMaximum = 4300;
+      // Native onScroll can report the grown child before onContentSizeChange;
+      // that must not make the latter discard the pending same-target retry.
+      act(() => timeline().props.onScroll(scroll(0, 4900)));
+      act(() => timeline().props.onContentSizeChange(393, 4900));
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 2000, animated: false });
+      expect(mockHistoryGeometry.positions[2]! + mockHistoryGeometry.header - mockHistoryGeometry.offset).toBe(140);
+      act(() => timeline().props.onScroll(scroll(2000, 4900)));
+      act(() => timeline().props.onScrollEndDrag(scroll(0)));
+      act(() => timeline().props.onCommitLayoutEffect());
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 2000, animated: false });
+      expect(props.onLoadMoreHistory).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      mockScrollToOffset.mockImplementation(originalScroll);
+      jest.useRealTimers();
+    }
+  });
+
   it.each([false, true])('retries an Android prepend after native content size commits instead of retaining the old maximum offset: settled=%s', settled => {
     jest.useFakeTimers();
     const originalScroll = mockScrollToOffset.getMockImplementation()!;

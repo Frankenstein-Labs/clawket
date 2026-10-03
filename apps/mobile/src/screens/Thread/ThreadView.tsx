@@ -978,7 +978,8 @@ export function ThreadView({
     // Preserve a surviving content row before considering end-follow corrections.
     if (!followNewMessagesRef.current) {
       const { height, viewport } = scrollMetricsRef.current;
-      restoreHistoryAnchor({ nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined });
+      restoreHistoryAnchor({ nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined,
+        nativeOffset: viewport > 0 ? scrollMetricsRef.current.offset : undefined });
     }
     let content: number;
     let viewport: number;
@@ -1062,7 +1063,7 @@ export function ThreadView({
     scrollMetricsRef.current = metrics;
     // A queued compensation/clamp event supplies native sizing but cannot turn
     // the reader's old-height maximum into an intent to follow the bottom.
-    if (!updateHistoryAnchor(metrics.offset, readerScrollingRef.current)) refreshScrollButton();
+    if (!updateHistoryAnchor(metrics.offset, readerScrollingRef.current, metrics.height)) refreshScrollButton();
     // Rows inserted above a short top-anchored list (older history, a preview
     // unlocked) make the anchor correction push the offset past the end; iOS
     // keeps it there as blank space until the next touch. A reader's own
@@ -1107,8 +1108,9 @@ export function ThreadView({
     loadedTimelineRef.current = list;
     uiFollowRef.current = Platform.OS === 'android' && uiFollow.bind(list?.getNativeScrollRef?.()) ? uiFollow : null;
   }, [uiFollow]);
-  const handleScrollBeginDrag = useCallback(() => {
-    beginHistoryDrag(historyPagingBusyRef.current);
+  const handleScrollBeginDrag = useCallback((event?: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const native = event?.nativeEvent;
+    beginHistoryDrag(historyPagingBusyRef.current, native ? { offset: native.contentOffset.y, height: native.contentSize.height } : undefined);
     historyDragRef.current?.();
     // The reader's finger takes over any glide in flight.
     cancelReaderSettle();
@@ -1127,13 +1129,14 @@ export function ThreadView({
       // Native size confirms that a previously clamped prepend can now reach
       // the same planned offset, even without another JS layout commit.
       const { viewport } = scrollMetricsRef.current;
-      if (changed) restoreHistoryAnchor({
+      if (changed || historyCorrectionPending()) restoreHistoryAnchor({
         nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined,
+        nativeOffset: scrollMetricsRef.current.offset,
         nativeGeometryCommitted: true,
       });
       refreshScrollButton();
     }
-  }, [refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
+  }, [historyCorrectionPending, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   const handleTimelineLayout = useCallback((event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
     const changed = scrollMetricsRef.current.viewport !== height;
@@ -1141,13 +1144,14 @@ export function ThreadView({
     if (followNewMessagesRef.current) {
       if (changed) scheduleBottomFollow(true);
     } else {
-      if (changed) restoreHistoryAnchor({
+      if (changed || historyCorrectionPending()) restoreHistoryAnchor({
         nativeMaxOffset: height > 0 ? Math.max(0, scrollMetricsRef.current.height - height) : undefined,
+        nativeOffset: scrollMetricsRef.current.offset,
         nativeGeometryCommitted: true,
       });
       refreshScrollButton();
     }
-  }, [refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
+  }, [historyCorrectionPending, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   useLayoutEffect(() => {
     cancelReaderSettle();
     cancelBottomFollow();
