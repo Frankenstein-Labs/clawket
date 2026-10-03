@@ -7,7 +7,8 @@ jest.mock('./components/SessionFilesSheet', () => ({ SessionFilesSheet: () => nu
 import { createReplyConversation } from '../../services/reply-conversation';
 jest.mock('../../services/reply-conversation', () => ({ createReplyConversation: jest.fn(), replyConversationDraft: (message: any) => message.role === 'assistant' && !message.streaming ? message.text : null }));
 jest.mock('./components/DraftRecoverySheet', () => ({ DraftRecoverySheet: () => null }));
-jest.mock('./components/RunInputSheet', () => ({ RunInputSheet: () => null }));
+let mockRunInputSheetProps: Record<string, any> | null = null;
+jest.mock('./components/RunInputSheet', () => ({ RunInputSheet: (props: any) => { mockRunInputSheetProps = props; return null; } }));
 let mockSkillPickerProps: { sessionKey?: string; onSelect: (skill: any) => void } | null = null;
 jest.mock('./components/SkillPickerSheet', () => ({ SkillPickerSheet: (props: any) => { mockSkillPickerProps = props; return null; } }));
 jest.mock('./components/SelectedSkill', () => ({ SelectedSkill: () => null }));
@@ -306,6 +307,23 @@ function createApp(): Record<string, unknown> {
 }
 
 describe('ThreadScreen connection container', () => {
+  it('keeps the Current/Next chooser while a Current acknowledgement is pending instead of silently queuing Next', () => {
+    mockController.canChooseRunInput = true;
+    mockController.canSteer = false;
+    mockController.steeringPending = true;
+    mockController.activeRunId = 'active';
+    mockController.onSteer = jest.fn();
+    render(<ThreadScreen {...createNavigationProps()} />);
+    act(() => mockThreadViewProps?.onSend?.());
+    expect(mockRunInputSheetProps?.visible).toBe(true);
+    expect(mockRunInputSheetProps?.canSteer).toBe(false);
+    expect(mockRunInputSheetProps?.steeringPending).toBe(true);
+    expect(mockController.onSend).not.toHaveBeenCalled();
+    act(() => mockRunInputSheetProps?.onNext());
+    expect(mockController.onSend).toHaveBeenCalledTimes(1);
+    expect(mockController.onSteer).not.toHaveBeenCalled();
+  });
+
   it('routes a required native permission confirmation directly to permission selection', () => {
     const props = createNavigationProps();
     mockController.runtimeSettingsUnconfirmed = true;

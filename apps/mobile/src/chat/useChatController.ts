@@ -2,7 +2,7 @@ import { sameLiveToolCall, withToolMessage } from './liveToolMessages';
 import { hasBackendEcho, rememberUncertainSend, recoverUncertainSends, reconcilePromptReceipts, useUncertainSends } from './sendRecovery';
 import { describeReplyFailure, sanitizeReplyFailure } from './reply-failure';
 import { triggerSendHaptic, triggerSuccessHaptic, triggerWarningHaptic } from '../services/haptics';
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import {
   AppState,
   AppStateStatus,
@@ -270,7 +270,12 @@ export function useChatController({
   const [connectionState, setConnectionState] = useState<ConnectionState>(
     adapter ? mapAdapterConnectionState(adapter.state) : "idle",
   );
-  const [input, setInput] = useState("");
+  const [input, setInputState] = useState("");
+  const inputRevisionRef = useRef(0);
+  const setInput = useCallback((next: SetStateAction<string>) => {
+    inputRevisionRef.current += 1;
+    setInputState(next);
+  }, []);
   const [sendFailure, setSendFailureMessage] = useState<string | null>(null);
   const [sendFailureDetails, setSendFailureDetails] = useState<string | null>(null);
   const uncertainFailureRef = useRef<{ scope: string | null; message: UiMessage } | null>(null);
@@ -3076,6 +3081,7 @@ export function useChatController({
   // place until history adopts the optimistic message with the same id.
   const steeringBusyRef = useRef(false);
   const steeringSequenceRef = useRef(0);
+  const [steeringPending, setSteeringPending] = useState(false);
   const onSteer = useCallback((expectedRunId?: string) => {
     const key = history.sessionKey;
     const runId = currentRunIdRef.current;
@@ -3091,7 +3097,9 @@ export function useChatController({
     const dispatchedAt = Date.now();
     const codex = adapter.connection.backendKind === 'codex';
     const steeringSequence = codex ? ++steeringSequenceRef.current : undefined;
+    const draftRevision = inputRevisionRef.current;
     steeringBusyRef.current = true;
+    setSteeringPending(true);
     setSendFailure(null);
     void adapter.steer(key, runId, text).then(() => {
       if (!scope.active || sendScopeRef.current !== scope || sessionKeyRef.current !== key) return;
@@ -3101,7 +3109,9 @@ export function useChatController({
       history.setMessages((messages) => codex
         ? reconcileAcceptedSteeringMessage(dispatchedMessages, messages, accepted)
         : [...messages, accepted]);
-      setInput((current) => current === input ? '' : current);
+      if (inputRevisionRef.current === draftRevision) {
+        setInput((current) => current === input ? '' : current);
+      }
       if (!codex || currentRunIdRef.current === runId) {
         setMessageSubmittedAt(timestampMs);
         setMessageAcceptedAt(timestampMs);
@@ -3112,7 +3122,10 @@ export function useChatController({
       if (!scope.active || sendScopeRef.current !== scope) return;
       setSendFailure(t('Sending failed. Check the conversation before trying again.'));
       setSendFailureDetails(sanitizeReplyFailure(error instanceof Error ? error.message : String(error)) || null);
-    }).finally(() => { steeringBusyRef.current = false; });
+    }).finally(() => {
+      steeringBusyRef.current = false;
+      if (sendScopeRef.current.active) setSteeringPending(false);
+    });
   }, [adapter, connectionState, history.messages, history.sessionKey, history.setMessages, input, pendingImages.length, readOnly, requestVisibleHistoryReload, t]);
 
   const queueDeliveryReady = !readOnly && !runtimeSettingsBusy && !runtimeSettingsUnconfirmed
@@ -3622,6 +3635,9 @@ export function useChatController({
     await history.onRefresh();
   }, [adapter, connectionState, history]);
 
+  const canChooseRunInput = Boolean(adapter?.capabilities.steer && adapter.steer && isSending
+    && currentRunIdRef.current && !pendingImages.length && input.trim());
+
   return {
     draftReady,
     recoverableDraft,
@@ -3680,7 +3696,9 @@ export function useChatController({
     pendingReplyRenderKey: currentRunIdRef.current
       ? liveReplyRenderKey(streamStartedAtRef.current, currentRunIdRef.current, chatStreamSegments.length)
       : null,
-    canSteer: Boolean(adapter?.capabilities.steer && adapter.steer && isSending && currentRunIdRef.current && !pendingImages.length && input.trim()),
+    canChooseRunInput,
+    canSteer: canChooseRunInput && !steeringPending,
+    steeringPending,
     startVoiceInput, stopVoiceInput, cancelVoiceInput,
     voiceInputSupported,
     recoverVoiceInput, voiceRecoveryCount, voiceRecordingSaved,

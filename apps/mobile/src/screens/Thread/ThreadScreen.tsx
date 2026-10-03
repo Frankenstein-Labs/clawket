@@ -1060,7 +1060,7 @@ function ThreadScreenContent({
           if (!value) { setSelectedSkill(null); controller.setInput(''); }
           else controller.setInput(activeSkill ? `${activeSkill.prefix}${value}` : value);
         }}
-        onSend={sessionPreview ? openSessionPaywall : controller.canSteer ? () => { controller.composerRef.current?.blur(); setRunInputId(controller.activeRunId); } : controller.onSend}
+        onSend={sessionPreview ? openSessionPaywall : controller.canChooseRunInput ? () => { controller.composerRef.current?.blur(); setRunInputId(controller.activeRunId); } : controller.onSend}
         onCancel={requestCancelCurrentRun}
         onOpenAddMenu={addMenuAvailable ? handleOpenAddMenu : undefined}
         onVoice={controller.voiceInputSupported ? controller.toggleVoiceInput : undefined}
@@ -1120,7 +1120,8 @@ function ThreadScreenContent({
         onResolveApproval={controller.resolveApproval}
       />
       <RunInputSheet visible={Boolean(runInputId) && !sessionPreview} scope={`${connectionId}:${agentId}:${sessionKey}`}
-        onClose={() => setRunInputId(null)} onCurrent={() => { if (runInputId) controller.onSteer(runInputId); }} onNext={controller.onSend} canSteer={controller.canSteer && controller.activeRunId === runInputId} />
+        onClose={() => setRunInputId(null)} onCurrent={() => { if (runInputId) controller.onSteer(runInputId); }} onNext={controller.onSend}
+        canSteer={controller.canSteer && controller.activeRunId === runInputId} steeringPending={controller.steeringPending} />
       <SessionFilesSheet visible={sessionFilesVisible && focused && !locked && !sessionPreview && routeIsActive} adapter={adapter} sessionKey={sessionKey}
         online={adapter?.state === 'ready'} onClose={() => setSessionFilesVisible(false)} />
       <SkillPickerSheet visible={skillPickerVisible && !sessionPreview} adapter={adapter} agentId={agentId} sessionKey={sessionKey}

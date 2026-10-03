@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Current 指引等待确认的交互修复（负责人授权，Codex Android 深入验收中发现源码缺口）。
+  - 原防重锁只有 ref：等待第一条 ACK 时仍可选择 Current，弹层关闭后第二次操作被静默忽略。新增可渲染 pending 状态；选择入口保持，Current 明确禁用并显示既有「发送中…」，Next 和 Stop 保持可用，不自动排 Next、不解除防重锁、不重放。
+  - ACK 仅清理发送时的草稿修订，用户后来重新输入的同文草稿仍保留；原会话、适配器与卸载边界保留。正常各后端能力与确认行为不变。
+  - 旧实现真实基线 6 项失败：三个支持后端仍开放 Current、同文新草稿被清、缺少等待状态、入口静默排 Next。修复后本机独立依赖、逐文件串行：controller contract 69、chooser sheets 12、ThreadScreen 70、queue 106，共 257 项通过；Mobile 类型、UI 246 文件、设计系统文档 11 组件/5 用例、19 语言严格检查/8 用例、check:docs 7 指令对/5 用例通过，heavy 已释放。未操作手机、Native、RPC、生产服务、构建或发布；真机验收与 dependency audit 的 owner-only 例外仍分开。
+
 - 2026-10-04 Codex 真机2033复验检查点；全面验收仍在进行。
   - 手机私有开发bundle实际为2033源，22,482,541字节/SHA8a52a4604e38348ee78781df6cc63d7979de811db005ead99d18652f04bd7640；C/E隔离QA CLI为SHA09bd77711192409196c1c95b912156b75457b9e554b8e5a51bd65eda53a5c929。已在authenticated idle后仅重启隔离QA owner，配对/config字节保持，Production/store不变。原completed STREAM冷历史三段时间匹配Native持久化lifecycle start，final仍优先completion；旧record/completion时间比较的差异另存解释，不重写原baseline/receipt。
   - H5录像016三段实际分页/快速滑动窗口的全部658编码帧复核通过，无观察到页首跳转、错正文复用或大片空白；两次分页stable正文RGB一致。仅覆盖该80消息fixture的有界窗口，不是整段6506帧、极端budget或审批崩溃验收。
@@ -1490,6 +1495,8 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-STEER-PENDING-1004 | Current 指引等待确认的真机验收 | 在包含修复的开发 App 上，让 Current ACK 延迟；重新输入不同或相同草稿，打开 Current/Next，再显式选择 Next 或 Stop。 | 等待期间 Current 禁用且显示发送中，选择入口/Next/Stop 可用；旧 ACK 不清新草稿，失败不重放，切换会话后旧 ACK 不修改新会话。 | 本地 257 项窄回归、类型、UI、文档和 19 语言检查通过；负责人真机验收待完成，本任务不发布。 |
+
 | HT-CODEX-ACTIONS-AUDIT-1004 | Codex 会话操作拒绝修复的审计合并阻挡 | 负责人决定既有 braces GHSA-vfj7-8cjw-p6xm 的修复或经批准窄范围例外；代理不绕过门禁。 | required audit 全绿后才可合并；当前仅本机自动回归通过，手机验收继续由主 QA 任务执行。 | 待审计决定；未合并、未发布 |
 | HT-AUDIT-BRACES-1003 | 新 braces 高危公告阻挡 PR 的依赖门禁决策 | 当前 `GHSA-vfj7-8cjw-p6xm` / `braces` 3.0.3 无 npm 已发布修补版本；由负责人选择等待修补，或明确批准该单条 advisory 的有期限例外及理由。代理不自行加例外、改安全门禁或绕过合并保护。 | 两份 lockfile 的 dependency-audit 按选定方案通过；受影响 PR rebase fresh main 后 required 全绿才合并。 | PR #127 源码相关 CI 全通过，但依赖审计失败；尚未合并，待负责人决策。 |
 
