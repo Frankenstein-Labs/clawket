@@ -2306,6 +2306,70 @@ describe('ThreadView', () => {
       expect(mockScrollToOffset).not.toHaveBeenCalled(); // Returning to bottom retires the reading anchor.
     });
 
+  it.each([false, true])('retries an Android prepend after native content size commits instead of retaining the old maximum offset: settled=%s', settled => {
+    jest.useFakeTimers();
+    const originalScroll = mockScrollToOffset.getMockImplementation()!;
+    let nativeMaximum = 1500;
+    mockScrollToOffset.mockImplementation(({ offset }) => {
+      if (mockHistoryGeometry) mockHistoryGeometry.offset = Math.min(offset, nativeMaximum);
+    });
+    const stamp = new Date('2026-10-03T10:14:00Z').getTime();
+    const props = createProps({ capabilities: CAPABILITY_MATRIX.codex, messages: [
+      { id: '26', role: 'assistant', text: 'Reply 26', timestampMs: stamp + 1000 },
+      { id: '25', role: 'user', text: 'Read 25', timestampMs: stamp },
+    ] });
+    mockHistoryGeometry = { first: 0, offset: 100, header: 80, positions: [0, 60, 220] };
+    mockListLayout.content = 2100;
+    mockListLayout.viewport = 600;
+    const view = render(<ThreadView {...props} />);
+    try {
+      const timeline = () => view.getByTestId('thread-screen-timeline');
+      const scroll = (offset: number, height = 2100) => ({ nativeEvent: { contentSize: { height },
+        layoutMeasurement: { height: 600 }, contentOffset: { y: offset } } });
+      fireEvent(timeline(), 'load', { elapsedTimeInMs: 5 });
+      act(() => timeline().props.onCommitLayoutEffect());
+      act(() => {
+        timeline().props.onScrollBeginDrag();
+        timeline().props.onScroll(scroll(100));
+        timeline().props.onStartReached();
+      });
+      view.rerender(<ThreadView {...props} messages={[...props.messages,
+        { id: '09', role: 'user', text: 'Earlier 09', timestampMs: stamp - 1000 },
+      ]} />);
+      mockHistoryGeometry.positions = [0, 60, 2060, 2220];
+      mockListLayout.content = 4900; // FlashList's JS layout is ahead of Android's content View.
+      act(() => timeline().props.onCommitLayoutEffect());
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 2100, animated: false });
+      expect(mockHistoryGeometry.offset).toBe(1500);
+      mockHistoryGeometry.first = 1;
+      act(() => timeline().props.onScroll(scroll(1500))); // Still inside the drag's settle window.
+      if (settled) {
+        act(() => timeline().props.onScrollEndDrag(scroll(1500)));
+        act(() => jest.advanceTimersByTime(160)); // Its old maximum must not masquerade as returning to bottom.
+      }
+      nativeMaximum = 4300;
+      act(() => timeline().props.onContentSizeChange(393, 4900)); // No further user gesture or JS layout change.
+      expect(mockScrollToOffset).toHaveBeenCalledTimes(2);
+      expect(mockHistoryGeometry.positions[2]! + mockHistoryGeometry.header - mockHistoryGeometry.offset).toBe(40);
+      expect(timeline().props.maintainVisibleContentPosition).toEqual({ disabled: true });
+      if (!settled) {
+        act(() => timeline().props.onScroll(scroll(2100, 4900))); // The final target is acknowledged.
+        mockHistoryGeometry.offset = 1500;
+        act(() => timeline().props.onScrollEndDrag(scroll(1500))); // A late old clamp/end-drag event follows it.
+        act(() => jest.advanceTimersByTime(160));
+        mockHistoryGeometry.positions = [0, 60, 2460, 2620];
+        mockListLayout.content = 5300;
+        act(() => timeline().props.onCommitLayoutEffect());
+        expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 2500, animated: false });
+        expect(mockHistoryGeometry.positions[2]! + mockHistoryGeometry.header - mockHistoryGeometry.offset).toBe(40);
+      }
+    } finally {
+      view.unmount();
+      mockScrollToOffset.mockImplementation(originalScroll);
+      jest.useRealTimers();
+    }
+  });
+
   it('keeps following without paging when a short conversation reaches its top on a layout change', () => {
     jest.useFakeTimers();
     const props = createProps({ messages: [{ id: 'newest', role: 'user', text: 'Run the tests' }] });
