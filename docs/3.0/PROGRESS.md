@@ -3,8 +3,8 @@
 - 2026-10-03 Codex 工具状态与历史重载一致性（负责人要求全面真机测试中即时修复）。
   - 原生 WebSearch/ImageView 可以没有 `status`；Desktop 恢复此前强制先发 running，之后又漏掉无 status 完成和未知工具更新，导致只剩一个真实工具时仍显示 11～15 步并行。按历史的状态/输出投影发送初始状态及变化，保留同一工具行、重复快照去重、同 status 输出/非零退出码修正；明确未知状态不推定运行或完成，回合不因工具结果而结束。
   - 最低支持的官方原生代码证明 ImageView canonical 历史只在 completed 的 ViewImageToolCall 上写入；隔离 CODEX_HOME 生成当前 Desktop 0.160.0 schema，确认 ImageView 仅 id/path/type、搜索也无 status，元数据证据存入本轮共享 evidence。只有无 status 的已知历史契约可隐式成功，显式未知/运行/失败优先。Bridge 所有的搜索/图片查看通知只在 active run 的内存覆盖中保留已确认 started/completed；冷历史、活跃历史与 follower 保持一致，原生项/文件不改。
-  - 可选初始 `tool_call.status`、unknown update 与 history `statusReported` 向后兼容：缺字段仍按旧后端 live start；明确 unknown 不计并行、不建完成时钟、不触发 settled recovery，历史合并也不回填旧完成时钟。Claude/Pi 旧 missing-result fallback、OpenClaw/Hermes 缺省路径保留。回归覆盖十次已完成图片查看加一个正在执行命令、unknown↔running、冻结原生对象及 live/active/cold history。
-  - 独立工作树 npm ci 后逐文件串行：Bridge history 28、service 166；Mobile adapter-events 18、turn-work 15、history 157、controller contract 61、historyMergePolicy 57（共 502）；protocol/Mobile/Bridge 类型与 docs 通过，Bridge/Mobile 只读 peer review 无阻挡。未碰设备、重启用户 Bridge、发布或改账号；Android 组合候选验收由本轮根任务继续。PR131 既有 CI 仅未获批准的 braces 高危审计红，禁止绕过，更新后的 CI 继续等待。
+  - 可选初始 `tool_call.status`、unknown update 与 history `statusReported` 向后兼容：缺字段仍按旧后端 live start；明确 unknown 不计并行、不建完成时钟、不触发 settled recovery，历史合并也不回填旧完成时钟；seq-gap直接history projection显式清字段，避免live/history对象spread沿用此前完成时钟。Claude/Pi 旧 missing-result fallback、OpenClaw/Hermes 缺省路径保留。回归覆盖十次已完成图片查看加一个正在执行命令、unknown↔running、冻结原生对象及 live/active/cold history。
+  - 独立工作树 npm ci 后逐文件串行：Bridge history 28、service 166；Mobile adapter-events 20、turn-work 15、history 157、controller contract 61、historyMergePolicy 57（共 504）；protocol/Mobile/Bridge 类型与 docs 通过，Bridge/Mobile 只读 peer review 无阻挡。未碰设备、重启用户 Bridge、发布或改账号；Android 组合候选验收由本轮根任务继续。PR131 既有 CI 仅未获批准的 braces 高危审计红，禁止绕过，更新后的 CI 继续等待。
 
 - 2026-10-03 Codex Desktop 跟随恢复时保留文本、工具和任务顺序（负责人授权全面 Android Codex 体验测试与修复）。
   - 原快照先把整轮助手文本拼完，再发全部工具，恢复正在运行的会话会把工具后的文字挤到首个工具前；现在每个新工具只先接收它之前的累计文本，最后再更新尾部。重复快照、普通尾部增长及较早文本校正不再临时回放缩短的前缀或重复工具。

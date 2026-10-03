@@ -248,6 +248,8 @@ export function mapAdapterChatMessage(
     toolSummary: tool?.summary,
     toolArgs: stringifyUnknown(tool?.input),
     toolDetail: stringifyUnknown(tool?.output),
+    // Explicit clears survive active live/history object merges after a gap.
+    ...(reportedUnsettled ? { toolDurationMs: undefined, toolFinishedAt: undefined } : {}),
     ...(!reportedUnsettled && tool?.durationMs !== undefined ? { toolDurationMs: tool.durationMs } : {}),
     ...(tool?.startedAtMs !== undefined ? { toolStartedAt: tool.startedAtMs } : {}),
     ...(!reportedUnsettled && tool?.finishedAtMs !== undefined ? { toolFinishedAt: tool.finishedAtMs } : {}),
