@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex clock/history/ring combined QA source checkpoint; phone acceptance continues.
+  - PR139 paragraph clocks are integrated with the existing final-completion clock fence. Two integration regressions preserve paragraph timing while eligible finals retain completion time, including a partial legacy page whose paragraph cannot borrow final eligibility. Static independent review confirms all original history/tool/delivery fences remain.
+  - Serial narrow checks passed: actual Mobile controller adapter events 48, liveRunThread 12, sessionRunState 6, queue 112; Native history 75 and CodexService 230, totaling 483. Protocol/Mobile/CLI types, local development CLI build and docs 9 instruction pairs/5 checker cases passed. The phone still loads815 and the C/E Preview owners still run274 at this checkpoint; source/build success is not physical acceptance.
+  - H5 actual-phone captures exercise two real prepends, earliest history, fast fling, return to bottom, scope return and background return. The fork uses a validated immutable parent-history reference; the old copy-shape validator failure stays preserved. Recording016 is fully transferred, SHA3137ec00facb34ca6a256dd53184bcc4a94a30f787dc25e4a5c3604acde19e91, continuous visual inspection pending. Idle history cannot validate the approval crash repair.
+  - A new empty QA conversation has6.1Sol/low/Workspace/Standard settings and zero submitted prompts/receipts before the next QA owner restart; cold-empty settings and first-send acceptance remain pending. No Production/store application, release or audit exception changed.
+
 - 2026-10-04 Codex 流式多段正文时间回退修复（安卓真实 R4E QA 现场，独立任务）。
   - 原生三段 commentary 有独立生命周期时间，但历史读取剥掉 item entry 时间；手机新 live tail 又复用整轮开始时间，导致 04:13 → 04:15 → 04:13。新增可选段时钟，工具提交与后续增量保留首次时间，断线和 active history 恢复保留同一段；run/render identity 不变。
   - 原生历史 valid start 优先 complete，缺失/畸形保留旧 turn fallback；owned live 首次有效生命周期 start 优先，缺失才用原条目首次 emission 或本机 receipt，512 条有界且不污染 raw item。手机旧 Bridge fallback 是该段首次收到时间，不声称原生 start；Desktop 无时钟仍有来源限制。OpenClaw/Hermes/Pi 既有时间保持；最终回复 completion fence 继续优先。

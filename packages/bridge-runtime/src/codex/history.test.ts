@@ -83,6 +83,25 @@ describe('Codex final reply clocks', () => {
       ['toolcall_tool', startedAt * 1000], ['final', completedAt * 1000],
     ]);
   });
+  it('keeps paragraph clocks while the confirmed final retains its completion clock', () => {
+    const progressClock = (startedAt + 60) * 1000, finalStartClock = (completedAt - 10) * 1000;
+    const messages = codexMessages([{ id: 'turn', status: 'completed', startedAt, completedAt,
+      itemTimestamps: new Map([['progress', progressClock], ['final', finalStartClock]]), items: [
+        user, { id: 'progress', type: 'agentMessage', phase: 'commentary', text: 'Still working' },
+        { id: 'final', type: 'agentMessage', phase: 'final_answer', text: 'Done' },
+      ] }]);
+    expect(messages.map(message => [message.id, message.timestampMs])).toEqual([
+      ['user', startedAt * 1000], ['progress', progressClock], ['final', completedAt * 1000],
+    ]);
+  });
+  it('retains the known paragraph clock for a partial legacy turn without borrowing completion', () => {
+    const paragraphClock = (startedAt + 60) * 1000;
+    const turn = { id: 'partial', status: 'completed', startedAt, completedAt,
+      itemTimestamps: new Map([['paragraph', paragraphClock]]),
+      items: [{ id: 'paragraph', type: 'agentMessage', text: 'Earlier progress' }] };
+    expect(codexMessages([turn], { unconfirmedLegacyTurnId: 'partial' })[0].timestampMs).toBe(paragraphClock);
+    expect(codexMessages([turn])[0].timestampMs).toBe(completedAt * 1000);
+  });
   it.each([undefined, null])('retains native last-message compatibility for phase %j without retiming every legacy paragraph', phase => {
     const messages = codexMessages([{ status: 'completed', startedAt, completedAt, items: [
       { id: 'earlier', type: 'agentMessage', phase, text: 'Earlier paragraph' },
