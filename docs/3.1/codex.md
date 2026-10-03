@@ -40,6 +40,8 @@ Persist owned-thread metadata and prompt fingerprints before acknowledgement. Na
 
 When entering or recovering a Desktop-owned running conversation, project its snapshot in native item order: each new tool follows only the text before it, and later commentary remains after that tool. Keep cumulative snapshot text and suppress unchanged replay so normal tail growth does not flash earlier messages or duplicate work records. A snapshot containing a completed old turn and a new active turn finishes the exact old run before starting the new one; missing or unknown old termination leaves its ownership and run identity intact.
 
+Visiting old chats must not permanently consume Desktop subscriptions. The 64-follow limit reuses least recently read idle observations, preserving active/unknown runs, queued mutations and pending approval/question requests. Idle requires a valid terminal snapshot or explicit no-owner proof on the current IPC connection with no newer native state; stale, missing or malformed state alone is insufficient. At most two read-only owner-discovery probes resolve missing snapshots in the background. Retirement uses native `thread-stream-following-changed` v1 with `following: false`; this releases only observation, never native writer ownership. The installed Desktop's follower handler confirms that false removes that client from its follower set. New native index records are persisted only after follow admission succeeds. Reconnect renews current follows and invalidates prior no-owner evidence.
+
 Codex Registry/Relay resources, room classes, pairing state, secrets and Preview deployment units are isolated from OpenClaw, Hermes and Pi. Existing clients and transports keep their contracts and 8 MiB frame limits.
 
 ## Research baseline
