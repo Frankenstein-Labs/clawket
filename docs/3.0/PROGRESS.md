@@ -4,7 +4,9 @@
   - 原因：每次打开原生聊天都永久占一个 follow，64 个之后新聊天无法跟随；新原生索引还会先保存，再因 follow 失败报错，留下半完成记录。
   - 改法：维持 64 个观察订阅的上限，先释放临时目录观察，再复用最久未读且已确认 idle 的聊天观察；保护 active / 未知 dispatch run、排队操作、审批与问题，以及正在等待的 native IPC 请求。canonical 图同时检查未引用实体，畸形或未完成状态不当作 idle。无快照会话使用最多两个并行只读 owner-discovery，只有当前 socket、follow 与状态 generation 的明确 no-owner 才能复用；历史读取不等待探测。断线作废证据，新状态与迟到结果不能相互覆盖。
   - 协议：只读核对安装文件 Desktop 26.930.31730，`thread-stream-following-changed` v1 的 `following: false` 删除该 client 的 follower 集合条目；只释放观察，不解写锁、不另开 writer、不发明 RPC。native record 先完成 follow admission 再保存；保存失败回滚内存记录。
+  - 组合源码复核补边界：已索引 idle 会话被回收 follow 后直接 Send，必须在 receipt 前重新 admission；容量失败不记录 key/run，同 key 重试仍返回未发送。warm local-owned 发送不要求 Desktop slot；admission/settings 收到新 active snapshot 再检查 busy。receipt 后重复 follow 写失败可证明尚未 dispatch，结束该 run 为 rejected，保留 receipt 防同 key 重放；容量恢复或该失败之后，由明确的新发送继续。实际 turn 请求的未知结果仍不允许重发或另开 writer。
   - 持 heavy 租约逐文件串行：desktop-follow 23、desktop-ipc 27、service 163、session-activity 7，共 220 项通过；Bridge 类型与 check:docs（7 指令对 / 5 检查器用例）通过。包含真实 framed socket 的断线、退休会话不重订阅与当前会话恢复；100 会话容量来自确定性 fixture，未冒称手机验收。完整门禁交本 PR CI；不重启用户 Bridge，不打分发包、不发布或部署。新代码仍需后续授权的 Bridge 更新及真机验收。
+  - admission 补修持 heavy 串行再验证 service 167（新增 4 场景：实际 64 active follow、receipt 后观察写失败、warm local-owned 和 active snapshot 竞态），Bridge 类型与 check:docs 通过；其他三个未改文件保持上述结果。容量不足时两次同 key 均未接受、无 receipt/run/dispatch；容量恢复后显式新 send 只 dispatch 一次，已记录失败 key 不重放。
   - [PR #130](https://github.com/p697/clawket/pull/130) 首轮 CI 的 Mobile 三分片、types、tests/static、v1 replay、Windows/macOS Bridge 与 secret scan 通过；依赖审计唯一阻断为两份 lockfile 的 `GHSA-vfj7-8cjw-p6xm` / `braces`，required 汇总因此失败。未绕过安全门禁，PR 尚未合并，待 HT-AUDIT-BRACES-1003 的负责人决策。
 
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。

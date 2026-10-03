@@ -519,7 +519,12 @@ export class CodexService extends EventEmitter {
     for (const key of this.nativePreviews.keys()) if (!this.native.has(key)) this.nativePreviews.delete(key);
   }
   private async desktopTurn(r: Entry, params: object): Promise<any> {
-    this.desktop!.follow(r.threadId!);
+    try { this.desktop!.follow(r.threadId!); }
+    catch (error) {
+      // Subscription writes do not dispatch a prompt. A failure here cannot
+      // turn a recorded but unsent input into an unknown native execution.
+      throw new DesktopIpcError('rejected', error instanceof Error ? error.message : 'Codex could not observe this conversation. Refresh before sending again.');
+    }
     const run = this.runs.get(r.id)!; run.desktop = true;
     try {
       const result = await this.desktop!.request('thread-follower-start-turn', { conversationId: r.threadId, turnStart: { request: params, context: { inheritThreadSettings: true } } });
@@ -1158,6 +1163,9 @@ export class CodexService extends EventEmitter {
       if (r.permissionsUnconfirmed) throw new Error('Codex did not restore the conversation permissions. Select and confirm permissions before sending.');
       let desktopOwned = !!r.threadId && !!r.activity && !this.loaded.has(r.id);
       if (desktopOwned) {
+        // An indexed idle chat may have retired its observation. Admission is
+        // required before receipt; local-owned turns need no Desktop slot.
+        this.desktop!.follow(r.threadId!);
         try { await this.desktop!.connect(); }
         catch (error) {
           // A send need not be preceded by opening the model picker. Use the
@@ -1175,6 +1183,9 @@ export class CodexService extends EventEmitter {
       const model = this.catalog.find(m => m.model === r.model);
       if (images.length && model && !model.inputModalities?.includes('image')) throw new Error('This model does not support images');
       if (!desktopOwned && input.thinkingLevel && !model?.supportedReasoningEfforts?.some((e: any) => e.reasoningEffort === input.thinkingLevel)) throw new Error('This model does not support that reasoning level');
+      // Owner discovery/settings may deliver a fresh active Desktop snapshot.
+      // Preserve that exact turn instead of replacing it with our pending send.
+      if (this.runs.has(r.id)) throw new Error('This session is busy. Stop it or send guidance.');
       if (Object.keys(r.keys).length >= 10000) throw new Error('Start a new conversation to continue');
       const runId = randomUUID();
       const previousMetadata = { preview: r.preview, activity: r.activity, title: r.title, effort: r.effort };
