@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-03 Codex 长期跨会话浏览耗尽 Desktop follow 容量（安卓全面 QA 的源码审查补充）。
+  - 原因：每次打开原生聊天都永久占一个 follow，64 个之后新聊天无法跟随；新原生索引还会先保存，再因 follow 失败报错，留下半完成记录。
+  - 改法：维持 64 个观察订阅的上限，先释放临时目录观察，再复用最久未读且已确认 idle 的聊天观察；保护 active / 未知 dispatch run、排队操作、审批与问题，以及正在等待的 native IPC 请求。canonical 图同时检查未引用实体，畸形或未完成状态不当作 idle。无快照会话使用最多两个并行只读 owner-discovery，只有当前 socket、follow 与状态 generation 的明确 no-owner 才能复用；历史读取不等待探测。断线作废证据，新状态与迟到结果不能相互覆盖。
+  - 协议：只读核对安装文件 Desktop 26.930.31730，`thread-stream-following-changed` v1 的 `following: false` 删除该 client 的 follower 集合条目；只释放观察，不解写锁、不另开 writer、不发明 RPC。native record 先完成 follow admission 再保存；保存失败回滚内存记录。
+  - 持 heavy 租约逐文件串行：desktop-follow 23、desktop-ipc 27、service 163、session-activity 7，共 220 项通过；Bridge 类型与 check:docs（7 指令对 / 5 检查器用例）通过。包含真实 framed socket 的断线、退休会话不重订阅与当前会话恢复；100 会话容量来自确定性 fixture，未冒称手机验收。完整门禁交本 PR CI；不重启用户 Bridge，不打分发包、不发布或部署。新代码仍需后续授权的 Bridge 更新及真机验收。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。

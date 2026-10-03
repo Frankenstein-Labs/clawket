@@ -104,6 +104,10 @@ export class CodexService extends EventEmitter {
       for (const r of this.records) { if (r.cwd && !options.device && r.cwd !== this.project) throw new Error('Project authorization mismatch'); this.rememberProject(r.cwd ?? this.project); }
       {
         this.desktop = options.desktop ?? new DesktopIpc();
+        this.desktop.followProtected = id => this.records.some(record => record.threadId === id
+          && (this.runs.has(record.id) || this.queues.has(record.id)
+            || [...this.approvals.values()].some(consent => consent.entry === record)
+            || [...this.questions.values()].some(group => group.entry === record)));
         this.desktop.on('follow', (id: string, following: boolean) => { if (following && this.records.some(r => r.threadId === id && this.loaded.has(r.id))) { this.desktopFollowers.add(id); void this.publishDesktop(id).catch(() => {}); } else this.desktopFollowers.delete(id); });
         this.desktop.handler = { accepts: (method, p) => this.acceptDesktop(method, p), request: (method, p) => this.desktopRequest(method, p) };
         this.desktop.on('unsupported', (id: string) => { const r = this.records.find(row => row.threadId === id); if (r && !this.desktop?.isObservationOnly?.(id)) this.update({ type: 'error', sessionKey: r.id, code: 'unsupported', message: 'This Codex Desktop version cannot be followed safely. Continue on your computer.' }); });
@@ -643,7 +647,9 @@ export class CodexService extends EventEmitter {
     if (!record && native && this.options.device) {
       record = { id: String(key), archived: this.archivedNative.has(String(key)), threadId: native.id, native: true, cwd: native.cwd, title: native.name || native.preview?.slice(0, 80) || '', created: native.createdAt * 1000 || Date.now(), activity: native.updatedAt * 1000 || Date.now(), model: modelName(native.model), provider: native.modelProvider, keys: {} };
       if (this.records.length >= 1000) throw new Error('Conversation index limit reached');
-      this.records.push(record); this.save(); this.desktop?.follow(native.id);
+      this.desktop?.follow(native.id);
+      this.records.push(record);
+      try { this.save(); } catch (error) { this.records.pop(); throw error; }
     }
     if (!record) throw new Error('This session is read-only. Create a branch to continue.');
     return record;

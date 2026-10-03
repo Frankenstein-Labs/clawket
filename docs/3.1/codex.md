@@ -36,6 +36,8 @@ Session descriptors treat model metadata as an optional string. Native catalog o
 
 Persist owned-thread metadata and prompt fingerprints before acknowledgement. Native transcript storage stays Codex-owned. Reconnect reads native state and pending approvals; phone disconnection leaves work running. Bridge loss never silently reruns work. Stop only owned children. Honor native permission refusals; never add bypass flags. Explicit approvals apply once to one pending native request and retire only after dispatch/terminal resolution.
 
+Visiting old chats must not permanently consume Desktop subscriptions. The 64-follow limit reuses least recently read idle observations, preserving active/unknown runs, queued mutations and pending approval/question requests. Idle requires a valid terminal snapshot or explicit no-owner proof on the current IPC connection with no newer native state; stale, missing or malformed state alone is insufficient. At most two read-only owner-discovery probes resolve missing snapshots in the background. Retirement uses native `thread-stream-following-changed` v1 with `following: false`; this releases only observation, never native writer ownership. The installed Desktop's follower handler confirms that false removes that client from its follower set. New native index records are persisted only after follow admission succeeds. Reconnect renews current follows and invalidates prior no-owner evidence.
+
 Codex Registry/Relay resources, room classes, pairing state, secrets and Preview deployment units are isolated from OpenClaw, Hermes and Pi. Existing clients and transports keep their contracts and 8 MiB frame limits.
 
 ## Research baseline
