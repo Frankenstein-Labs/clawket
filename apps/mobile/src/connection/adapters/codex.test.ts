@@ -58,10 +58,14 @@ it('marks a terminal reconciled history event with the same cursor semantics', a
 
 it.each([
   [true, 'chat.send', 'codex_error', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', 'confirm_permissions'],
+  [true, 'chat.send', 'codex_error', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', 'confirm_permissions'],
   [true, 'chat.send', 'codex_error', 'A different native send failure', undefined],
   [true, 'chat.send', 'server', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', undefined],
   [true, 'chat.history', 'codex_error', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', undefined],
   [false, 'chat.send', 'codex_error', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', undefined],
+  [true, 'chat.send', 'server', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', undefined],
+  [true, 'chat.history', 'codex_error', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', undefined],
+  [false, 'chat.send', 'codex_error', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', undefined],
 ])('classifies only the negotiated, exact pre-dispatch permission send rejection (%s, %s, %s)', async (sessionPermissions, method, code, message, recoveryAction) => {
   const connected = adapter.connect(); sockets[0].open();
   let request = JSON.parse(sockets[0].sent.at(-1)!);

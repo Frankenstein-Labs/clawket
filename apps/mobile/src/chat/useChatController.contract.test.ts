@@ -705,10 +705,13 @@ describe('useChatController contract', () => {
     expect(adapter.prompt).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps an immediate permission rejection paused after local submission settles', async () => {
+  it.each([
+    'Codex did not restore the conversation permissions. Select and confirm permissions before sending.',
+    'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.',
+  ])('keeps an immediate permission rejection paused after local submission settles (%s)', async message => {
     const adapter = createAdapter('ready', 'codex');
     adapter.capabilities.sessionPermissions = true;
-    adapter.prompt.mockRejectedValue(new AdapterError('server', 'Fixed native permission rejection', 'confirm_permissions'));
+    adapter.prompt.mockRejectedValue(new AdapterError('server', message, 'confirm_permissions'));
     const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
     await act(async () => { result.current.setInput('Keep this input'); });
     await act(async () => { result.current.onSend(); await Promise.resolve(); });
@@ -718,10 +721,13 @@ describe('useChatController contract', () => {
     expect(adapter.prompt).toHaveBeenCalledTimes(1);
   });
 
-  it('retains the ordinary uncertain send path when a server error has the permission text without a classified recovery', async () => {
+  it.each([
+    'Codex did not restore the conversation permissions. Select and confirm permissions before sending.',
+    'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.',
+  ])('retains the ordinary uncertain send path when a server error has the permission text without a classified recovery (%s)', async message => {
     const adapter = createAdapter('ready', 'codex');
     adapter.capabilities.sessionPermissions = true;
-    adapter.prompt.mockRejectedValue(new AdapterError('server', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.'));
+    adapter.prompt.mockRejectedValue(new AdapterError('server', message));
     const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
     await act(async () => { result.current.setInput('Unknown result'); });
     await act(async () => { result.current.onSend(); await Promise.resolve(); });
