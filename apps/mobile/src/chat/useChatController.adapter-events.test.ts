@@ -380,6 +380,22 @@ describe('useChatController adapter event migration', () => {
     expect(result.current.listData.find(message => message.text === 'Earlier paragraph.')).toMatchObject({ timestampMs: 5_000 });
   });
 
+  it('recovers the first clock of consecutive Codex assistant items merged into one tail without a tool', () => {
+    jest.setSystemTime(30_000);
+    const { result, rerender } = renderController('codex');
+    historyMock.messages = [
+      { id: 'user', role: 'user', text: 'Request', timestampMs: 1_000 },
+      { id: 'first', role: 'assistant', text: 'First paragraph.', timestampMs: 13_000 },
+      { id: 'second', role: 'assistant', text: 'Second paragraph.', timestampMs: 15_000 },
+    ];
+    historyMock.activitySnapshot = { key: 'agent:main:main', messages: [], hasActiveRun: true, requestedAtMs: 30_000,
+      activeRun: { runId: 'clock-run', text: 'First paragraph.\n\nSecond paragraph.', startedAtMs: 1_000, messageTimestampMs: 15_000 } };
+    rerender({});
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({
+      text: 'First paragraph.\n\nSecond paragraph.', timestampMs: 13_000,
+    });
+  });
+
   it.each([false, true])('does not borrow an empty recovered Codex tail clock (previous tool: %s)', previousTool => {
     jest.setSystemTime(10_000);
     const { result, rerender, handlers } = renderController('codex');

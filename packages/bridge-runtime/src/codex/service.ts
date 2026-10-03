@@ -1231,12 +1231,12 @@ export class CodexService extends EventEmitter {
     if (method === 'turn/started') { if (!run.turnId) run.turnId = p.turn?.id; return; }
     if (p.turnId && run.turnId && p.turnId !== run.turnId) return;
     const base = { sessionKey: r.id, runId: run.id };
-    const itemTimestamp = (id: string): number => {
+    const itemTimestamp = (id: string, startedAtMs?: unknown): number => {
       const clocks = run.itemTimestamps ??= new Map();
       if (!clocks.has(id)) {
         if (clocks.size >= 512) clocks.delete(clocks.keys().next().value!);
-        // This is first notification emission/receipt, not an invented Native item start.
-        clocks.set(id, codexItemTimestamp(emittedAtMs) ?? Date.now());
+        // Older producers omit lifecycle start; emission/receipt is observation only.
+        clocks.set(id, codexItemTimestamp(startedAtMs) ?? codexItemTimestamp(emittedAtMs) ?? Date.now());
       }
       return clocks.get(id)!;
     };
@@ -1250,7 +1250,7 @@ export class CodexService extends EventEmitter {
     if (method === 'item/reasoning/summaryTextDelta' && typeof p.delta === 'string') this.update({ type: 'agent_thought_chunk', ...base, text: p.delta });
     if (method === 'item/started' || method === 'item/completed') {
       const item = p.item; if (!item || typeof item.id !== 'string') return;
-      if (item.type === 'agentMessage') itemTimestamp(item.id);
+      if (item.type === 'agentMessage') itemTimestamp(item.id, method === 'item/started' ? p.startedAtMs : undefined);
       if (this.items.size >= 512) this.items.delete(this.items.keys().next().value!);
       this.items.set(item.id, item);
       if (run.items.size >= 512 && !run.items.has(item.id)) run.items.delete(run.items.keys().next().value!);
