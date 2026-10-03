@@ -123,6 +123,69 @@ it('ignores an older in-flight compensation event before the newest acknowledgem
   expect(f.getViewportY('25')).toBe(before);
 });
 
+it.each([false, true])('retries a prepend correction after native content grows beyond its old clamped maximum: settling=%s', settling => {
+  const f = fixture();
+  const before = f.getViewportY('25');
+  let nativeMaxOffset = 1500;
+  f.list.scrollToOffset.mockImplementation(({ offset }) => f.setOffset(Math.min(offset, nativeMaxOffset)));
+  act(() => f.result.current.capture());
+  f.setRows([message('09'), message('21'), message('25'), message('26')], [0, 1260, 2060, 2220]);
+  act(() => f.result.current.restore({ nativeMaxOffset })); // Native child still has its old height.
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2100, animated: false });
+  f.setFirst(1);
+  act(() => f.result.current.readerScrolled(1500, settling)); // A clamped command is not a reader gesture.
+  expect(f.result.current.isCorrectionPending()).toBe(true);
+  nativeMaxOffset = 3500;
+  act(() => f.result.current.restore({ nativeMaxOffset, nativeGeometryCommitted: true }));
+  expect(f.list.scrollToOffset).toHaveBeenCalledTimes(2);
+  expect(f.getViewportY('25')).toBe(before);
+});
+
+it('keeps the new reader position when a fresh drag supersedes an old clamped correction', () => {
+  const f = fixture();
+  let nativeMaxOffset = 1500;
+  f.list.scrollToOffset.mockImplementation(({ offset }) => f.setOffset(Math.min(offset, nativeMaxOffset)));
+  act(() => f.result.current.capture());
+  f.setRows([message('09'), message('21'), message('25'), message('26')], [0, 1260, 2060, 2220]);
+  act(() => f.result.current.restore({ nativeMaxOffset }));
+  f.setFirst(1);
+  act(() => f.result.current.readerScrolled(1500));
+  f.setOffset(1450);
+  act(() => f.result.current.beginDrag(true));
+  f.setOffset(1400);
+  act(() => f.result.current.readerScrolled(1400));
+  const readingY = f.getViewportY('21');
+  nativeMaxOffset = 3500;
+  act(() => f.result.current.restore({ nativeMaxOffset, nativeGeometryCommitted: true }));
+  expect(f.list.scrollToOffset).toHaveBeenCalledTimes(1); // The new drag's native position already matches.
+  expect(f.getViewportY('21')).toBe(readingY);
+});
+
+it('keeps a late clamp acknowledgement after retrying the same target against the new native size', () => {
+  const f = fixture();
+  const before = f.getViewportY('25');
+  f.list.scrollToOffset.mockImplementation(() => {});
+  act(() => f.result.current.capture());
+  f.setRows([message('09'), message('21'), message('25'), message('26')], [0, 1260, 2060, 2220]);
+  act(() => f.result.current.restore({ nativeMaxOffset: 1500 }));
+  f.setOffset(1500);
+  act(() => f.result.current.restore({ nativeMaxOffset: 3500, nativeGeometryCommitted: true }));
+  f.setFirst(1);
+  act(() => { f.result.current.readerScrolled(1500); f.result.current.readerScrolled(1500); });
+  act(() => f.result.current.restore());
+  expect(f.list.scrollToOffset).toHaveBeenCalledTimes(2);
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2100, animated: false });
+  f.setOffset(2100);
+  act(() => f.result.current.readerScrolled(2100));
+  expect(f.result.current.isCorrectionPending()).toBe(false);
+  f.setRows(f.currentRows(), [0, 1260, 2460, 2620]);
+  act(() => f.result.current.restore({ nativeMaxOffset: 3900 }));
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2500, animated: false });
+  f.setOffset(2500);
+  act(() => f.result.current.readerScrolled(2500, false));
+  expect(f.getViewportY('25')).toBe(before);
+});
+
 it('fences anchors across scope and native list replacement', () => {
   const f = fixture();
   act(() => f.result.current.capture());

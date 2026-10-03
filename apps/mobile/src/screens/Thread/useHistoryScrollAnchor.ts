@@ -9,7 +9,12 @@ type List = {
   scrollToOffset: (options: { offset: number; animated: boolean }) => void;
 };
 type Anchor = { scope: string; list: List; key: string; viewportY: number; correction: number | null };
-type Corrections = { scope: string; list: List; offsets: Array<{ offset: number; seen: boolean }> };
+type Corrections = {
+  scope: string;
+  list: List;
+  offsets: Array<{ offset: number; clampedOffset: number | undefined; seen: boolean }>;
+};
+type RestoreOptions = { nativeMaxOffset?: number; nativeGeometryCommitted?: boolean };
 
 /** A conditional date separator is not a surviving row when an earlier page joins its minute. */
 export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | null>, rows: ReadonlyArray<Row>) {
@@ -21,6 +26,7 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
   const [managed, setManaged] = useState<string | null>(null);
   const isActive = useCallback(() => anchor.current?.scope === latest.current.scope
     && anchor.current.list === listRef.current, [listRef]);
+  const isCorrectionPending = useCallback(() => isActive() && anchor.current?.correction != null, [isActive]);
   const release = useCallback(() => {
     anchor.current = null;
     corrections.current = null;
@@ -56,7 +62,7 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
       // An unplaced/retired list cannot supply an anchor; its normal placement remains authoritative.
     }
   }, [listRef]);
-  const restore = useCallback(() => {
+  const restore = useCallback(({ nativeMaxOffset, nativeGeometryCommitted = false }: RestoreOptions = {}) => {
     const saved = anchor.current;
     const current = latest.current;
     if (!saved || saved.scope !== current.scope || saved.list !== listRef.current) return;
@@ -70,15 +76,20 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
       if (!layout) return;
       const offset = Math.max(0, layout.y + saved.list.getFirstItemOffset() - saved.viewportY);
       if (!Number.isFinite(offset) || Math.abs(offset - saved.list.getAbsoluteLastScrollOffset()) < 0.5
-        || (saved.correction !== null && Math.abs(offset - saved.correction) < 0.5)) return;
+        || (!nativeGeometryCommitted && saved.correction !== null && Math.abs(offset - saved.correction) < 0.5)) return;
       saved.correction = offset;
       if (corrections.current?.scope !== current.scope || corrections.current.list !== saved.list) {
         corrections.current = { scope: current.scope, list: saved.list, offsets: [] };
       }
       const pending = corrections.current.offsets;
-      const existing = pending.find(value => Math.abs(value.offset - offset) < 0.5);
+      // JS layout can precede the native child size. Android then clamps this
+      // command to the old maximum and does not retry it when the child grows.
+      const clampedOffset = nativeMaxOffset !== undefined && Number.isFinite(nativeMaxOffset)
+        && nativeMaxOffset >= 0 && offset > nativeMaxOffset + 0.5 ? nativeMaxOffset : undefined;
+      const existing = pending.find(value => Math.abs(value.offset - offset) < 0.5
+        && value.clampedOffset === clampedOffset);
       if (existing) existing.seen = false;
-      else pending.push({ offset, seen: false });
+      else pending.push({ offset, clampedOffset, seen: false });
       if (pending.length > 32) pending.splice(0, pending.length - 32);
       saved.list.scrollToOffset({ offset, animated: false });
     } catch {
@@ -87,22 +98,24 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
   }, [listRef, release]);
   const readerScrolled = useCallback((offset: number, reading = true) => {
     const pending = corrections.current;
-    const correction = pending?.scope === latest.current.scope && pending.list === listRef.current
-      ? pending.offsets.find(value => Math.abs(offset - value.offset) < 0.5) : undefined;
+    const acknowledged = pending?.scope === latest.current.scope && pending.list === listRef.current
+      ? pending.offsets.filter(value => Math.abs(offset - value.offset) < 0.5
+        || (value.clampedOffset !== undefined && Math.abs(offset - value.clampedOffset) < 0.5)) : [];
     // Several estimated-height corrections may be in flight. An older native
-    // event (or its end-drag duplicate) must not replace the current reader anchor.
-    if (correction) {
-      correction.seen = true;
+    // event, clamp or end-drag duplicate must not replace the reader anchor.
+    if (acknowledged.length) {
+      acknowledged.forEach(correction => { correction.seen = true; });
       if (anchor.current?.correction !== null && anchor.current?.correction !== undefined
         && Math.abs(offset - anchor.current.correction) < 0.5) anchor.current.correction = null;
-      return;
+      return true;
     }
     if (reading && isActive()) capture(offset);
+    return false;
   }, [capture, isActive, listRef]);
   const beginDrag = useCallback((pagePending: boolean) => {
     if (corrections.current) corrections.current.offsets = corrections.current.offsets.filter(value => !value.seen);
     if (managedScope.current === latest.current.scope || (pagePending && isActive())) capture();
     else release();
   }, [capture, isActive, release]);
-  return { managed: managed === scope, capture, restore, readerScrolled, beginDrag, release, isActive };
+  return { managed: managed === scope, capture, restore, readerScrolled, beginDrag, release, isActive, isCorrectionPending };
 }
