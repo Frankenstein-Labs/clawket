@@ -26,7 +26,7 @@ import { DesktopIpc, DesktopIpcError, type DesktopSnapshot } from './desktop-ipc
 export interface CodexRequest { type: 'req'; id: string; method: string; params?: Record<string, unknown> }
 export interface CodexOptions { bridgeVersion?: string; project: string; directory: string; command?: string; env?: NodeJS.ProcessEnv; device?: boolean; desktop?: DesktopIpc }
 type Entry = { permissionsUnconfirmed?: true; archived?: boolean; cwd?: string; native?: boolean; id: string; threadId?: string; title: string; created: number; activity?: number; model?: string; provider?: string; effort?: string; serviceTier?: string | null; speedPreference?: { serviceTier: string | null; provider: string }; preview?: string; keys: Record<string, { hash: string; runId: string }> };
-type Run = { desktop?: boolean; id: string; turnId?: string; text: string; started: number; itemId?: string; final?: string; items: Map<string, any>; itemTimestamps?: Map<string, number> };
+type Run = { desktop?: boolean; id: string; turnId?: string; inputMessageId?: string; inputMessageKey?: string; text: string; started: number; itemId?: string; final?: string; items: Map<string, any>; itemTimestamps?: Map<string, number> };
 type Consent = { desktop?: boolean; wireId: string | number; entry: Entry; turnId: string; approval: Extract<ApprovalRequest, { kind: 'exec' }>; permissions?: object };
 type QuestionGroup = { desktop?: boolean; wireId: string | number; entry: Entry; turnId: string; pending: Map<string, { question: AgentQuestion; nativeId: string }>; answers: Record<string, { answers: string[] }> };
 type MetadataBaseline = Map<Entry, { threadId: string; revision: number; pending: boolean }>;
@@ -601,10 +601,11 @@ export class CodexService extends EventEmitter {
     this.scheduleDesktop(r);
   }
   private projectDesktopItems(r: Entry, run: Run, items: any[]): void {
+    const identity = { turnId: run.turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey };
     const messages: string[] = [];
     const publishText = () => {
       const text = messages.join('\n\n').slice(-128000);
-      if (text !== run.text) { run.text = text; this.update({ type: 'agent_message_chunk', sessionKey: r.id, runId: run.id, text, textMode: 'snapshot' }); }
+      if (text !== run.text) { run.text = text; this.update({ type: 'agent_message_chunk', sessionKey: r.id, runId: run.id, ...identity, text, textMode: 'snapshot' }); }
     };
     for (const item of items) {
       if (typeof item.id !== 'string') continue;
@@ -619,11 +620,11 @@ export class CodexService extends EventEmitter {
         // Mobile commits the current text at a new tool boundary. Replaying
         // a caught-up snapshot must publish only the preceding words first.
         publishText();
-        this.update({ type: 'tool_call', sessionKey: r.id, runId: run.id, toolCallId: item.id, title: tool.name, rawInput: tool.input, status: tool.status });
+        this.update({ type: 'tool_call', sessionKey: r.id, runId: run.id, ...identity, toolCallId: item.id, title: tool.name, rawInput: tool.input, status: tool.status });
       }
       // Match history's projected state and output. Initial unknown updates
       // also correct older clients that ignore tool_call's additive status.
-      if ((tool.status !== 'running' || previousTool) && (!previousTool || previousTool.status !== tool.status || previousTool.output !== tool.output)) this.update({ type: 'tool_call_update', sessionKey: r.id, runId: run.id, toolCallId: item.id, status: tool.status, rawOutput: tool.output });
+      if ((tool.status !== 'running' || previousTool) && (!previousTool || previousTool.status !== tool.status || previousTool.output !== tool.output)) this.update({ type: 'tool_call_update', sessionKey: r.id, runId: run.id, ...identity, toolCallId: item.id, status: tool.status, rawOutput: tool.output });
     }
     publishText();
   }
@@ -662,8 +663,17 @@ export class CodexService extends EventEmitter {
         run = undefined;
       }
       if (!run) { run = { id: `desktop:${turnId}`, desktop: true, turnId, text: '', started: Date.now(), items: new Map() }; this.runs.set(r.id, run); this.update({ type: 'run_started', sessionKey: r.id, runId: run.id }); }
+      if (run.turnId !== turnId) { run.inputMessageId = undefined; run.inputMessageKey = undefined; }
       run.turnId = turnId;
-      this.projectDesktopItems(r, run, Array.isArray(turn.items) ? turn.items : []);
+      const items = Array.isArray(turn.items) ? turn.items : [];
+      const completeItems = turn.itemsView === 'full' || turn.itemsPagination?.hasLoadedOldest === true;
+      const originalInput = completeItems && items.find((item: any) => item.type === 'userMessage');
+      if (!run.inputMessageId && typeof originalInput?.id === 'string' && originalInput.id.length > 0 && originalInput.id.length <= 256) {
+        run.inputMessageId = originalInput.id;
+        if (typeof originalInput.clientId === 'string' && Object.hasOwn(r.keys, originalInput.clientId) && r.keys[originalInput.clientId].runId === run.id) run.inputMessageKey = originalInput.clientId;
+        this.update({ type: 'run_started', sessionKey: r.id, runId: run.id, turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey });
+      }
+      this.projectDesktopItems(r, run, items);
     } else if (run?.turnId) {
       const terminal = terminalFor(run.turnId);
       if (terminal) finishDesktopTurn(run, terminal);
@@ -1200,7 +1210,7 @@ export class CodexService extends EventEmitter {
     const identity = legacyCursor ? {} : { kind: 'items' };
     const next = start ? { ...identity, native: page.native, end: start } : result.nextCursor ? { ...identity, native: result.nextCursor } : undefined;
     const run = owned ? this.runs.get(owned.id) : undefined;
-    return { key: String(key), messages: messages.slice(start, end), nextCursor: next ? Buffer.from(JSON.stringify(next)).toString('base64url') : undefined, sessionId: threadId, thinkingLevel: owned?.effort, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, messageTimestampMs: run.itemId ? run.itemTimestamps?.get(run.itemId) : undefined, sessionAbortable: !!run.turnId } : undefined };
+    return { key: String(key), messages: messages.slice(start, end), nextCursor: next ? Buffer.from(JSON.stringify(next)).toString('base64url') : undefined, sessionId: threadId, thinkingLevel: owned?.effort, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, messageTimestampMs: run.itemId ? run.itemTimestamps?.get(run.itemId) : undefined, sessionAbortable: !!run.turnId, turnId: run.turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey } : undefined };
   }
   private prompt(r: Entry, input: PromptInput, desktopOverrides?: Record<string, unknown>): Promise<{ runId: string }> {
     return this.serial(r, async () => {
@@ -1301,9 +1311,9 @@ export class CodexService extends EventEmitter {
     }
     const run = this.runs.get(r.id); if (!run || run.desktop) return;
     this.scheduleDesktop(r);
-    if (method === 'turn/started') { if (!run.turnId) run.turnId = p.turn?.id; return; }
+    if (method === 'turn/started') { if (!run.turnId && typeof p.turn?.id === 'string' && p.turn.id.length > 0 && p.turn.id.length <= 256) run.turnId = p.turn.id; return; }
     if (p.turnId && run.turnId && p.turnId !== run.turnId) return;
-    const base = { sessionKey: r.id, runId: run.id };
+    const base = { sessionKey: r.id, runId: run.id, turnId: run.turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey };
     const itemTimestamp = (id: string, startedAtMs?: unknown): number => {
       const clocks = run.itemTimestamps ??= new Map();
       if (!clocks.has(id)) {
@@ -1324,6 +1334,15 @@ export class CodexService extends EventEmitter {
     if (method === 'item/started' || method === 'item/completed') {
       const item = p.item; if (!item || typeof item.id !== 'string') return;
       if (item.type === 'agentMessage') itemTimestamp(item.id, method === 'item/started' ? p.startedAtMs : undefined);
+      // Only the original owned input's receipt proves the main run anchor.
+      if (!run.inputMessageId && item.type === 'userMessage' && typeof item.clientId === 'string'
+        && Object.hasOwn(r.keys, item.clientId) && r.keys[item.clientId].runId === run.id
+        && run.turnId && item.id.length > 0 && item.id.length <= 256) {
+        run.inputMessageId = item.id; run.inputMessageKey = item.clientId;
+        // Same-run enrichment does not represent another native start. Send it
+        // immediately, even when the next item is a long-running tool.
+        this.update({ type: 'run_started', sessionKey: r.id, runId: run.id, turnId: run.turnId, inputMessageId: item.id, inputMessageKey: run.inputMessageKey });
+      }
       if (this.items.size >= 512) this.items.delete(this.items.keys().next().value!);
       this.items.set(item.id, item);
       if (run.items.size >= 512 && !run.items.has(item.id)) run.items.delete(run.items.keys().next().value!);

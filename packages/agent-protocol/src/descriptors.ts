@@ -205,6 +205,8 @@ export interface ChatMessage {
   artifactDisplayText?: string;
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
+  /** Optional backend-authored execution group; never inferred from prose or clocks. */
+  turnId?: string;
   text: string;
   timestampMs?: number;
   idempotencyKey?: string;
@@ -249,7 +251,8 @@ export interface SessionHistory {
   nextCursor?: string;
   hasActiveRun: boolean;
   /** Backend recovery snapshot; absent on peers that do not expose live runs. */
-  activeRun?: { runId: string; text: string; startedAtMs?: number; messageTimestampMs?: number; sessionAbortable?: boolean };
+  activeRun?: { runId: string; text: string; startedAtMs?: number; messageTimestampMs?: number; sessionAbortable?: boolean;
+    turnId?: string; inputMessageId?: string; inputMessageKey?: string };
   sessionId?: string;
   thinkingLevel?: string;
 }

@@ -1,3 +1,4 @@
+import { validTurnIdentity } from './turnIdentity';
 import { extractHistoryAttachments } from '../connection/adapters/gateway-attachments';
 import { normalizeMessageAttribution } from './messageAttribution';
 import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -149,6 +150,7 @@ function areUiMessagesEquivalent(prev: UiMessage[], next: UiMessage[]): boolean 
     const b = next[index];
     if (a.id !== b.id) return false;
     if (a.historyMessageId !== b.historyMessageId) return false;
+    if (a.turnId !== b.turnId) return false;
     if (a.renderKey !== b.renderKey) return false;
     if (a.presentationRunId !== b.presentationRunId) return false;
     if (a.role !== b.role) return false;
@@ -742,6 +744,7 @@ export function useChatHistoryState({
       let currentTurnTimestamp = 0;
       let currentHistoryMessageId: string | undefined;
       let currentNormalizedMessageId: string | undefined;
+      let currentNativeTurnId: string | undefined;
       let currentTurnModel = '';
       let hasAssistantTurn = false;
       const currentTurnHasContent = () => (
@@ -760,6 +763,7 @@ export function useChatHistoryState({
           uiMessages.push({
             id: currentNormalizedMessageId ?? stableMessageId('assistant', currentTurnTimestamp, idSeed),
             historyMessageId: currentHistoryMessageId,
+            turnId: currentNativeTurnId,
             role: 'assistant',
             text: currentTurnText,
             timestampMs: currentTurnTimestamp > 0 ? currentTurnTimestamp : undefined,
@@ -777,6 +781,7 @@ export function useChatHistoryState({
         currentTurnTimestamp = 0;
         currentHistoryMessageId = undefined;
         currentNormalizedMessageId = undefined;
+        currentNativeTurnId = undefined;
         currentTurnModel = '';
         hasAssistantTurn = false;
       };
@@ -871,6 +876,7 @@ export function useChatHistoryState({
             id: userMsgId,
             historyMessageId: typeof message.id === 'string' ? message.id : undefined,
             role: 'user',
+            turnId: validTurnIdentity(message.turnId),
             ...(attribution ? { attribution } : {}),
             ...(message.sentLocally === true ? { sentLocally: true as const } : {}),
             ...(message.sendUncertain === true ? { sendUncertain: true } : {}),
@@ -919,6 +925,7 @@ export function useChatHistoryState({
           currentHistoryMessageId = typeof message.id === 'string' ? message.id : undefined;
           currentNormalizedMessageId = typeof message.normalizedMessageId === 'string' && message.normalizedMessageId
             ? message.normalizedMessageId : undefined;
+          currentNativeTurnId = validTurnIdentity(message.turnId);
           prevRole = 'assistant';
           if (msgTs > 0) currentTurnTimestamp = msgTs;
 
@@ -959,6 +966,7 @@ export function useChatHistoryState({
               uiMessages.push({
                 id,
                 role: 'tool',
+                turnId: validTurnIdentity(message.turnId),
                 text: '',
                 toolName: name,
                 toolStatus: 'running',
@@ -1057,6 +1065,7 @@ export function useChatHistoryState({
               id: toolCallId && msgRecord.normalizedToolId === `toolcall_${toolCallId}`
                 ? `toolcall_${toolCallId}` : `toolresult_${toolCallId ?? uiMessages.length}`,
               role: 'tool',
+              turnId: validTurnIdentity(message.turnId),
               text: '',
               toolName: name,
               toolStatus: msgRecord.toolStatus === 'unknown' ? 'unknown'

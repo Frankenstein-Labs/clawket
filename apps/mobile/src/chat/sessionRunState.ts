@@ -1,5 +1,10 @@
+import { validTurnIdentity } from './turnIdentity';
+
 export type SessionRunState = {
   runId: string;
+  turnId?: string;
+  inputMessageId?: string;
+  inputMessageKey?: string;
   streamText: string | null;
   startedAt: number;
   streamTimestampMs?: number;
@@ -19,6 +24,7 @@ export function markSessionRunStarted(
   const prev = map.get(sessionKey);
   const next: SessionRunState = {
     runId,
+    ...(prev?.runId === runId ? { turnId: prev.turnId, inputMessageId: prev.inputMessageId, inputMessageKey: prev.inputMessageKey } : {}),
     streamText: prev?.runId === runId ? prev.streamText : null,
     startedAt: prev?.runId === runId ? prev.startedAt : startedAt,
     streamTimestampMs: prev?.runId === runId ? prev.streamTimestampMs : undefined,
@@ -39,6 +45,7 @@ export function markSessionRunDelta(
   const prev = map.get(sessionKey);
   const next: SessionRunState = {
     runId,
+    ...(prev?.runId === runId ? { turnId: prev.turnId, inputMessageId: prev.inputMessageId, inputMessageKey: prev.inputMessageKey } : {}),
     streamText: prev?.runId === runId
       ? (authoritative || shouldReplaceStreamText(prev.streamText, text) ? text : prev.streamText)
       : text,
@@ -58,5 +65,20 @@ export function clearSessionRunState(
   if (!prev) return false;
   if (runId && prev.runId !== runId) return false;
   map.delete(sessionKey);
+  return true;
+}
+
+/** Metadata may arrive after start acknowledgement; it cannot reset presentation. */
+export function rememberSessionRunIdentity(map: Map<string, SessionRunState>, key: string, runId: string,
+  turnId: unknown, inputMessageId: unknown, inputMessageKey?: unknown): boolean {
+  const state = map.get(key);
+  const turn = validTurnIdentity(turnId), input = validTurnIdentity(inputMessageId);
+  if (!state || state.runId !== runId || !turn || !input || (state.turnId && state.turnId !== turn)
+    || (state.inputMessageId && state.inputMessageId !== input)) return false;
+  const clientKey = validTurnIdentity(inputMessageKey);
+  if (state.inputMessageKey && clientKey && state.inputMessageKey !== clientKey) return false;
+  if (state.turnId === turn && state.inputMessageId === input && (!clientKey || state.inputMessageKey === clientKey)) return false;
+  state.turnId = turn; state.inputMessageId = input;
+  if (clientKey) state.inputMessageKey = clientKey;
   return true;
 }

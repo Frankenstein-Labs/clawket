@@ -1,5 +1,5 @@
 import { UiMessage } from '../types/chat';
-import { preserveApprovalRows, preserveHydratedMessageKeys, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, prependOlderCachedMessages, reconcileAcceptedSteeringMessage, retireAliasedTools } from './historyMergePolicy';
+import { preserveCompletedRunPresentation, preserveApprovalRows, preserveHydratedMessageKeys, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, prependOlderCachedMessages, reconcileAcceptedSteeringMessage, retireAliasedTools } from './historyMergePolicy';
 
 describe('reconcileAcceptedSteeringMessage', () => {
   const prompt: UiMessage = { id: 'prompt', historyMessageId: 'prompt-native', role: 'user', text: 'Initial task', timestampMs: 1_000 };
@@ -681,5 +681,26 @@ describe('preserveToolTiming', () => {
     const aliased = { ...live, id: 'toolcall_live_7' };
     expect(preserveToolTiming([aliased], [{ ...reloaded, id: 'toolcall_item_7' }], { live_7: 'item_7' })[0])
       .toMatchObject({ id: 'toolcall_item_7', toolStartedAt: 10_000, toolFinishedAt: 35_000 });
+  });
+});
+
+describe('native same-run completed presentation', () => {
+  it('keeps two canonical guides interleaved while adopting completed live tool identities', () => {
+    const main: UiMessage = { id: 'main', role: 'user', text: 'Task', turnId: 'turn', idempotencyKey: 'send' };
+    const a: UiMessage = { id: 'live-a', role: 'assistant', text: 'A', turnId: 'turn', presentationRunId: 'run', renderKey: 'stable-a' };
+    const tool: UiMessage = { id: 'toolcall_exec', role: 'tool', text: '', toolName: 'exec', toolStatus: 'running', turnId: 'turn', presentationRunId: 'run' };
+    const b: UiMessage = { id: 'live-b', role: 'assistant', text: 'B', turnId: 'turn', presentationRunId: 'run', renderKey: 'stable-b' };
+    const guide1: UiMessage = { id: 'guide1', role: 'user', text: 'Same guide', turnId: 'turn' };
+    const guide2: UiMessage = { ...guide1, id: 'guide2' };
+    const next: UiMessage = { ...guide1, id: 'next', idempotencyKey: 'next-send', turnId: 'next-turn' };
+    const remote: UiMessage[] = [main, { ...a, id: 'native-a', presentationRunId: undefined },
+      { ...tool, toolStatus: 'success', presentationRunId: undefined }, guide1,
+      { ...b, id: 'native-b', presentationRunId: undefined }, guide2, next];
+    const rows = preserveCompletedRunPresentation([main, a, tool, guide1, b, guide2], remote);
+    expect(rows.map(row => row.text)).toEqual(['Task', 'A', '', 'Same guide', 'B', 'Same guide', 'Same guide']);
+    expect(rows.filter(row => row.role === 'user').map(row => row.id)).toEqual(['main', 'guide1', 'guide2', 'next']);
+    expect(rows.filter(row => row.id === 'toolcall_exec')).toEqual([expect.objectContaining({ toolStatus: 'success' })]);
+    expect(rows.find(row => row.text === 'A')?.renderKey).toBe('stable-a');
+    expect(rows.at(-1)).toEqual(next);
   });
 });

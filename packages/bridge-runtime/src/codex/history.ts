@@ -105,7 +105,7 @@ export function codexMessages(turns: any[], options: { unconfirmedLegacyTurnId?:
     for (const item of items) {
       if (typeof item.id !== 'string') continue;
       const timestampMs = typeof turn.startedAt === 'number' ? turn.startedAt * 1000 : undefined;
-      const base = { id: item.id, timestampMs };
+      const base = { id: item.id, timestampMs, ...(typeof turn.id === 'string' && turn.id.length > 0 && turn.id.length <= 256 ? { turnId: turn.id } : {}) };
       if (item.type === 'userMessage') {
         const text = (item.content ?? []).filter((p: any) => p.type === 'text').map((p: any) => p.text).join('\n');
         const attachments: NonNullable<ChatMessage['attachments']> = [];
@@ -123,7 +123,7 @@ export function codexMessages(turns: any[], options: { unconfirmedLegacyTurnId?:
         const tool = codexTool(item);
         if (tool) messages.push({ ...base, id: `toolcall_${item.id}`, role: 'tool', text: '', tool });
         const image = codexGeneratedImage(item);
-        if (image) messages.push({ ...image, timestampMs: completedAtMs ?? timestampMs });
+        if (image) messages.push({ ...image, timestampMs: completedAtMs ?? timestampMs, ...(base.turnId ? { turnId: base.turnId } : {}) });
       }
     }
     const failure = codexTurnFailure(turn);

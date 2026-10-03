@@ -1,3 +1,4 @@
+import { originalRunUserIndex } from './turnIdentity';
 import { sameLiveToolCall, withToolMessage } from './liveToolMessages';
 import { hasBackendEcho, rememberUncertainSend, recoverUncertainSends, reconcilePromptReceipts, useUncertainSends } from './sendRecovery';
 import { describeReplyFailure, sanitizeReplyFailure } from './reply-failure';
@@ -88,6 +89,7 @@ import {
   clearSessionRunState,
   markSessionRunDelta,
   markSessionRunStarted,
+  rememberSessionRunIdentity,
   SessionRunState,
 } from "./sessionRunState";
 import { shouldAdoptPendingOptimisticRunId } from "./pendingOptimisticRun";
@@ -400,6 +402,7 @@ export function useChatController({
   const sendPreflightInFlightRef = useRef(false);
   const sendTriggerGuardRef = useRef(false);
 
+  const [nativeRunIdentityEpoch, setNativeRunIdentityEpoch] = useState(0);
   const [chatStream, setChatStream] = useState<string | null>(null);
   const [chatStreamTimestampMs, setChatStreamTimestampMs] = useState<number | null>(null);
   const chatStreamTimestampRef = useRef<number | null>(null);
@@ -768,6 +771,7 @@ export function useChatController({
         return;
       }
       sessionRunStateRef.current.set(key, {
+        ...(sessionRunStateRef.current.get(key)?.runId === runId ? sessionRunStateRef.current.get(key) : {}),
         runId,
         streamText: chatStreamRef.current,
         startedAt: streamStartedAtRef.current ?? Date.now(),
@@ -1607,16 +1611,18 @@ export function useChatController({
         ?? (previous?.runId === run.runId ? previous.startedAt : null)
         ?? run.startedAtMs ?? Date.now();
       sessionRunStateRef.current.set(snapshot.key, {
-        runId: run.runId, streamText: text,
-        startedAt,
+        ...(previous?.runId === run.runId ? previous : {}),
+        runId: run.runId, streamText: text, startedAt,
         streamTimestampMs: previous?.runId === run.runId ? previous.streamTimestampMs : undefined,
       });
+      if (rememberSessionRunIdentity(sessionRunStateRef.current, snapshot.key, run.runId, run.turnId, run.inputMessageId, run.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
+      const identity = sessionRunStateRef.current.get(snapshot.key);
       currentRunIdRef.current = run.runId;
       streamStartedAtRef.current = startedAt;
       sessionAbortableRunRef.current = run.sessionAbortable ? run.runId : null;
       let recoveredTailTimestamp: number | undefined;
       if (!chatStreamSegmentsRef.current.length && !chatToolMessagesRef.current.length) {
-        const recovered = recoverLiveRunPresentation(text ?? '', history.messages);
+        const recovered = recoverLiveRunPresentation(text ?? '', history.messages, identity?.turnId, identity?.inputMessageId, identity?.inputMessageKey);
         chatStreamSegmentsRef.current = recovered.segments;
         setChatStreamSegments(recovered.segments);
         chatToolMessagesRef.current = recovered.tools;
@@ -1855,6 +1861,7 @@ export function useChatController({
     const sessionKey = sessionKeyRef.current;
     if (sessionKey && currentRunIdRef.current) {
       sessionRunStateRef.current.set(sessionKey, {
+        ...(sessionRunStateRef.current.get(sessionKey)?.runId === currentRunIdRef.current ? sessionRunStateRef.current.get(sessionKey) : {}),
         runId: currentRunIdRef.current,
         streamText: chatStreamRef.current,
         startedAt: streamStartedAtRef.current ?? Date.now(),
@@ -1900,6 +1907,8 @@ export function useChatController({
 
     const markActivityStarted = (sessionKey: string, runId: string) => {
       markSessionRunStarted(sessionRunStateRef.current, sessionKey, runId);
+      if ('turnId' in update && 'inputMessageId' in update
+        && rememberSessionRunIdentity(sessionRunStateRef.current, sessionKey, runId, update.turnId, update.inputMessageId, update.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
       const agentId = agentIdFromSessionKey(sessionKey);
       if (agentId && agentId !== currentAgentId) {
         if (applyRunStart(agentActivityRef.current, agentId)) {
@@ -2014,6 +2023,7 @@ export function useChatController({
             ? (remembered?.runId === update.runId ? validStreamTimestamp(remembered.streamTimestampMs) : undefined)
               ?? validStreamTimestamp(update.timestampMs) ?? Date.now() : undefined,
         );
+        if (rememberSessionRunIdentity(sessionRunStateRef.current, update.sessionKey, update.runId, update.turnId, update.inputMessageId, update.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
         const agentId = agentIdFromSessionKey(update.sessionKey);
         if (agentId && agentId !== currentAgentId) {
           applyActivityDelta(agentActivityRef.current, agentId, mergedText);
@@ -2081,6 +2091,7 @@ export function useChatController({
         if (lastAdapterStateRef.current !== "ready") return;
         markRunSignal();
         markSessionRunStarted(sessionRunStateRef.current, update.sessionKey, update.runId);
+        if (rememberSessionRunIdentity(sessionRunStateRef.current, update.sessionKey, update.runId, update.turnId, update.inputMessageId, update.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
         if (!matchesCurrentSession(update.sessionKey)) return;
         if (!acceptRun(update.sessionKey, update.runId)) return;
         const previousMessage = chatToolMessagesRef.current.find(
@@ -2149,6 +2160,9 @@ export function useChatController({
       case "run_finished": {
         if (recoveredActiveSessionRef.current === update.sessionKey) recoveredActiveSessionRef.current = null;
         markRunSignal();
+        const finishedIdentity = sessionRunStateRef.current.get(update.sessionKey)?.runId === update.runId
+          ? sessionRunStateRef.current.get(update.sessionKey) : undefined;
+        const finishedTurnId = finishedIdentity?.turnId;
         markActivityFinished(update.sessionKey, update.runId, {
           text: update.finalMessage?.text ?? update.systemMessage?.text,
           failed: update.stopReason === "error" || update.stopReason === "cancelled",
@@ -2183,20 +2197,24 @@ export function useChatController({
             ? completedText : streamText;
           const rows = finishLiveRunPresentation({
             segments, tools, tail: finalReplyTail(finalText, segments, streamText),
-            runId: update.runId, startedAt: activeRunStartedAt,
+            runId: update.runId, startedAt: activeRunStartedAt, turnId: finishedTurnId,
             finalMessage: completed ? update.finalMessage : undefined,
             cancelled: update.stopReason === "cancelled",
           });
           // Any history fetched during tools is reconciled inside this turn,
           // then all live rows move into history together before clearing them.
-          history.setMessages((previous) => preserveOptimisticAssistantMessage(
-            [...previous.filter(message => !rows.some(row => row.id === message.id)), ...rows], previous,
-          ));
+          history.setMessages((previous) => {
+            const original = originalRunUserIndex(previous, finishedIdentity?.turnId, finishedIdentity?.inputMessageId, finishedIdentity?.inputMessageKey);
+            const anchored = previous.map((message, index) => index === original ? { ...message, turnId: finishedTurnId } : message);
+            return preserveOptimisticAssistantMessage([
+              ...anchored.filter(message => !rows.some(row => row.id === message.id)), ...rows,
+            ], anchored);
+          });
         } else if (update.stopReason === "cancelled") {
           if (streamText.trim()) history.setMessages((previous) => appendUniqueMessage(previous, {
             id: `abort_${update.runId}`,
             renderKey: liveReplyRenderKey(activeRunStartedAt, update.runId, 0),
-            role: "assistant", text: streamText, timestampMs: Date.now(),
+            role: "assistant", text: streamText, timestampMs: Date.now(), ...(finishedTurnId ? { turnId: finishedTurnId } : {}),
           }));
         } else if (update.stopReason !== "error") {
           const finalText = completedText;
@@ -2204,6 +2222,7 @@ export function useChatController({
             const finalMessage: UiMessage = {
               ...(update.finalMessage ?? { id: `final_${update.runId}`, role: "assistant" as const, timestampMs: Date.now() }),
               text: finalText, renderKey: liveReplyRenderKey(activeRunStartedAt, update.runId, 0),
+              ...(finishedTurnId ? { turnId: finishedTurnId } : {}),
             };
             history.setMessages((previous) => {
               if (previous.some((message) => message.id === finalMessage.id)) return previous;
@@ -3098,13 +3117,15 @@ export function useChatController({
     const codex = adapter.connection.backendKind === 'codex';
     const steeringSequence = codex ? ++steeringSequenceRef.current : undefined;
     const draftRevision = inputRevisionRef.current;
+    const rememberedRun = sessionRunStateRef.current.get(key);
+    const steeredTurnId = adapter.connection.backendKind === 'codex' && rememberedRun?.runId === runId ? rememberedRun.turnId : undefined;
     steeringBusyRef.current = true;
     setSteeringPending(true);
     setSendFailure(null);
     void adapter.steer(key, runId, text).then(() => {
       if (!scope.active || sendScopeRef.current !== scope || sessionKeyRef.current !== key) return;
       const timestampMs = codex ? dispatchedAt : Date.now();
-      const accepted: UiMessage = { id: `usr_${timestampMs}_steer_${runId}${codex ? `_${steeringSequence}` : ''}`, role: 'user', sentLocally: true, text, timestampMs };
+      const accepted: UiMessage = { id: `usr_${timestampMs}_steer_${runId}${codex ? `_${steeringSequence}` : ''}`, role: 'user', sentLocally: true, text, timestampMs, ...(steeredTurnId ? { turnId: steeredTurnId } : {}) };
       if (codex) accepted.renderKey = accepted.id;
       history.setMessages((messages) => codex
         ? reconcileAcceptedSteeringMessage(dispatchedMessages, messages, accepted)
@@ -3487,6 +3508,12 @@ export function useChatController({
       liveStreamStartedAt: presentationStartedAt,
       liveMessageTimestampMs: chatStreamTimestampMs,
       activeRunId: presentationRunId,
+      ...(adapter?.connection.backendKind === 'codex' && history.sessionKey
+        && sessionRunStateRef.current.get(history.sessionKey)?.runId === presentationRunId ? {
+          activeTurnId: sessionRunStateRef.current.get(history.sessionKey)?.turnId,
+          inputMessageId: sessionRunStateRef.current.get(history.sessionKey)?.inputMessageId,
+          inputMessageKey: sessionRunStateRef.current.get(history.sessionKey)?.inputMessageKey,
+        } : {}),
       includePlaceholder: true,
     });
     const pairApprovals = pairApprovalProjection.adapter === adapter
@@ -3518,7 +3545,7 @@ export function useChatController({
       }), renderKey: item.id }))
       .reverse();
     return queued.length > 0 ? [...queued, ...withDelivery] : withDelivery;
-  }, [adapter, chatStream, chatStreamTimestampMs, chatStreamSegments, chatToolMessages, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, presentationRunId, presentationStartedAt, recoverableMessages]);
+  }, [adapter, chatStream, chatStreamTimestampMs, chatStreamSegments, chatToolMessages, nativeRunIdentityEpoch, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, presentationRunId, presentationStartedAt, recoverableMessages]);
 
   useEffect(() => {
     const list = adapter?.management?.approvals?.listExec;

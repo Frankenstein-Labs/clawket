@@ -94,6 +94,26 @@ beforeEach(async () => {
 });
 afterEach(async () => { await service.stop(); rmSync(root, { recursive: true, force: true }); });
 describe('Codex owned sessions', () => {
+  it('publishes the original receipt-bound native input immediately and never promotes a guide', async () => {
+    const sent = await start();
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'a', delta: 'Before the tool.' });
+    notify('item/started', { turnId: 'turn-1', item: { id: 'main', type: 'userMessage', clientId: 'send-1', content: [] } });
+    expect(updates.filter(update => update.type === 'run_started')).toEqual([
+      expect.objectContaining({ runId: sent.runId }),
+      expect.objectContaining({ runId: sent.runId, turnId: 'turn-1', inputMessageId: 'main' }),
+    ]);
+    notify('item/started', { turnId: 'turn-1', item: { id: 'guide1', type: 'userMessage', content: [] } });
+    notify('item/completed', { turnId: 'turn-1', item: { id: 'guide2', type: 'userMessage', clientId: 'unknown-key', content: [] } });
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'b', delta: 'After the guide.' });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.activeRun).toMatchObject({ runId: sent.runId, turnId: 'turn-1', inputMessageId: 'main' });
+    expect(history.messages.filter((message: any) => ['main', 'guide1', 'guide2'].includes(message.id)))
+      .toEqual([expect.objectContaining({ id: 'main', turnId: 'turn-1', idempotencyKey: 'send-1' }),
+        expect.objectContaining({ id: 'guide1', turnId: 'turn-1' }), expect.objectContaining({ id: 'guide2', turnId: 'turn-1' })]);
+    expect(updates.at(-1)).toMatchObject({ type: 'agent_message_chunk', turnId: 'turn-1', inputMessageId: 'main' });
+    expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+  });
+
   it.each([null, 42, false, { name: 'private-native-value' }, ['private-native-value']])(
     'keeps the complete catalog when a native model is not a string: %j', async model => {
       const knownId = randomUUID();
@@ -1331,6 +1351,23 @@ describe('device project discovery and desktop routing', () => {
     accept({ turn: { id: 'native-turn', status: 'inProgress', items: [] } });
     expect(await response).toEqual({ result: { turn: { id: 'native-turn', status: 'inProgress', items: [] } } });
   });
+  it.each(['full', 'summary', undefined])('proves the desktop original input only from an authoritative full item window (%s)', async itemsView => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list' ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); await request('chat.history', { sessionKey: `native:${threadId}` });
+    desktop.emit('snapshot', threadId, { fresh: true, state: { requests: [], turns: [{ id: 'active', status: 'inProgress', itemsView,
+      items: [{ id: 'main', type: 'userMessage', content: [] }, { id: 'a', type: 'agentMessage', text: 'A' },
+        { id: 'guide', type: 'userMessage', content: [] }, { id: 'b', type: 'agentMessage', text: 'B' }] }] } });
+    const pair = updates.find(update => update.type === 'run_started' && update.inputMessageId);
+    if (itemsView === 'full') expect(pair).toMatchObject({ turnId: 'active', inputMessageId: 'main' });
+    else expect(pair).toBeUndefined();
+    expect(updates.find(update => update.type === 'agent_message_chunk')).toMatchObject({ turnId: 'active',
+      ...(itemsView === 'full' ? { inputMessageId: 'main' } : {}) });
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start' || method === 'thread/resume')).toBe(false);
+  });
+
   it('restores desktop active questions and answers the exact original request', async () => {
     const desktop = await device();
     const original = mock.request.getMockImplementation()!;

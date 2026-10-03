@@ -1,3 +1,4 @@
+import { validTurnIdentity } from './turnIdentity';
 import { normalizeMessageAttribution } from './messageAttribution';
 import { localizeAgentSystemNotice } from './agentSystemNotice';
 import {
@@ -40,6 +41,9 @@ export type AdapterChatUpdate =
       type: 'run_started';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       activeRunId: string;
       isSending: true;
       startedAtMs: number;
@@ -48,6 +52,9 @@ export type AdapterChatUpdate =
       type: 'agent_message_chunk';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       text: string;
       textMode?: 'snapshot' | 'delta';
       timestampMs?: number;
@@ -68,6 +75,9 @@ export type AdapterChatUpdate =
       type: 'tool_call';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       toolCallId: string;
       message: UiMessage;
       merge: false;
@@ -78,6 +88,9 @@ export type AdapterChatUpdate =
       type: 'tool_call_update';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       toolCallId: string;
       message: UiMessage;
       merge: true;
@@ -230,6 +243,7 @@ export function mapAdapterChatMessage(
   return {
     id: message.id,
     role: message.role,
+    turnId: validTurnIdentity(message.turnId),
     ...(message.attribution ? { attribution: normalizeMessageAttribution(message.attribution) } : {}),
     ...(message.sentLocally ? { sentLocally: true as const } : {}),
     text: message.role === 'system' ? localizeAgentSystemNotice(message.text, translate) : message.text,
@@ -371,6 +385,7 @@ export function mapAdapterSessionUpdate(
         ...update,
         message: {
           id: `toolcall_${update.toolCallId}`,
+          ...(validTurnIdentity(update.turnId) ? { turnId: update.turnId } : {}),
           role: 'tool',
           text: '',
           toolName: update.kind ?? update.title,
@@ -390,6 +405,7 @@ export function mapAdapterSessionUpdate(
         ...update,
         message: {
           id: `toolcall_${update.toolCallId}`,
+          ...(validTurnIdentity(update.turnId) ? { turnId: update.turnId } : {}),
           role: 'tool',
           text: '',
           toolStatus: update.status,
