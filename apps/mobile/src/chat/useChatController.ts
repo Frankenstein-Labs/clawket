@@ -1620,7 +1620,7 @@ export function useChatController({
       }
       const tail = text === null ? null : finalReplyTail(text, chatStreamSegmentsRef.current);
       if (adapter?.connection.backendKind === 'codex') {
-        const clock = validStreamTimestamp(run.messageTimestampMs) ?? validStreamTimestamp(recoveredTailTimestamp)
+        const clock = validStreamTimestamp(recoveredTailTimestamp) ?? validStreamTimestamp(run.messageTimestampMs)
           ?? (previous?.runId === run.runId ? validStreamTimestamp(previous.streamTimestampMs) : undefined);
         chatStreamTimestampRef.current = tail?.trim() ? chatStreamTimestampRef.current ?? clock ?? Date.now() : null;
         setChatStreamTimestampMs(chatStreamTimestampRef.current);

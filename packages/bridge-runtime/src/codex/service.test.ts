@@ -483,6 +483,33 @@ describe('Codex owned sessions', () => {
     expect(history.messages.filter((message: any) => message.role === 'assistant').map((message: any) => message.timestampMs)).toEqual([13000, 19000]);
     expect((service as any).runs.get(key).items.get('first')).not.toHaveProperty('timestampMs');
   });
+  it('prefers the same Native item lifecycle start over a later notification emission in live and cold history', async () => {
+    await start();
+    notify('item/started', { turnId: 'turn-1', startedAtMs: 59000,
+      item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 61000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: 'A paragraph across the minute.' }, 62000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 59000 });
+    notify('item/started', { turnId: 'turn-1', startedAtMs: 63000,
+      item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 64000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: ' More.' }, 65000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 59000 });
+    notify('item/started', { turnId: 'other-turn', startedAtMs: 99999,
+      item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 99999);
+    const implementation = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method: string, params: any) => method === 'thread/items/list'
+      ? { data: [{ turnId: 'turn-1', startedAtMs: 59000, completedAtMs: 66000,
+          item: { type: 'agentMessage', id: 'first', text: 'A paragraph across the minute. More.', phase: 'commentary' } }] }
+      : implementation(method, params));
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.activeRun.messageTimestampMs).toBe(59000);
+    expect(history.messages.find((message: any) => message.id === 'first').timestampMs).toBe(59000);
+  });
+  it.each([undefined, null, 0, -1, '123', Infinity, NaN, 1e20])('uses first emission when Native lifecycle start is missing or invalid: %j', async startedAtMs => {
+    await start();
+    notify('item/started', { turnId: 'turn-1', startedAtMs, item: { type: 'agentMessage', id: 'first', text: '' } }, 13000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: 'A paragraph.' }, 14000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 13000 });
+  });
   it('does not enable unsafe approvals and persists before turn submission', async () => {
     mock.request.mockImplementationOnce(async () => response());
     await start();

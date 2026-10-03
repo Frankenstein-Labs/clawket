@@ -2,8 +2,8 @@
 
 - 2026-10-04 Codex 流式多段正文时间回退修复（安卓真实 R4E QA 现场，独立任务）。
   - 原生三段 commentary 有独立生命周期时间，但历史读取剥掉 item entry 时间；手机新 live tail 又复用整轮开始时间，导致 04:13 → 04:15 → 04:13。新增可选段时钟，工具提交与后续增量保留首次时间，断线和 active history 恢复保留同一段；run/render identity 不变。
-  - 原生历史 valid start 优先 complete，缺失/畸形保留旧 turn fallback；owned live 使用原条目首次 emission 或本机 receipt，512 条有界且不污染 raw item。手机旧 Bridge fallback 是该段首次收到时间，不声称原生 start；Desktop 无时钟仍有来源限制。OpenClaw/Hermes/Pi 既有时间保持；最终回复 completion fence 继续优先。
-  - 窄回归基线实际 Mobile 9 红/27 绿、Bridge 2 红/166 绿；修复后逐文件串行 actual controller 42、liveRunThread 12、sessionRunState 6、Bridge service 168 共 228 项通过，覆盖空 active snapshot 等待首正文、工具后空 tail、断线及非当前会话的首次时钟隔离。Mobile/协议/runtime 类型与 check:docs 7 对/5 用例通过。未操作手机、原生线程/服务、账号、发包或生产部署。真机候选与完整连接体验仍由负责人继续验收。
+  - 原生历史 valid start 优先 complete，缺失/畸形保留旧 turn fallback；owned live 首次有效生命周期 start 优先，缺失才用原条目首次 emission 或本机 receipt，512 条有界且不污染 raw item。手机旧 Bridge fallback 是该段首次收到时间，不声称原生 start；Desktop 无时钟仍有来源限制。OpenClaw/Hermes/Pi 既有时间保持；最终回复 completion fence 继续优先。
+  - 窄回归基线实际 Mobile 9 红/27 绿、Bridge 2 红/166 绿；修复后逐文件串行 actual controller 43、liveRunThread 12、sessionRunState 6、Bridge service 177 共 238 项通过，新增 lifecycle start 跨分钟优先与无 tool 连续 A/B 同 tail 冷恢复均实际 1 红→绿；覆盖空 active snapshot 等待首正文、工具后空 tail、断线及非当前会话的首次时钟隔离。Mobile/协议/runtime 类型与 check:docs 7 对/5 用例通过。未操作手机、原生线程/服务、账号、发包或生产部署。真机候选与完整连接体验仍由负责人继续验收。
 
 - 2026-10-04 Codex Android combined-candidate checkpoint; phone acceptance continues.
   - The STREAM Workspace main is verified against its original immutable baseline: one canonical main, two sequential original command waits (120 and 90 seconds), both exit zero, exact terminal reply, two original turns/receipts including initialization. No guide, queue, Stop or promotion was dispatched; those controls remain unverified. A live third commentary bubble returns to the whole-run start time while its native item has a later clock; a separate stream-clock repair is in progress.
