@@ -289,7 +289,10 @@ export class CodexAdapter implements AgentAdapter {
       if (frame.ok) pending.resolve(frame.payload);
       else if (pending.method === 'chat.send' && this.capabilities.sessionPermissions
         && frame.error?.code === 'codex_error'
-        && frame.error.message === 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.') {
+        // Both direct-send refusals precede turn dispatch. A settings response
+        // or a later native error event does not establish that send outcome.
+        && (frame.error.message === 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.'
+          || frame.error.message === 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.')) {
         pending.reject(new AdapterError('server', frame.error.message, 'confirm_permissions'));
       }
       else pending.reject(new AdapterError(frame.error?.code === 'BRIDGE_UNAVAILABLE' ? 'bridge_offline' : requiresConnectionAction(frame.error) ? 'unauthorized' : 'server', frame.error?.code === 'BRIDGE_UNAVAILABLE' ? 'Codex Bridge is offline. Keep the Bridge running on your computer.' : frame.error?.message ?? 'Codex request failed'));
