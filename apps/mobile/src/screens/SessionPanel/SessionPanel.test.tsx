@@ -75,6 +75,7 @@ jest.mock('react-native', () => {
     ),
   );
   return {
+    ...require('../../../__mocks__/native-animated'),
     Platform: { OS: 'android', select: (options: Record<string, unknown>) => options.android ?? options.default },
     Keyboard: { dismiss: jest.fn() },
     AppState: { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) },

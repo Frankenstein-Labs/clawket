@@ -1,11 +1,14 @@
 import React from 'react';
 import { render } from '@testing-library/react-native';
+import { Animated } from 'react-native';
 import * as Reanimated from 'react-native-reanimated';
 import { SessionActivityRing } from './SessionActivityRing';
 
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
   return {
+    ...require('../../../__mocks__/native-animated'),
+    AppState: { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) },
     Platform: { OS: 'android', select: (options: Record<string, unknown>) => options.android ?? options.default },
     View: ({ children, ...props }: Record<string, unknown>) => ReactRuntime.createElement('View', props, children),
     StyleSheet: { create: (styles: unknown) => styles, flatten: (style: unknown) => style,
@@ -13,6 +16,7 @@ jest.mock('react-native', () => {
   };
 });
 jest.mock('../../theme', () => ({ useAppTheme: () => ({ theme: { colors: { accent: '#6B95FF' } } }) }));
+beforeEach(() => jest.clearAllMocks());
 afterEach(() => jest.restoreAllMocks());
 it('shares the theme arc while hiding decorative SVG from accessibility', () => {
   const view = render(<SessionActivityRing testID="session-running" />);
@@ -25,4 +29,5 @@ it('holds the native arc still when reduced motion is enabled', () => {
   const timing = jest.spyOn(Reanimated, 'withTiming');
   render(<SessionActivityRing testID="session-running" />);
   expect(timing).not.toHaveBeenCalled();
+  expect(Animated.timing).not.toHaveBeenCalled();
 });
