@@ -842,7 +842,7 @@ export function ThreadView({
   const historyAnchor = useHistoryScrollAnchor(historyScope ?? sessionKey ?? '', timelineRef, timelineItems);
   const { restore: restoreHistoryAnchor, readerScrolled: updateHistoryAnchor,
     beginDrag: beginHistoryDrag, capture: captureHistoryAnchor, release: releaseHistoryAnchor,
-    isActive: historyAnchorActive } = historyAnchor;
+    isActive: historyAnchorActive, isCorrectionPending: historyCorrectionPending } = historyAnchor;
   // Placement state belongs to one list instance: another session mounts a new
   // list whose layout commits run before this view's effects, and they must
   // never act on the previous list's measurements.
@@ -976,7 +976,10 @@ export function ThreadView({
     const list = timelineRef.current;
     if (!list) return;
     // Preserve a surviving content row before considering end-follow corrections.
-    if (!followNewMessagesRef.current) restoreHistoryAnchor();
+    if (!followNewMessagesRef.current) {
+      const { height, viewport } = scrollMetricsRef.current;
+      restoreHistoryAnchor({ nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined });
+    }
     let content: number;
     let viewport: number;
     try {
@@ -1057,8 +1060,9 @@ export function ThreadView({
       offset: nativeEvent.contentOffset.y,
     };
     scrollMetricsRef.current = metrics;
-    updateHistoryAnchor(metrics.offset, readerScrollingRef.current);
-    refreshScrollButton();
+    // A queued compensation/clamp event supplies native sizing but cannot turn
+    // the reader's old-height maximum into an intent to follow the bottom.
+    if (!updateHistoryAnchor(metrics.offset, readerScrollingRef.current)) refreshScrollButton();
     // Rows inserted above a short top-anchored list (older history, a preview
     // unlocked) make the anchor correction push the offset past the end; iOS
     // keeps it there as blank space until the next touch. A reader's own
@@ -1073,9 +1077,12 @@ export function ThreadView({
     cancelReaderSettle();
     if (!readerScrollingRef.current) return;
     readerScrollingRef.current = false;
-    followNewMessagesRef.current = !historyPagingBusyRef.current && distanceFromBottomRef.current <= Space.lg;
+    // A prepend command clipped to the old native maximum looks like the end
+    // until native sizing catches up; it cannot release the reader's anchor.
+    followNewMessagesRef.current = !historyPagingBusyRef.current && !historyCorrectionPending()
+      && distanceFromBottomRef.current <= Space.lg;
     if (followNewMessagesRef.current) releaseHistoryAnchor();
-  }, [cancelReaderSettle, releaseHistoryAnchor]);
+  }, [cancelReaderSettle, historyCorrectionPending, releaseHistoryAnchor]);
   const finishScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     cancelReaderSettle();
     if (returningToBottomRef.current) {
@@ -1116,16 +1123,31 @@ export function ThreadView({
     scrollMetricsRef.current.height = height;
     if (followNewMessagesRef.current) {
       if (changed) scheduleBottomFollow(false);
-    } else refreshScrollButton();
-  }, [refreshScrollButton, scheduleBottomFollow]);
+    } else {
+      // Native size confirms that a previously clamped prepend can now reach
+      // the same planned offset, even without another JS layout commit.
+      const { viewport } = scrollMetricsRef.current;
+      if (changed) restoreHistoryAnchor({
+        nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined,
+        nativeGeometryCommitted: true,
+      });
+      refreshScrollButton();
+    }
+  }, [refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   const handleTimelineLayout = useCallback((event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
     const changed = scrollMetricsRef.current.viewport !== height;
     scrollMetricsRef.current.viewport = height;
     if (followNewMessagesRef.current) {
       if (changed) scheduleBottomFollow(true);
-    } else refreshScrollButton();
-  }, [refreshScrollButton, scheduleBottomFollow]);
+    } else {
+      if (changed) restoreHistoryAnchor({
+        nativeMaxOffset: height > 0 ? Math.max(0, scrollMetricsRef.current.height - height) : undefined,
+        nativeGeometryCommitted: true,
+      });
+      refreshScrollButton();
+    }
+  }, [refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   useLayoutEffect(() => {
     cancelReaderSettle();
     cancelBottomFollow();
