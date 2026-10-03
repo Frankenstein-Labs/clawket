@@ -26,7 +26,7 @@ import { DesktopIpc, DesktopIpcError, type DesktopSnapshot } from './desktop-ipc
 export interface CodexRequest { type: 'req'; id: string; method: string; params?: Record<string, unknown> }
 export interface CodexOptions { bridgeVersion?: string; project: string; directory: string; command?: string; env?: NodeJS.ProcessEnv; device?: boolean; desktop?: DesktopIpc }
 type Entry = { permissionsUnconfirmed?: true; archived?: boolean; cwd?: string; native?: boolean; id: string; threadId?: string; title: string; created: number; activity?: number; model?: string; provider?: string; effort?: string; serviceTier?: string | null; speedPreference?: { serviceTier: string | null; provider: string }; preview?: string; keys: Record<string, { hash: string; runId: string }> };
-type Run = { desktop?: boolean; id: string; turnId?: string; text: string; started: number; itemId?: string; final?: string; items: Map<string, any> };
+type Run = { desktop?: boolean; id: string; turnId?: string; inputMessageId?: string; inputMessageKey?: string; text: string; started: number; itemId?: string; final?: string; items: Map<string, any> };
 type Consent = { desktop?: boolean; wireId: string | number; entry: Entry; turnId: string; approval: Extract<ApprovalRequest, { kind: 'exec' }>; permissions?: object };
 type QuestionGroup = { desktop?: boolean; wireId: string | number; entry: Entry; turnId: string; pending: Map<string, { question: AgentQuestion; nativeId: string }>; answers: Record<string, { answers: string[] }> };
 type MetadataBaseline = Map<Entry, { threadId: string; revision: number; pending: boolean }>;
@@ -601,16 +601,25 @@ export class CodexService extends EventEmitter {
       const turnId = turn.turnId ?? turn.id;
       if (typeof turnId !== 'string' || !turnId) return;
       if (!run) { run = { id: `desktop:${turnId}`, desktop: true, turnId, text: '', started: Date.now(), items: new Map() }; this.runs.set(r.id, run); this.update({ type: 'run_started', sessionKey: r.id, runId: run.id }); }
+      if (run.turnId !== turnId) { run.inputMessageId = undefined; run.inputMessageKey = undefined; }
       run.turnId = turnId;
       const items = Array.isArray(turn.items) ? turn.items : [];
+      const completeItems = turn.itemsView === 'full' || turn.itemsPagination?.hasLoadedOldest === true;
+      const originalInput = completeItems && items.find((item: any) => item.type === 'userMessage');
+      if (!run.inputMessageId && typeof originalInput?.id === 'string' && originalInput.id.length > 0 && originalInput.id.length <= 256) {
+        run.inputMessageId = originalInput.id;
+        if (typeof originalInput.clientId === 'string' && Object.hasOwn(r.keys, originalInput.clientId) && r.keys[originalInput.clientId].runId === run.id) run.inputMessageKey = originalInput.clientId;
+        this.update({ type: 'run_started', sessionKey: r.id, runId: run.id, turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey });
+      }
+      const identity = { turnId: run.turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey };
       const text = items.filter((i: any) => ['agentMessage', 'assistantMessage'].includes(i.type)).map((i: any) => i.text ?? i.message ?? '').join('\n\n').slice(-128000);
-      if (text !== run.text) { run.text = text; this.update({ type: 'agent_message_chunk', sessionKey: r.id, runId: run.id, text, textMode: 'snapshot' }); }
+      if (text !== run.text) { run.text = text; this.update({ type: 'agent_message_chunk', sessionKey: r.id, runId: run.id, ...identity, text, textMode: 'snapshot' }); }
       for (const item of items) {
         if (typeof item.id !== 'string') continue;
         const old = run.items.get(item.id); run.items.set(item.id, item); this.items.set(item.id, item);
         const tool = codexTool(item); if (!tool) continue;
-        if (!old) this.update({ type: 'tool_call', sessionKey: r.id, runId: run.id, toolCallId: item.id, title: tool.name, rawInput: tool.input });
-        if (tool.status !== 'running' && tool.status !== 'unknown' && old?.status !== item.status) this.update({ type: 'tool_call_update', sessionKey: r.id, runId: run.id, toolCallId: item.id, status: tool.status, rawOutput: tool.output });
+        if (!old) this.update({ type: 'tool_call', sessionKey: r.id, runId: run.id, ...identity, toolCallId: item.id, title: tool.name, rawInput: tool.input });
+        if (tool.status !== 'running' && tool.status !== 'unknown' && old?.status !== item.status) this.update({ type: 'tool_call_update', sessionKey: r.id, runId: run.id, ...identity, toolCallId: item.id, status: tool.status, rawOutput: tool.output });
       }
     } else if (run?.turnId) {
       const terminal = turns.find((t: any) => (t.turnId ?? t.id) === run!.turnId && ['completed', 'interrupted', 'failed'].includes(t.status));
@@ -1133,7 +1142,7 @@ export class CodexService extends EventEmitter {
     const identity = legacyCursor ? {} : { kind: 'items' };
     const next = start ? { ...identity, native: page.native, end: start } : result.nextCursor ? { ...identity, native: result.nextCursor } : undefined;
     const run = owned ? this.runs.get(owned.id) : undefined;
-    return { key: String(key), messages: messages.slice(start, end), nextCursor: next ? Buffer.from(JSON.stringify(next)).toString('base64url') : undefined, sessionId: threadId, thinkingLevel: owned?.effort, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, sessionAbortable: !!run.turnId } : undefined };
+    return { key: String(key), messages: messages.slice(start, end), nextCursor: next ? Buffer.from(JSON.stringify(next)).toString('base64url') : undefined, sessionId: threadId, thinkingLevel: owned?.effort, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, sessionAbortable: !!run.turnId, turnId: run.turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey } : undefined };
   }
   private prompt(r: Entry, input: PromptInput, desktopOverrides?: Record<string, unknown>): Promise<{ runId: string }> {
     return this.serial(r, async () => {
@@ -1223,9 +1232,9 @@ export class CodexService extends EventEmitter {
     }
     const run = this.runs.get(r.id); if (!run || run.desktop) return;
     this.scheduleDesktop(r);
-    if (method === 'turn/started') { if (!run.turnId) run.turnId = p.turn?.id; return; }
+    if (method === 'turn/started') { if (!run.turnId && typeof p.turn?.id === 'string' && p.turn.id.length > 0 && p.turn.id.length <= 256) run.turnId = p.turn.id; return; }
     if (p.turnId && run.turnId && p.turnId !== run.turnId) return;
-    const base = { sessionKey: r.id, runId: run.id };
+    const base = { sessionKey: r.id, runId: run.id, turnId: run.turnId, inputMessageId: run.inputMessageId, inputMessageKey: run.inputMessageKey };
     if (method === 'item/agentMessage/delta' && typeof p.delta === 'string') {
       if (run.itemId !== p.itemId) { run.itemId = p.itemId; if (run.text) run.text += '\n\n'; }
       const item = run.items.get(p.itemId) ?? { id: p.itemId, type: 'agentMessage', text: '' };
@@ -1235,6 +1244,15 @@ export class CodexService extends EventEmitter {
     if (method === 'item/reasoning/summaryTextDelta' && typeof p.delta === 'string') this.update({ type: 'agent_thought_chunk', ...base, text: p.delta });
     if (method === 'item/started' || method === 'item/completed') {
       const item = p.item; if (!item || typeof item.id !== 'string') return;
+      // Only the original owned input's receipt proves the main run anchor.
+      if (!run.inputMessageId && item.type === 'userMessage' && typeof item.clientId === 'string'
+        && Object.hasOwn(r.keys, item.clientId) && r.keys[item.clientId].runId === run.id
+        && run.turnId && item.id.length > 0 && item.id.length <= 256) {
+        run.inputMessageId = item.id; run.inputMessageKey = item.clientId;
+        // Same-run enrichment does not represent another native start. Send it
+        // immediately, even when the next item is a long-running tool.
+        this.update({ type: 'run_started', sessionKey: r.id, runId: run.id, turnId: run.turnId, inputMessageId: item.id, inputMessageKey: run.inputMessageKey });
+      }
       if (this.items.size >= 512) this.items.delete(this.items.keys().next().value!);
       this.items.set(item.id, item);
       if (run.items.size >= 512 && !run.items.has(item.id)) run.items.delete(run.items.keys().next().value!);

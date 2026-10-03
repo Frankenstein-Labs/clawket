@@ -80,6 +80,28 @@ describe('useChatHistoryState', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it('adopts late native execution identity on otherwise identical history rows', async () => {
+    const key = 'native-chat';
+    const rows = [{ id: 'main', role: 'user', text: 'Task', timestampMs: 1000 },
+      { id: 'tool', role: 'tool', text: '', tool: { callId: 'exec', name: 'exec', status: 'success' } },
+      { id: 'guide', role: 'user', text: 'Continue', timestampMs: 2000 },
+      { id: 'answer', role: 'assistant', text: 'Done', timestampMs: 3000 }];
+    const adapter = { connection: { backendKind: 'codex' }, state: 'ready',
+      loadSession: jest.fn().mockResolvedValueOnce({ messages: rows, hasActiveRun: false })
+        .mockResolvedValue({ messages: rows.map(row => ({ ...row, turnId: 'native-turn' })), hasActiveRun: false }) };
+    const { result, unmount } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, routeSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    await act(async () => { await result.current.loadHistory(key); });
+    expect(result.current.messages.every(row => !row.turnId)).toBe(true);
+    await act(async () => { await result.current.loadHistory(key); });
+    expect(result.current.messages).toHaveLength(4);
+    expect(result.current.messages.every(row => row.turnId === 'native-turn')).toBe(true);
+    unmount();
+  });
+
   it('preserves image-only managed artifacts through history projection and refresh', async () => {
     const key = 'agent:main:artifact-test';
     const attachments = [{ type: 'image', mimeType: 'image/png', artifactId: 'opaque-image' }];

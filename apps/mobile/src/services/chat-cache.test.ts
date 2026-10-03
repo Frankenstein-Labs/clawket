@@ -93,6 +93,14 @@ function makeMsg(overrides: Partial<UiMessage> = {}): UiMessage {
 }
 
 describe("ChatCacheService", () => {
+  it("retains native execution groups across cache reload without accepting malformed identities", async () => {
+    const scope = { gatewayConfigId: "gw1", agentId: "main", sessionKey: "chat" };
+    await ChatCacheService.saveMessages(scope, [makeMsg({ id: "main", turnId: "native-turn" }),
+      makeMsg({ id: "guide", turnId: "native-turn" }), makeMsg({ id: "bad", turnId: " padded " })]);
+    const rows = await ChatCacheService.getMessages(scope.gatewayConfigId, scope.agentId, scope.sessionKey);
+    expect(rows?.map(row => row.turnId)).toEqual(["native-turn", "native-turn", undefined]);
+  });
+
   it.each(["openclaw", "hermes"].flatMap(backend => [true, false].map(known => [backend, known] as const)))(
     "restores the current %s snapshot before network history (known generation: %s)", async (backendKind, known) => {
       const key = "agent:main:main";

@@ -1,3 +1,4 @@
+import { validTurnIdentity } from './turnIdentity';
 import { restoreCachedAttribution } from './messageAttribution';
 import { CachedMessage, CachedSessionSnapshot } from '../services/chat-cache';
 import { UiMessage } from '../types/chat';
@@ -20,6 +21,7 @@ function buildMessageDedupKey(message: UiMessage): string {
 export function cachedMessageToUiMessage(message: CachedMessage, sessionKey = ''): UiMessage {
   return {
     ...restoreCachedAttribution(message, sessionKey),
+    turnId: validTurnIdentity(message.turnId),
     streaming: false,
   };
 }
