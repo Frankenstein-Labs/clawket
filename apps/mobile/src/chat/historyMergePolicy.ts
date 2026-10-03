@@ -272,22 +272,31 @@ export function reconcileAcceptedSteeringMessage(
       if (!positions.has(key)) positions.set(key, index);
     }
   });
-  let anchor = -1;
-  for (let index = dispatchedMessages.length - 1; index >= 0 && anchor < 0; index--) {
-    const message = dispatchedMessages[index];
-    const matching = identities(message).map(id => positions.get(`${message.role}:${id}`)).filter((at): at is number => at !== undefined);
-    if (matching.length) anchor = Math.min(...matching);
-  }
+  const findAnchor = (messages: UiMessage[]) => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      const matching = identities(message).map(id => positions.get(`${message.role}:${id}`)).filter((at): at is number => at !== undefined);
+      if (matching.length) return Math.min(...matching);
+    }
+    return -1;
+  };
+  const anchor = findAnchor(dispatchedMessages);
   // A replaced history window supplies no evidence of the old insertion point.
   // The caller reads canonical history instead of placing old input in a new turn.
   if (anchor < 0 && (dispatchedMessages.length > 0 || currentMessages.length > 0)) return currentMessages;
   const previousUserIds = new Set(dispatchedMessages.filter(message => message.role === 'user').flatMap(identities));
-  const suffix = currentMessages.slice(anchor + 1);
+  // A streaming assistant row can keep its identity while native persistence
+  // places the steering user before it. Only user lineage bounds echo search;
+  // the full dispatch lineage still owns insertion when the echo is absent.
+  const userAnchor = findAnchor(dispatchedMessages.filter(message => message.role === 'user'));
+  const suffix = currentMessages.slice(userAnchor + 1);
   // Native client IDs belong to ordinary sends. Steering has no send key; a
   // queued next turn with the same text must not absorb its acknowledgement.
   const nextSend = suffix.findIndex(message => message.role === 'user' && Boolean(message.idempotencyKey));
   const candidates = (nextSend < 0 ? suffix : suffix.slice(0, nextSend)).filter(message => message.role === 'user'
-    && Boolean(message.historyMessageId) && !message.idempotencyKey
+    // Direct adapter recovery carries the native ID without a history alias.
+    && (Boolean(message.historyMessageId) || (Boolean(message.id) && !message.sentLocally && !/^usr_\d/.test(message.id)))
+    && !message.idempotencyKey && !message.delivery
     && !identities(message).some(id => previousUserIds.has(id))
     && !message.imageUris?.length && !message.fileAttachments?.length
     && canMatchMessageAuthors(message, accepted)

@@ -1068,6 +1068,11 @@ export function useChatController({
           if (sessionKeyRef.current !== sessionKey
             || (reason === 'post-stream' && currentRunIdRef.current)
             || (reason === 'steer-accepted' && (!scope.active || sendScopeRef.current !== scope))) return 0;
+          // Multiple accepted inputs may have waited for this same older read.
+          // The first fresh read already follows all of those native writes.
+          const following = historyReloadInFlightRef.current;
+          if (reason === 'steer-accepted' && following?.sessionKey === sessionKey
+            && following.promise !== inFlight.promise) return following.promise;
         } else {
           if (showDebug) dbg(`historyReload:reuse session=${sessionKey} reason=${reason}`);
           return inFlight.promise;
