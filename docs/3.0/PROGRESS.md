@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex Android 深测继续：真实命令审批与分页录屏残留问题（未完成）。
+  - 当前 QA JS / 独立 Preview Bridge 均来自 `8f502810`，Native 0.160.0。长等待答题后的 final 在 cold history 保持完成时刻/时间分隔；另一真实命令审批等待数分钟后 final 也显示完成时刻。五个 GPT-6-Luna effort、跨会话设置隔离与 archive/restore 已用原生完成记录和私有身份基线核对；Fast actual tier 仍未报告。
+  - 两个 fresh Read-only 会话产生真实 command approval：手机单次拒绝后同 original item declined、原 turn 完成、文件不存在；单次仅允许一次后同 item completed/exit zero、原 turn 完成、测试文件恰好一行。后台返回仍保持原请求。Native rollout 缺少瞬时 command terminal 的边界保留，严格 code-mode 包装核对与第二次写入重新审批仍待完成，不能仅靠卡片消失判断授权。
+  - fresh 80-message 历史两次 prepend 已不跳新页顶部，能到最早消息并正确回到底部；完整录屏 012 仍揭示两次短暂空白及助手正文与错误用户消息并排的复用错位。最终稳定截图不构成全程通过，正在查原生 Markdown 身份与窗口提交。
+  - Allow once 后 QA App 意外退至 Android Home；现场 crash/exit 日志确认 RN 0.86.3 原生 ShadowTree commit exhaustion / SIGABRT，原生命令已成功完成。具体触发组件、修复与 cold recovery 尚未证明，不冒充连接失败或已修复。原 Production Bridge、商店 App 与其他后端服务未动；未发布。详见 `docs/3.1/codex-android-qa-20261003.md`，全部独立任务仍遵守 braces HUMAN TODO 的合并门禁。
+
 - 2026-10-04 Codex 最终答复重载后时间回退（负责人真机 219→220 与视频 010：同一回复从完成时刻退回 31 分钟前的请求时刻，时间分隔随之消失）。
   - 原因：实时成功 final 使用手机收到完成通知的时间，原生历史所有行却使用 turn.startedAt。已有 unknown 工具状态/时钟修复与这个正文时间问题无关。
   - 依据：官方 Native Turn.completedAt 是 Unix 秒；last_agent_message 只认可最后一条非空 final_answer 或旧模型 absent/null phase。已完成 final 和生成图片附件统一原生完成时间；用户、commentary、plan、工具以及缺失/非法/未知原生时间的既有 fallback 保留。协议只增加可选 FinalMessage.timestampMs，不改变其它后端未提供此字段时的行为。
