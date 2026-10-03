@@ -1,5 +1,13 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 017 全帧现场复核与旧版本历史对照；真机全面验收继续。
+  - 017完整传输462,908,981字节/SHA2aaad119d9dda26556420b5c231ab6d680e8d276e613264f929b1ed99119f354；独立复核PTS838–918的全部6,296编码帧及17张全分辨率关键帧。正文全白状态由851.389733持续到首恢复851.812867，约0.423秒，不把截图间隔说成持续一分钟或精确render latency。恢复含空助手气泡、阅读位置变化及同第二步工作栏1:36→0:01；这些现象分开记录，不能据源码直接断定空白根因。
+  - 在实际旧QA CLI09bd/精确owner代次下仅一次authenticated controlOnly+chat.history：完整25消息/7canonical user，无游标，两guide各精确Native ID/正文一次且原序，missing/duplicate/unexpected皆0；Native及索引前后字节不变。固定2033 Git对象及原dist重建的14-source review严格等原baseline，新的Mobile源码不冒称旧运行版本。完成后的历史未丢guide，不证明当时live/UI正确；原5completed/5receipt、未验Stop/edit/remove/promotion的分类保持，不重放。
+
+- 2026-10-04 Codex 同轮lineage/pending/clock本地组合通过，手机仍2033。
+  - f722+7d最窄整合保留既有131 Desktop有序投影、139 Native逐项时钟、eligible final完成时间、ACK echo/dispatch顺序和pending草稿修订门。去掉合并产生的重复可选timestamp类型声明；独立production peer通过。逐文件串行Mobile live22/historyMerge67/sessionRun7/adapterEvents30/controllerContract93/historyState169/cache45/controllerAdapterEvents48，Bridge Native history75/service234，共790项通过。Protocol/Mobile/CLI类型、开发CLI build、check:docs 9指令对/5检查器通过，未跑全量本地套件，heavy释放。
+  - 新源码与开发CLI构建尚不等于手机/正在运行QA owner版本；工作栏计时消费者修复待独立窄回归，组合后继续真实审批与fresh运行控制fixture。PR141/140/142的功能与完整类型CI通过，唯一实质门禁为未获批准的braces高危审计；PR仍未合并，无发布/Production改动。
+
 - 2026-10-04 Current 指引等待确认的交互修复（负责人授权，Codex Android 深入验收中发现源码缺口）。
   - 原防重锁只有 ref：等待第一条 ACK 时仍可选择 Current，弹层关闭后第二次操作被静默忽略。新增可渲染 pending 状态；选择入口保持，Current 明确禁用并显示既有「发送中…」，Next 和 Stop 保持可用，不自动排 Next、不解除防重锁、不重放。
   - ACK 仅清理发送时的草稿修订，用户后来重新输入的同文草稿仍保留；原会话、适配器与卸载边界保留。正常各后端能力与确认行为不变。

@@ -121,7 +121,6 @@ export function buildLiveRunListData(params: {
   toolMessages: UiMessage[];
   liveStreamText: string | null;
   liveStreamStartedAt: number | null;
-  liveMessageTimestampMs?: number | null;
   activeRunId: string | null;
   liveMessageTimestampMs?: number | null;
   activeTurnId?: string;
