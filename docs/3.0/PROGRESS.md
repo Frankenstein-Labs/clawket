@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-03 全局会话面板创建晚完成覆盖后来选择（Codex 真机 QA 后续只读审查确认，独立窄修复）。
+  - 全局 Host 在创建等待期间没有 UI 代次保护；关闭后重开或选择其他行，后端创建/本地持久化晚完成仍会导航到新会话并关闭后来面板。创建成功原本应自动进入；真机 118 的 XML 仍 pending、同名 PNG 已在关闭动画末端，不能据此断言正常自动进入失败。
+  - Host 捕获 presentation/request generation；关闭、重开、行选择和卸载使旧 UI handoff 失效。实际创建结果及手动访问照常持久保存，读者离开后不导航、不关新面板、不展示旧错误；当前正常创建继续自动进入。付费墙明确继续保留同一作用域，派发前及持久化后再次检查，不因过期继续操作另建会话。
+  - 真实 Host 与生产创建 helper/ManualSessions 延迟 AsyncStorage 回归在原实现 2 红（错误导航），修后覆盖关闭重开、行选择、卸载、正常五后端、当前/过期错误及付费继续的 current/closed/selected 边界。逐文件 in-band：Host 15、Panel 35、ConversationEntry 35，共 85 项通过；Mobile 类型、247 UI 文件样式、设计系统文档及 check:docs 通过，完整门禁交给独立 PR CI。不操作设备，不改变 Root 候选树或 Production，不升版本、打包或发布。真机验收仍由本轮负责人进行。
+
 - 2026-10-03 Codex 工具状态与历史重载一致性（负责人要求全面真机测试中即时修复）。
   - 原生 WebSearch/ImageView 可以没有 `status`；Desktop 恢复此前强制先发 running，之后又漏掉无 status 完成和未知工具更新，导致只剩一个真实工具时仍显示 11～15 步并行。按历史的状态/输出投影发送初始状态及变化，保留同一工具行、重复快照去重、同 status 输出/非零退出码修正；明确未知状态不推定运行或完成，回合不因工具结果而结束。
   - 最低支持的官方原生代码证明 ImageView canonical 历史只在 completed 的 ViewImageToolCall 上写入；隔离 CODEX_HOME 生成当前 Desktop 0.160.0 schema，确认 ImageView 仅 id/path/type、搜索也无 status，元数据证据存入本轮共享 evidence。只有已知历史契约可隐式成功：图片查看为 completed-only；搜索 Begin 无 status 且 action/results 为 null，保留 unknown，End 必须官方四种有效 action、string query 与合法可选 results。非空 results 原样进入既有 32K JSON 工具输出，缺失/null/[] 不补造结果、不改模型正文；显式未来/运行/失败状态优先，owned completed 同样不强造 success。Bridge 所有的搜索/图片查看通知只在 active run 的内存覆盖中保留已确认 started/completed；冷历史、活跃历史与 follower 保持一致，原生项/文件不改。
