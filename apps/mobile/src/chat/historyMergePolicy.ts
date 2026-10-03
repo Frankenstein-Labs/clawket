@@ -250,6 +250,52 @@ function normalizeUserText(text: string): string {
     .trim();
 }
 
+/**
+ * Codex persists steering input before its RPC acknowledgement and stamps it
+ * with the original turn's clock. Reconcile against the dispatch lineage,
+ * never the acknowledgement clock or the current conversation tail.
+ */
+export function reconcileAcceptedSteeringMessage(
+  dispatchedMessages: UiMessage[],
+  currentMessages: UiMessage[],
+  accepted: UiMessage,
+): UiMessage[] {
+  const identities = (message: UiMessage) => [message.id, message.historyMessageId, message.renderKey]
+    .filter((id): id is string => Boolean(id));
+  const same = (left: UiMessage, right: UiMessage) => left.role === right.role
+    && identities(left).some(id => identities(right).includes(id));
+  if (currentMessages.some(message => same(message, accepted))) return currentMessages;
+  const positions = new Map<string, number>();
+  currentMessages.forEach((message, index) => {
+    for (const id of identities(message)) {
+      const key = `${message.role}:${id}`;
+      if (!positions.has(key)) positions.set(key, index);
+    }
+  });
+  let anchor = -1;
+  for (let index = dispatchedMessages.length - 1; index >= 0 && anchor < 0; index--) {
+    const message = dispatchedMessages[index];
+    const matching = identities(message).map(id => positions.get(`${message.role}:${id}`)).filter((at): at is number => at !== undefined);
+    if (matching.length) anchor = Math.min(...matching);
+  }
+  // A replaced history window supplies no evidence of the old insertion point.
+  // The caller reads canonical history instead of placing old input in a new turn.
+  if (anchor < 0 && (dispatchedMessages.length > 0 || currentMessages.length > 0)) return currentMessages;
+  const previousUserIds = new Set(dispatchedMessages.filter(message => message.role === 'user').flatMap(identities));
+  const suffix = currentMessages.slice(anchor + 1);
+  // Native client IDs belong to ordinary sends. Steering has no send key; a
+  // queued next turn with the same text must not absorb its acknowledgement.
+  const nextSend = suffix.findIndex(message => message.role === 'user' && Boolean(message.idempotencyKey));
+  const candidates = (nextSend < 0 ? suffix : suffix.slice(0, nextSend)).filter(message => message.role === 'user'
+    && Boolean(message.historyMessageId) && !message.idempotencyKey
+    && !identities(message).some(id => previousUserIds.has(id))
+    && !message.imageUris?.length && !message.fileAttachments?.length
+    && canMatchMessageAuthors(message, accepted)
+    && normalizeUserText(message.text) === normalizeUserText(accepted.text));
+  if (candidates.length > 0) return currentMessages;
+  return [...currentMessages.slice(0, anchor + 1), accepted, ...currentMessages.slice(anchor + 1)];
+}
+
 function areMessagesLinkedByIdempotency(a: UiMessage, b: UiMessage): boolean {
   return !!a.idempotencyKey && !!b.idempotencyKey && a.idempotencyKey === b.idempotencyKey;
 }
@@ -260,6 +306,8 @@ function areLikelySameUserMessage(a: UiMessage, b: UiMessage): boolean {
   }
 
   if (a.id === b.id) return true;
+  if ((/^usr_\d+_steer_/.test(a.id) && b.idempotencyKey)
+    || (/^usr_\d+_steer_/.test(b.id) && a.idempotencyKey)) return false;
   if (!canMatchMessageAuthors(a, b)) return false;
   if (a.idempotencyKey && b.idempotencyKey) return false;
   const timestampA = a.timestampMs ?? 0;
@@ -323,6 +371,7 @@ function findTailUserFallbackMatch(
   for (let index = messages.length - 1; index >= 0; index--) {
     const candidate = messages[index];
     if (candidate.role !== 'user' || knownOlderIds.has(candidate.historyMessageId ?? candidate.id) || knownOlderIds.has(candidate.id)) continue;
+    if (/^usr_\d+_steer_/.test(optimisticUser.id) && candidate.idempotencyKey) continue;
     if (candidate.idempotencyKey && optimisticUser.idempotencyKey && candidate.idempotencyKey !== optimisticUser.idempotencyKey) continue;
     if (!canMatchMessageAuthors(candidate, optimisticUser)) continue;
     if (normalizeUserText(candidate.text) !== normalizedOptimisticText) continue;

@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-03 Codex 引导消息确认与原生历史竞态（用户要求持续真机测试时发现的源码边界）。
+  - fresh main 的实际 controller hook 两项确定性基线红：原生引导历史先到、时间继承两分钟前的 turn start；随后 ACK 再加一份，旧 turn 完成且新 turn 开始时还会落到新末尾。这是测试复现，尚不宣称真机复现。
+  - Codex ACK 按 dispatch 消息身份/位置归并：已有明确新 native echo 保留；否则插存活 dispatch anchor 后；窗口替换无旧锚点只读 canonical，不猜新 turn 位置。dispatch 时钟与单调本地序号保持两次同文/同毫秒引导独立，晚 ACK 不覆盖新 run clock；新草稿、失败草稿、scope 和无自动重发边界保留。独立有 send key 的下一条消息不吞并引导，OpenClaw 能力门禁与 Hermes/Pi 既有确认路径保持。
+  - acceptance 必须在旧 in-flight history 完成后再读，且 adapter/session 退休即阻止该追加 read。本机单文件串行 controller 72、historyMergePolicy 61，共 133 项通过；Mobile 类型、check:docs 7 指令对/5 检查器用例及 diff 检查通过。完整门禁由本 PR CI 继续验证。未操作手机、Native/Bridge 服务、账号或现有会话，未构建/发布。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。
