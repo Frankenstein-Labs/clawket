@@ -499,6 +499,8 @@ The official Pi Preview Registry is environment-checked like OpenClaw/Hermes Pre
 
 ## Codex conversations
 
+Confirmed reset/delete failures use the session panel’s scoped failure notice and retain the conversation for explicit retry. Discard late errors after the panel or connection scope changes; honor backend-provided `allowedActions` rather than globally forbidding active-session actions.
+
 Tool calls with an optional initial status use that state; omission preserves existing live-start behavior. Carry `statusReported` through canonical history and UI merges so explicitly unknown tools never use the legacy Claude/Pi missing-result running hint. Unknown has no finish timestamp, completion summary, measured duration or tool-settled recovery; direct seq-gap history projections explicitly clear old completion clocks through live/history object merges; only confirmed running tools name current execution. Preserve other backends' legacy events and history behavior.
 
 Codex entry uses a 12-second slow-hint budget per real connection/catalog stage. Derive `Connecting` versus `Loading sessions` from the current connection readiness; rerenders do not reset the clock. Reuse cold activation’s complete live catalog for the picker, but retain the fallback after failed/cache-only reads. Only exact `sessionCatalogPageIndex: 1` negotiation enables three concurrent frozen catalog pages; retain legacy serial reads, scope/retirement fences, complete atomic validation and all existing size/expiry bounds. See `../../docs/3.1/session-catalog-sync.md`.

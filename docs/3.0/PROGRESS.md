@@ -1,5 +1,8 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 会话操作拒绝反馈（独立 session-action-errors 任务）。
+  - actual SessionPanelView 基线 reset/delete 无声拒绝和同步异常 3 项红；actual CodexService turn/start 待确认时错误开放 reset/delete 1 项红。已用 scoped 既有失败 Banner 保留原行可重试，Codex 原生生命周期通过 allowedActions 关闭运行中操作；开始事件先发布即时描述，Stop ACK 不解锁，原终态仍仅发布既有单份元数据。不改变 OpenClaw/Hermes/Pi 的活跃会话语义。
+  - peer 发现前一操作迟到拒绝会覆盖后一操作成功，实际新增回归 1 红→绿；独立 action generation 栅栏不取消归档读取。串行单文件 SessionPanel 44、CodexService 159 共 203 项通过，Mobile/Bridge 类型通过；文档 7 指令对/5 检查用例与 UI 246 文件/66 checker outcomes、app config 7、design docs 5 全绿；CI 待远端门禁。仅自动回归，未宣称手机验收；未操作手机/原生线程，未发布。
 - 2026-10-04 Codex Profile 返回页面后的迟到写入确认（完整连接体验测试中的独立修复）。
   - Skill 切换等待确认时仍可打开 SKILL.md；返回后新读取的状态会被旧切换 ACK 覆盖，同一焦点往返也能让旧失败提示重新出现，或让之前的「使用 Skill」创建结果迟到导航。原逻辑只比较当前 focused 布尔值，无法区分离开前后两个页面代际。
   - Profile mutation 增加按已提交 adapter/project/section/online/focus 状态更新的代际栅栏；旧成功、失败和导航结果不再覆盖返回后的读取。正常确认、写锁、原生 CAS 与不重放写入保持现有行为；未修改其它后端或 Bridge。
@@ -1453,6 +1456,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-CODEX-ACTIONS-AUDIT-1004 | Codex 会话操作拒绝修复的审计合并阻挡 | 负责人决定既有 braces GHSA-vfj7-8cjw-p6xm 的修复或经批准窄范围例外；代理不绕过门禁。 | required audit 全绿后才可合并；当前仅本机自动回归通过，手机验收继续由主 QA 任务执行。 | 待审计决定；未合并、未发布 |
 | HT-AUDIT-BRACES-1003 | 新 braces 高危公告阻挡 PR 的依赖门禁决策 | 当前 `GHSA-vfj7-8cjw-p6xm` / `braces` 3.0.3 无 npm 已发布修补版本；由负责人选择等待修补，或明确批准该单条 advisory 的有期限例外及理由。代理不自行加例外、改安全门禁或绕过合并保护。 | 两份 lockfile 的 dependency-audit 按选定方案通过；受影响 PR rebase fresh main 后 required 全绿才合并。 | PR #127 源码相关 CI 全通过，但依赖审计失败；尚未合并，待负责人决策。 |
 
 | HT-BRACES-AUDIT-1003 | 新 braces 公告的临时审计例外决定 | 官方修复或负责人明确批准一条指定公告/包、有原因和到期日的临时例外；不能因 Codex QA 紧急或本地测试通过而绕过门禁。 | root 与 Mobile lockfile 的 GHSA-vfj7-8cjw-p6xm / braces high 消除或通过获批规则；各 PR 对齐 main 后完整门禁再绿。 | PR #128 的功能与类型/static/v1 CI 已通过；现有依赖审计阻塞合并，待负责人决定。 |
