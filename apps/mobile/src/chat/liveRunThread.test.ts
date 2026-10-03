@@ -55,10 +55,23 @@ describe('buildLiveRunListData', () => {
     const text = 'Checking.\n\nContinuing.\n\nStill waiting.';
     const recovered = recoverLiveRunPresentation(text, history, 'native-main', 'main');
     expect(recovered.segments.map(row => row.id)).toEqual(['a', 'b']);
+    expect(recovered.tailTimestampMs).toBe(3000);
     expect(recovered.tail).toBe('Still waiting.');
     const rows = buildLiveRunListData({ historyMessages: history, streamSegments: [], toolMessages: [],
-      liveStreamText: text, liveStreamStartedAt: 1000, activeRunId: 'bridge-main', activeTurnId: 'native-main', inputMessageId: 'main' }).reverse();
+      liveStreamText: text, liveStreamStartedAt: 1000, activeRunId: 'bridge-main', activeTurnId: 'native-main', inputMessageId: 'main', includePlaceholder: true }).reverse();
     expect(rows.map(row => row.text)).toEqual(['Main task', 'Checking.', 'Keep waiting', 'Continuing.', 'Keep waiting', 'Still waiting.']);
+    expect(rows.filter(row => row.role === 'assistant').map(row => row.timestampMs)).toEqual([1000, 2000, 3000]);
+    expect(rows.at(-1)?.renderKey).toBe(liveReplyRenderKey(1000, 'bridge-main', 2));
+  });
+
+  it.each([undefined, 0, Number.NaN])('keeps an unreported or invalid canonical tail clock on the established fallback (%s)', timestampMs => {
+    const history = sameRunHistory().filter(row => row.role !== 'tool');
+    history.at(-1)!.timestampMs = timestampMs;
+    const text = 'Checking.\n\nContinuing.\n\nStill waiting.';
+    expect(recoverLiveRunPresentation(text, history, 'native-main', 'main').tailTimestampMs).toBeUndefined();
+    const rows = buildLiveRunListData({ historyMessages: history, streamSegments: [], toolMessages: [],
+      liveStreamText: text, liveStreamStartedAt: 1000, activeRunId: 'bridge-main', activeTurnId: 'native-main', inputMessageId: 'main' }).reverse();
+    expect(rows.at(-1)?.timestampMs).toBe(1000);
   });
 
   it('anchors a warm optimistic main only through its proven native client key', () => {
