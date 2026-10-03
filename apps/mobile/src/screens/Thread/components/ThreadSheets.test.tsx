@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { ThreadAddSheet } from './ThreadAddSheet';
+import { RunInputSheet } from './RunInputSheet';
 
 type MockRecentPhotos = {
   access: 'unavailable' | 'checking' | 'undetermined' | 'denied' | 'granted';
@@ -21,7 +22,9 @@ jest.mock('react-native', () => {
   return {
     Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
     Image: host('Image'),
-    Pressable: host('Pressable'),
+    Pressable: ({ children, disabled, ...props }: Record<string, unknown>) => ReactRuntime.createElement(
+      'Pressable', { ...props, disabled, onStartShouldSetResponder: () => !disabled }, children,
+    ),
     StyleSheet: {
       create: <T,>(styles: T) => styles,
       flatten: (style: unknown) => style,
@@ -160,7 +163,7 @@ jest.mock('../../../components/ui/SettingsGroup', () => {
       disabled?: boolean;
     }) => ReactRuntime.createElement(
       Pressable,
-      { onPress, testID, disabled },
+      { onPress, testID, disabled, accessibilityState: { disabled } },
       leading,
       ReactRuntime.createElement(Text, null, title),
       value ? ReactRuntime.createElement(Text, { testID: `${testID}-value` }, value) : null,
@@ -169,6 +172,52 @@ jest.mock('../../../components/ui/SettingsGroup', () => {
 });
 
 const photo = (id: string) => ({ id, uri: `file:///photos/${id}.heic`, width: 3000, height: 4000 });
+
+describe('RunInputSheet pending Current acknowledgement', () => {
+  const props = () => ({ visible: true, scope: 'connection:session:run', onClose: jest.fn(),
+    onCurrent: jest.fn(), onNext: jest.fn(), canSteer: false, steeringPending: true });
+
+  it('shows pending Current without closing or submitting it, while explicit Next still hands off after close', () => {
+    const actions = props();
+    const view = render(<RunInputSheet {...actions} />);
+    expect(view.getByTestId('run-input-current').props.disabled).toBe(true);
+    expect(view.getByTestId('run-input-current-value').props.children).toBe('Sending…');
+    fireEvent.press(view.getByTestId('run-input-current'));
+    expect(actions.onClose).not.toHaveBeenCalled();
+    expect(actions.onCurrent).not.toHaveBeenCalled();
+    fireEvent.press(view.getByTestId('run-input-next'));
+    expect(actions.onClose).toHaveBeenCalledTimes(1);
+    expect(actions.onNext).not.toHaveBeenCalled();
+    act(() => view.getByTestId('run-input-sheet').props.onAfterClose());
+    expect(actions.onNext).toHaveBeenCalledTimes(1);
+    expect(actions.onCurrent).not.toHaveBeenCalled();
+  });
+
+  it('restores a manual Current choice after acknowledgement and delivers only once after dismissal', () => {
+    const actions = props();
+    const view = render(<RunInputSheet {...actions} />);
+    view.rerender(<RunInputSheet {...actions} canSteer steeringPending={false} />);
+    expect(view.getByTestId('run-input-current').props.disabled).toBe(false);
+    expect(view.queryByText('Sending…')).toBeNull();
+    fireEvent.press(view.getByTestId('run-input-current'));
+    expect(actions.onClose).toHaveBeenCalledTimes(1);
+    expect(actions.onCurrent).not.toHaveBeenCalled();
+    act(() => view.getByTestId('run-input-sheet').props.onAfterClose());
+    act(() => view.getByTestId('run-input-sheet').props.onAfterClose());
+    expect(actions.onCurrent).toHaveBeenCalledTimes(1);
+    expect(actions.onNext).not.toHaveBeenCalled();
+  });
+
+  it('retires the chosen Current dismissal handoff when the conversation or run changes', () => {
+    const actions = props();
+    const view = render(<RunInputSheet {...actions} canSteer steeringPending={false} />);
+    fireEvent.press(view.getByTestId('run-input-current'));
+    view.rerender(<RunInputSheet {...actions} scope="connection:other:run" />);
+    act(() => view.getByTestId('run-input-sheet').props.onAfterClose());
+    expect(actions.onCurrent).not.toHaveBeenCalled();
+    expect(actions.onNext).not.toHaveBeenCalled();
+  });
+});
 
 function renderSheet(overrides: Partial<React.ComponentProps<typeof ThreadAddSheet>> = {}) {
   const props = {

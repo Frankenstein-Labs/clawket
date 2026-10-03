@@ -244,7 +244,7 @@ jest.mock('../services/analytics/events', () => ({
 
 function createAdapter(
   connectionState: 'ready' | 'connecting' = 'ready',
-  backendKind: 'openclaw' | 'hermes' = 'openclaw',
+  backendKind: 'openclaw' | 'hermes' | 'codex' | 'pi' = 'openclaw',
 ) {
   const listeners: Record<string, Set<(...args: any[]) => void>> = {
     update: new Set(),
@@ -310,10 +310,12 @@ function useChatController(options: Record<string, any>) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe('useChatController contract', () => {
@@ -338,6 +340,155 @@ describe('useChatController contract', () => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
     consoleErrorSpy.mockRestore();
+  });
+
+  it.each(['codex', 'hermes', 'pi'] as const)('keeps the chooser available but serializes pending Current acknowledgement for %s', async backend => {
+    const adapter = createAdapter('ready', backend);
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('First guidance');
+    });
+    expect(result.current.canSteer).toBe(true);
+    act(() => result.current.onSteer('active'));
+    expect(result.current.canSteer).toBe(false);
+    expect(result.current.steeringPending).toBe(true);
+    expect(result.current.canChooseRunInput).toBe(true);
+    act(() => result.current.setInput('Next guidance'));
+    act(() => result.current.onSteer('active'));
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(result.current.input).toBe('Next guidance');
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(result.current.steeringPending).toBe(false);
+    expect(result.current.canSteer).toBe(true);
+    expect(result.current.input).toBe('Next guidance');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('retains the normal outbox path when the backend does not advertise Current guidance', async () => {
+    const adapter = createAdapter('ready', 'openclaw');
+    const steer = jest.fn().mockResolvedValue(undefined);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Next task');
+    });
+    expect(result.current.canChooseRunInput).toBe(false);
+    expect(result.current.canSteer).toBe(false);
+    act(() => result.current.onSteer('active'));
+    await act(async () => { result.current.onSend(); });
+    expect(result.current.queuedMessages.map(message => message.text)).toEqual(['Next task']);
+    expect(steer).not.toHaveBeenCalled();
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('preserves a deliberately recomposed identical draft while the previous Current acknowledgement is pending', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn().mockReturnValueOnce(acknowledgement.promise).mockResolvedValue(undefined);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Keep waiting');
+    });
+    act(() => result.current.onSteer('active'));
+    act(() => result.current.setInput(''));
+    act(() => result.current.setInput('Keep waiting'));
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(result.current.input).toBe('Keep waiting');
+    expect(result.current.canChooseRunInput).toBe(true);
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    await act(async () => { jest.advanceTimersByTime(1); result.current.onSteer('active'); await Promise.resolve(); });
+    expect(steer).toHaveBeenCalledTimes(2);
+    expect(historyMock.messages.filter(message => message.text === 'Keep waiting')).toHaveLength(2);
+    expect(result.current.input).toBe('');
+  });
+
+  it('restores Current availability after an uncertain acknowledgement failure without replaying or clearing its draft', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Keep waiting');
+    });
+    act(() => result.current.onSteer('active'));
+    expect(result.current.canSteer).toBe(false);
+    await act(async () => { acknowledgement.reject(new Error('timed out')); await acknowledgement.promise.catch(() => undefined); });
+    expect(result.current.steeringPending).toBe(false);
+    expect(result.current.canSteer).toBe(true);
+    expect(result.current.input).toBe('Keep waiting');
+    expect(result.current.sendFailure).toContain('Sending failed');
+    expect(historyMock.messages.some(message => message.text === 'Keep waiting')).toBe(false);
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it.each(['session', 'adapter'] as const)('does not let a pending Current acknowledgement modify the later %s draft', async change => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    Object.assign(adapter, { steer: jest.fn(() => acknowledgement.promise) });
+    let activeAdapter = adapter;
+    const { result, rerender } = renderHook(() => useChatController({ adapter: activeAdapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('First guidance');
+    });
+    act(() => result.current.onSteer('active'));
+    await act(async () => {
+      if (change === 'session') historyMock.sessionKey = 'other-session';
+      else activeAdapter = createAdapter('ready', 'codex');
+      historyMock.messages = [{ id: 'other-user', role: 'user', text: 'Other conversation' }];
+      rerender({});
+      result.current.setInput('Other draft');
+    });
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(result.current.input).toBe('Other draft');
+    expect(historyMock.messages.map(message => message.text)).toEqual(['Other conversation']);
+    expect(result.current.steeringPending).toBe(false);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('keeps explicit Next and Stop available while a Current acknowledgement is pending', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('First guidance');
+    });
+    act(() => result.current.onSteer('active'));
+    await act(async () => { result.current.setInput('Next task'); });
+    await act(async () => { result.current.onSend(); });
+    expect(result.current.queuedMessages.map(message => message.text)).toEqual(['Next task']);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    expect(result.current.steeringPending).toBe(true);
+    act(() => result.current.abortCurrentRun());
+    expect(adapter.cancel).toHaveBeenCalledTimes(1);
+    expect(steer).toHaveBeenCalledTimes(1);
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
   });
 
   it('exposes stable public fields and forwards extracted hook outputs', () => {
