@@ -86,6 +86,15 @@ export function codexFinalReplyId(items: any[], allowLegacy = true): string | un
   return id;
 }
 
+/** Native millisecond item clocks are optional; malformed or reversed pairs are not evidence. */
+export function codexItemTimestamp(started: unknown, completed?: unknown): number | undefined {
+  const valid = (value: unknown): value is number => typeof value === 'number'
+    && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15;
+  if ((started != null && !valid(started)) || (completed != null && !valid(completed))) return undefined;
+  if (valid(started) && valid(completed) && completed < started) return undefined;
+  return valid(started) ? started : valid(completed) ? completed : undefined;
+}
+
 export function codexMessages(turns: any[], options: { unconfirmedLegacyTurnId?: string } = {}): ChatMessage[] {
   const messages: ChatMessage[] = [];
   for (const turn of turns) {
@@ -107,7 +116,9 @@ export function codexMessages(turns: any[], options: { unconfirmedLegacyTurnId?:
         }
         messages.push({ ...base, role: 'user', text, ...(typeof item.clientId === 'string' && item.clientId && item.clientId.length <= 200 ? { idempotencyKey: item.clientId } : {}), ...(attachments.length ? { attachments } : {}) });
       } else if (item.type === 'agentMessage' || item.type === 'plan') {
-        messages.push({ ...base, ...(item.id === finalReplyId && completedAtMs !== undefined ? { timestampMs: completedAtMs } : {}), role: 'assistant', text: String(item.text ?? '') });
+        messages.push({ ...base, timestampMs: (item.id === finalReplyId ? completedAtMs : undefined)
+          ?? (turn.itemTimestamps instanceof Map ? turn.itemTimestamps.get(item.id) : undefined) ?? timestampMs,
+          role: 'assistant', text: String(item.text ?? '') });
       } else {
         const tool = codexTool(item);
         if (tool) messages.push({ ...base, id: `toolcall_${item.id}`, role: 'tool', text: '', tool });

@@ -191,6 +191,10 @@ function mapAdapterAgent(agent: AgentDescriptor) {
   };
 }
 
+function validStreamTimestamp(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15 ? value : undefined;
+}
+
 function latestVisibleAssistant(history: SessionHistory): {
   text: string;
   timestampMs: number;
@@ -392,6 +396,8 @@ export function useChatController({
   const sendTriggerGuardRef = useRef(false);
 
   const [chatStream, setChatStream] = useState<string | null>(null);
+  const [chatStreamTimestampMs, setChatStreamTimestampMs] = useState<number | null>(null);
+  const chatStreamTimestampRef = useRef<number | null>(null);
   const [chatStreamSegments, setChatStreamSegments] = useState<StreamSegment[]>(
     [],
   );
@@ -509,6 +515,8 @@ export function useChatController({
       }
       chatStreamRef.current = null;
       setChatStream(null);
+      chatStreamTimestampRef.current = null;
+      setChatStreamTimestampMs(null);
     },
     [],
   );
@@ -518,7 +526,7 @@ export function useChatController({
     if (!currentText.trim()) {
       return;
     }
-    const ts = timestampMs ?? Date.now();
+    const ts = timestampMs ?? chatStreamTimestampRef.current ?? Date.now();
     const startedAt = streamStartedAtRef.current;
     const runId = currentRunIdRef.current;
     const previous = chatStreamSegmentsRef.current;
@@ -532,6 +540,11 @@ export function useChatController({
     setChatStreamSegments(next);
     chatStreamRef.current = null;
     setChatStream(null);
+    chatStreamTimestampRef.current = null;
+    setChatStreamTimestampMs(null);
+    const key = sessionKeyRef.current;
+    const remembered = key ? sessionRunStateRef.current.get(key) : undefined;
+    if (remembered?.runId === runId) remembered.streamTimestampMs = undefined;
   }, []);
 
   const armPendingRunTimeout = useCallback(() => {
@@ -753,6 +766,7 @@ export function useChatController({
         runId,
         streamText: chatStreamRef.current,
         startedAt: streamStartedAtRef.current ?? Date.now(),
+        streamTimestampMs: chatStreamTimestampRef.current ?? undefined,
       });
     },
     [],
@@ -866,6 +880,8 @@ export function useChatController({
       if (!currentRunIdRef.current && remembered) {
         currentRunIdRef.current = remembered.runId;
         streamStartedAtRef.current = remembered.startedAt;
+        chatStreamTimestampRef.current = remembered.streamTimestampMs ?? null;
+        setChatStreamTimestampMs(chatStreamTimestampRef.current);
         const streamText = sanitizeVisibleStreamText(remembered.streamText);
         chatStreamRef.current = streamText;
         setChatStream(streamText);
@@ -1143,6 +1159,8 @@ export function useChatController({
         );
       currentRunIdRef.current = remembered.runId;
       streamStartedAtRef.current = remembered.startedAt;
+      chatStreamTimestampRef.current = remembered.streamTimestampMs ?? null;
+      setChatStreamTimestampMs(chatStreamTimestampRef.current);
       lastRunSignalAtRef.current = Date.now();
       lastRunRecoveryProbeAtRef.current = 0;
       const streamText = sanitizeVisibleStreamText(remembered.streamText);
@@ -1586,24 +1604,35 @@ export function useChatController({
       sessionRunStateRef.current.set(snapshot.key, {
         runId: run.runId, streamText: text,
         startedAt,
+        streamTimestampMs: previous?.runId === run.runId ? previous.streamTimestampMs : undefined,
       });
       currentRunIdRef.current = run.runId;
       streamStartedAtRef.current = startedAt;
       sessionAbortableRunRef.current = run.sessionAbortable ? run.runId : null;
+      let recoveredTailTimestamp: number | undefined;
       if (!chatStreamSegmentsRef.current.length && !chatToolMessagesRef.current.length) {
         const recovered = recoverLiveRunPresentation(text ?? '', history.messages);
         chatStreamSegmentsRef.current = recovered.segments;
         setChatStreamSegments(recovered.segments);
         chatToolMessagesRef.current = recovered.tools;
         setChatToolMessages(recovered.tools);
+        recoveredTailTimestamp = recovered.tailTimestampMs;
       }
       const tail = text === null ? null : finalReplyTail(text, chatStreamSegmentsRef.current);
+      if (adapter?.connection.backendKind === 'codex') {
+        const clock = validStreamTimestamp(run.messageTimestampMs) ?? validStreamTimestamp(recoveredTailTimestamp)
+          ?? (previous?.runId === run.runId ? validStreamTimestamp(previous.streamTimestampMs) : undefined);
+        chatStreamTimestampRef.current = tail?.trim() ? chatStreamTimestampRef.current ?? clock ?? Date.now() : null;
+        setChatStreamTimestampMs(chatStreamTimestampRef.current);
+      }
       chatStreamRef.current = tail;
       setChatStream(tail);
+      const remembered = sessionRunStateRef.current.get(snapshot.key);
+      if (remembered) remembered.streamTimestampMs = chatStreamTimestampRef.current ?? undefined;
       lastRunSignalAtRef.current = Date.now();
     }
     setIsSending(true);
-  }, [history.activitySnapshot, history.sessionKey, clearActiveRunState]);
+  }, [adapter, history.activitySnapshot, history.sessionKey, clearActiveRunState]);
 
   useEffect(() => {
     syncDerivedSessionActivity("messages-or-session");
@@ -1824,6 +1853,7 @@ export function useChatController({
         runId: currentRunIdRef.current,
         streamText: chatStreamRef.current,
         startedAt: streamStartedAtRef.current ?? Date.now(),
+        streamTimestampMs: chatStreamTimestampRef.current ?? undefined,
       });
     }
     agentActivityRef.current.clear();
@@ -1905,6 +1935,8 @@ export function useChatController({
       if (!currentRunIdRef.current) {
         currentRunIdRef.current = runId;
         streamStartedAtRef.current = Date.now();
+        chatStreamTimestampRef.current = null;
+        setChatStreamTimestampMs(null);
       }
       setIsSending(true);
       setRunAcknowledged(true);
@@ -1973,6 +2005,9 @@ export function useChatController({
           mergedText,
           undefined,
           update.textMode !== undefined,
+          adapter?.connection.backendKind === 'codex' && update.text.trim()
+            ? (remembered?.runId === update.runId ? validStreamTimestamp(remembered.streamTimestampMs) : undefined)
+              ?? validStreamTimestamp(update.timestampMs) ?? Date.now() : undefined,
         );
         const agentId = agentIdFromSessionKey(update.sessionKey);
         if (agentId && agentId !== currentAgentId) {
@@ -1989,6 +2024,11 @@ export function useChatController({
         const nextText = update.textMode === 'snapshot'
           ? finalReplyTail(update.text, chatStreamSegmentsRef.current)
           : mergeStreamText(chatStreamRef.current, update.text, update.textMode);
+        if (adapter?.connection.backendKind === 'codex' && nextText.trim() && chatStreamTimestampRef.current === null) {
+          chatStreamTimestampRef.current = validStreamTimestamp(update.timestampMs) ?? Date.now();
+          setChatStreamTimestampMs(chatStreamTimestampRef.current);
+        }
+        if (adapter?.connection.backendKind === 'codex') sessionRunStateRef.current.get(update.sessionKey)!.streamTimestampMs = chatStreamTimestampRef.current ?? undefined;
         chatStreamRef.current = nextText;
         setChatStream(nextText);
         setActivityLabel(null);
@@ -2016,7 +2056,10 @@ export function useChatController({
           applyChildToolStart(childSessionActivityRef.current, update.sessionKey, toolName);
           onChildSessionActivityChange();
         }
-        if (!matchesCurrentSession(update.sessionKey)) return;
+        if (!matchesCurrentSession(update.sessionKey)) {
+          if (adapter?.connection.backendKind === 'codex') sessionRunStateRef.current.get(update.sessionKey)!.streamTimestampMs = undefined;
+          return;
+        }
         if (!acceptRun(update.sessionKey, update.runId)) return;
         if (chatToolMessagesRef.current.some(message => sameLiveToolCall(message, update.message))) return;
         commitCurrentStreamSegment();
@@ -3429,6 +3472,7 @@ export function useChatController({
       toolMessages: chatToolMessages,
       liveStreamText: chatStream,
       liveStreamStartedAt: presentationStartedAt,
+      liveMessageTimestampMs: chatStreamTimestampMs,
       activeRunId: presentationRunId,
       includePlaceholder: true,
     });
@@ -3461,7 +3505,7 @@ export function useChatController({
       }), renderKey: item.id }))
       .reverse();
     return queued.length > 0 ? [...queued, ...withDelivery] : withDelivery;
-  }, [adapter, chatStream, chatStreamSegments, chatToolMessages, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, presentationRunId, presentationStartedAt, recoverableMessages]);
+  }, [adapter, chatStream, chatStreamTimestampMs, chatStreamSegments, chatToolMessages, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, presentationRunId, presentationStartedAt, recoverableMessages]);
 
   useEffect(() => {
     const list = adapter?.management?.approvals?.listExec;

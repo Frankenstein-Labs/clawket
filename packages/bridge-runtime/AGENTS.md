@@ -259,6 +259,8 @@ Codex skill catalogs resolve optional session scope to an already authorized nat
 
 Codex Desktop IPC deadlines must outlast native owner discovery plus dispatch (currently 10 seconds each). Imported threads require explicit no-owner for local fallback; the verified native-writer-lock exception above is limited to Bridge-created threads and failure before dispatch. Routed timeouts, disconnects and generic handler failures retain uncertain dispatch. Do not clear the writer fence or resend after an ambiguous error.
 
+Codex assistant history preserves valid optional `ThreadItemEntry.startedAtMs`/`completedAtMs` in a separate projection map; keep native items unchanged and missing/malformed clocks on the legacy turn fallback. Owned live text carries the same item's first notification emission time, or first local receipt if absent, in a 512-entry bounded map. Later tokens cannot advance it; active history exposes the latest paragraph clock independently of run start. Emission/receipt time is not an asserted native item start, and explicit terminal-reply completion rules retain priority.
+
 After a Desktop start acknowledgement confirms the turn ID, reconcile an already received fresh terminal snapshot for that exact turn and current Bridge run. Fast authentication failures can precede the acknowledgement. Stale snapshots, other turns and incomplete status cannot end the run; reconciliation never dispatches another turn.
 
 Claude metadata commits must flush the writable exclusive-create handle before atomic rename; reopening it read-only fails `fsync` on Windows. Preserve the old index on write/flush failure. Cross-platform IPC tests use Windows named pipes and platform-native path comparisons.

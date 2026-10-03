@@ -54,7 +54,7 @@ function response(cwd = project) {
   return { ...settings, cwd, thread: { id: threadId, cwd }, sandbox: settings.sandboxPolicy, reasoningEffort: settings.effort };
 }
 const request = (method: string, params: Record<string, unknown> = {}) => service.request({ type: 'req', id: randomUUID(), method, params }) as Promise<any>;
-const notify = (method: string, params: object) => mock.instances.at(-1).emit('notification', { method, params: { threadId, ...params } });
+const notify = (method: string, params: object, emittedAtMs?: unknown) => mock.instances.at(-1).emit('notification', { method, params: { threadId, ...params }, emittedAtMs });
 async function start() {
   const result = await request('chat.send', { sessionKey: key, text: 'hello', idempotencyKey: 'send-1' });
   await Promise.resolve(); notify('turn/started', { turn: { id: 'turn-1' } }); return result;
@@ -437,6 +437,51 @@ describe('Codex owned sessions', () => {
     const history = await request('chat.history', { sessionKey: key });
     expect(history.messages[0]).toMatchObject({ id: 'old-reply', timestampMs: 123000 });
     expect(mock.request).toHaveBeenCalledWith('thread/turns/list', expect.objectContaining({ itemsView: 'notLoaded', cursor: 'older-metadata' }));
+  });
+  it('retains Native per-item commentary clocks in item history rather than dating every paragraph at turn start', async () => {
+    await start(); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method, params) => {
+      if (method === 'thread/items/list') return { data: [
+        { turnId: 'turn-1', startedAtMs: 16000, completedAtMs: 17000, item: { type: 'agentMessage', id: 'third', phase: 'commentary', text: 'The second command started.' } },
+        { turnId: 'turn-1', startedAtMs: null, completedAtMs: 15000, item: { type: 'agentMessage', id: 'second', phase: 'commentary', text: 'Still waiting.' } },
+        { turnId: 'turn-1', startedAtMs: 13000, completedAtMs: 14000, item: { type: 'agentMessage', id: 'first', phase: 'commentary', text: 'Starting.' } },
+      ] };
+      if (method === 'thread/turns/list' && params.itemsView === 'notLoaded') return { data: [{ id: 'turn-1', startedAt: 10, completedAt: 18, status: 'completed' }] };
+      return original(method, params);
+    });
+    expect((await request('chat.history', { sessionKey: key })).messages.map((message: any) => [message.id, message.timestampMs]))
+      .toEqual([['first', 13000], ['second', 15000], ['third', 16000]]);
+  });
+  it.each([
+    [null, null], ['13000', null], [NaN, null], [Infinity, null], [-1, null], [0, null], [1e20, null], [13000, 12000],
+  ])('keeps legacy turn timing for missing or invalid Native item clocks %j/%j', async (startedAtMs, completedAtMs) => {
+    await start(); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method, params) => {
+      if (method === 'thread/items/list') return { data: [{ turnId: 'turn-1', startedAtMs, completedAtMs,
+        item: { type: 'agentMessage', id: 'legacy', phase: 'commentary', text: 'Older runtime.' } }] };
+      if (method === 'thread/turns/list' && params.itemsView === 'notLoaded') return { data: [{ id: 'turn-1', startedAt: 10, status: 'inProgress' }] };
+      return original(method, params);
+    });
+    expect((await request('chat.history', { sessionKey: key })).messages[0]).toMatchObject({ id: 'legacy', timestampMs: 10000 });
+  });
+  it('retains each Native item first emission clock across later deltas and active-history recovery', async () => {
+    await start();
+    notify('item/started', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 13000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: 'Starting.' }, 14000);
+    expect(updates.at(-1)).toMatchObject({ type: 'agent_message_chunk', timestampMs: 13000 });
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: ' Still working.' }, 15000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 13000 });
+    notify('item/agentMessage/delta', { turnId: 'other-turn', itemId: 'first', delta: 'Wrong turn.' }, 99999);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 13000 });
+    notify('item/started', { turnId: 'turn-1', item: { id: 'exec', type: 'commandExecution', command: 'true', status: 'inProgress' } }, 16000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'second', delta: 'A later paragraph.' }, 19000);
+    expect(updates.at(-1)).toMatchObject({ type: 'agent_message_chunk', timestampMs: 19000 });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.activeRun).toMatchObject({ messageTimestampMs: 19000 });
+    expect(history.messages.filter((message: any) => message.role === 'assistant').map((message: any) => message.timestampMs)).toEqual([13000, 19000]);
+    expect((service as any).runs.get(key).items.get('first')).not.toHaveProperty('timestampMs');
   });
   it('does not enable unsafe approvals and persists before turn submission', async () => {
     mock.request.mockImplementationOnce(async () => response());

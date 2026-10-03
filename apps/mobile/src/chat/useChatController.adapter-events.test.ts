@@ -20,6 +20,7 @@ const historyMock = {
   hasMoreHistory: false,
   loadingMoreHistory: false,
   historyLoaded: true,
+  activitySnapshot: null as (import('@clawket/agent-protocol').SessionHistory & { requestedAtMs: number }) | null,
   messages: [] as any[],
   thinkingLevel: null as string | null,
   historyLimitRef: { current: 50 },
@@ -254,6 +255,7 @@ describe('useChatController adapter event migration', () => {
     historyMock.sessions = [{ key: 'agent:main:main', kind: 'direct' as const }];
     historyMock.messages = [];
     historyMock.historyLoaded = true;
+    historyMock.activitySnapshot = null;
     historyMock.hasMoreHistory = false;
     historyMock.loadSessionsAndHistory.mockResolvedValue(undefined);
     mockAppContext.currentAgentId = 'main';
@@ -268,6 +270,134 @@ describe('useChatController adapter event migration', () => {
     });
     jest.useRealTimers();
     consoleErrorSpy.mockRestore();
+  });
+
+  it('dates each Codex commentary segment independently across two tool boundaries', () => {
+    const runAt = Date.UTC(2026, 9, 3, 20, 13, 35);
+    jest.setSystemTime(runAt);
+    const { result, handlers } = renderController('codex');
+    const receive = (update: any, receivedAt: number) => {
+      jest.setSystemTime(receivedAt);
+      act(() => handlers.onUpdate?.(mapAdapterSessionUpdate(update, { now: () => receivedAt })));
+    };
+    act(() => handlers.onState?.('ready'));
+    receive({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'clock-run' }, runAt);
+    const firstAt = runAt + 4_000, secondAt = runAt + 94_000, thirdAt = runAt + 162_000;
+    const texts = ['I will run the first command.', 'The first command is still running.', 'The second command is now running.'];
+    for (const [index, at] of [firstAt, secondAt, thirdAt].entries()) {
+      receive({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run',
+        textMode: 'snapshot', text: texts.slice(0, index + 1).join('\n\n'), timestampMs: at }, at + 2_000);
+      const tail = result.current.listData.find(message => message.id === 'streaming');
+      expect(tail).toMatchObject({ text: texts[index], timestampMs: at });
+      const renderKey = tail?.renderKey;
+      // Later tokens cannot advance this paragraph's first observed clock or its identity.
+      receive({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run',
+        textMode: 'snapshot', text: texts.slice(0, index + 1).join('\n\n') + ' More.', timestampMs: at + 1_000 }, at + 3_000);
+      expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({ timestampMs: at, renderKey });
+      if (index < 2) receive({ type: 'tool_call', sessionKey: 'agent:main:main', runId: 'clock-run',
+        toolCallId: `tool-${index}`, title: 'exec' }, at + 10_000);
+      // The Native cumulative stream includes the committed paragraph's last tokens.
+      texts[index] += ' More.';
+    }
+    expect(result.current.listData.filter(message => message.role === 'assistant').reverse()
+      .map(message => message.timestampMs)).toEqual([firstAt, secondAt, thirdAt]);
+  });
+
+  it.each([undefined, null, 0, -1, NaN, Infinity, 1e20, '123'])('keeps a fixed first-receipt Codex paragraph clock when Native omits or corrupts it: %j', timestampMs => {
+    jest.setSystemTime(1_000);
+    const { result, handlers } = renderController('codex');
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'clock-run' }));
+    });
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run', text: 'A new paragraph is arriving.', timestampMs } as any)));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(20_000);
+    jest.setSystemTime(30_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run', text: ' More.', timestampMs } as any)));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(20_000);
+  });
+
+  it.each(['openclaw', 'hermes', 'pi'] as const)('retains the existing %s live clock when its stream has no stage metadata', backend => {
+    jest.setSystemTime(1_000);
+    const { result, handlers } = renderController(backend);
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'clock-run' }));
+    });
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run', text: 'A paragraph is arriving.' })));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(1_000);
+  });
+
+  it('restores the same Codex paragraph clock after transport disconnect without advancing it on later tokens', () => {
+    jest.setSystemTime(1_000);
+    const { result, handlers } = renderController('codex');
+    act(() => handlers.onState?.('ready'));
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main',
+      runId: 'clock-run', text: 'A paragraph in progress.', timestampMs: 19_000 })));
+    act(() => handlers.onState?.('offline'));
+    jest.setSystemTime(30_000);
+    act(() => handlers.onState?.('ready'));
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main',
+      runId: 'clock-run', text: ' More.', timestampMs: 29_000 })));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(19_000);
+  });
+
+  it('keeps a noncurrent Codex paragraph first clock and isolates it from the previous selected conversation', () => {
+    jest.setSystemTime(10_000);
+    const { result, rerender, handlers } = renderController('codex');
+    act(() => handlers.onState?.('ready'));
+    const receive = (sessionKey: string, text: string, timestampMs: number) => act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({
+      type: 'agent_message_chunk', sessionKey, runId: sessionKey, text, timestampMs,
+    })));
+    receive('agent:main:main', 'The selected conversation paragraph.', 9_000);
+    receive('agent:main:other', 'Another conversation paragraph.', 11_000);
+    receive('agent:main:other', ' More.', 12_000);
+    historyMock.sessionKey = 'agent:main:other';
+    rerender({});
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({
+      text: 'Another conversation paragraph. More.', timestampMs: 11_000,
+    });
+    receive('agent:main:main', ' Later.', 15_000);
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(11_000);
+  });
+
+  it.each([true, false])('recovers a later Codex paragraph from active history (explicit tail clock: %s)', reported => {
+    jest.setSystemTime(30_000);
+    const { result, rerender } = renderController('codex');
+    historyMock.messages = [
+      { id: 'user', role: 'user', text: 'Request', timestampMs: 1_000 },
+      { id: 'first', role: 'assistant', text: 'Earlier paragraph.', timestampMs: 5_000 },
+      { id: 'toolcall_exec', role: 'tool', text: '', toolName: 'exec', toolCallId: 'exec', toolStatus: 'running', timestampMs: 7_000 },
+      { id: 'second', role: 'assistant', text: 'A later paragraph.', timestampMs: 19_000 },
+    ];
+    historyMock.activitySnapshot = { key: 'agent:main:main', messages: [], hasActiveRun: true, requestedAtMs: 30_000,
+      activeRun: { runId: 'clock-run', text: 'Earlier paragraph.\n\nA later paragraph.', startedAtMs: 1_000,
+        ...(reported ? { messageTimestampMs: 19_000 } : {}) } };
+    rerender({});
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({ text: 'A later paragraph.', timestampMs: 19_000 });
+    expect(result.current.listData.find(message => message.text === 'Earlier paragraph.')).toMatchObject({ timestampMs: 5_000 });
+  });
+
+  it.each([false, true])('does not borrow an empty recovered Codex tail clock (previous tool: %s)', previousTool => {
+    jest.setSystemTime(10_000);
+    const { result, rerender, handlers } = renderController('codex');
+    act(() => handlers.onState?.('ready'));
+    historyMock.messages = previousTool ? [
+      { id: 'user', role: 'user', text: 'Request', timestampMs: 1_000 },
+      { id: 'first', role: 'assistant', text: 'Earlier paragraph.', timestampMs: 5_000 },
+      { id: 'toolcall_exec', role: 'tool', text: '', toolName: 'exec', toolCallId: 'exec', toolStatus: 'running', timestampMs: 7_000 },
+    ] : [];
+    historyMock.activitySnapshot = { key: 'agent:main:main', messages: [], hasActiveRun: true, requestedAtMs: 10_000,
+      activeRun: { runId: 'clock-run', text: previousTool ? 'Earlier paragraph.' : '', startedAtMs: 1_000,
+        ...(previousTool ? { messageTimestampMs: 5_000 } : {}) } };
+    rerender({});
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main',
+      runId: 'clock-run', textMode: 'snapshot', text: `${previousTool ? 'Earlier paragraph.\n\n' : ''}A later paragraph.`, timestampMs: 19_000 })));
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({ text: 'A later paragraph.', timestampMs: 19_000 });
   });
 
   it.each(['NO', 'NO_'])('does not adopt silent reply prefix %s as the active visible run', (text) => {

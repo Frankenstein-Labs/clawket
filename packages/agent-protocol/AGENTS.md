@@ -28,6 +28,8 @@ This package is the platform-neutral contract between Clawket UI and backend ada
 
 `agent_message_chunk.textMode` is additive: `snapshot` replaces the whole run text, `delta` appends verbatim (including repeated tokens); omission preserves legacy adapter behavior. This is text semantics, independent of backend capabilities and transport identity.
 
+Optional `agent_message_chunk.timestampMs` and `SessionHistory.activeRun.messageTimestampMs` describe the current visible paragraph independently of run start. A producer must keep the same paragraph's clock fixed; absent fields preserve older peers. These clocks are presentation metadata, never activity, ownership or dispatch proof.
+
 `ConfigOperations.backups.remove` is additive and optional: it removes a local restore point without restoring or modifying the Gateway. Older adapters without it remain valid. Cron mock updates normalize `agentTurn.model: null` to an absent stored override.
 
 `SkillStatusEntry.invocation` is an optional adapter-authored draft prefix for an available installed skill. `SkillsOperations.install` is an optional source-pinned native installation with a verified installed-status result. `Capabilities.steer` and `AgentAdapter.steer` describe exact active-run guidance; Hermes may enable it only after explicit API/Bridge capability negotiation. Other backends and legacy peers keep it absent/disabled.
