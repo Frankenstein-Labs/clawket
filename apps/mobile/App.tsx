@@ -2150,7 +2150,7 @@ function AppContent({
                       if (await create() && canPresent()) sessionPanelRef.current?.close();
                     });
                     return false;
-                  } else await create();
+                  } else return await create() ? undefined : false;
                 }}
                 onSessionAction={handleSessionAction}
                 onAfterClose={handleSessionPanelAfterClose}

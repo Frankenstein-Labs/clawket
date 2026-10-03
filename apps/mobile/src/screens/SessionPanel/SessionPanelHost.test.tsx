@@ -64,10 +64,12 @@ function creationFixture(backend = 'codex', pendingStorage = false) {
   const createSession = jest.fn().mockResolvedValue(created);
   const adapter = { connection: { id: connectionId, backendKind: backend }, capabilities: { sessionCreate: true }, createSession } as unknown as AgentAdapter;
   const navigate = jest.fn();
+  let adapterActive = true;
   // Use the App's real persistence boundary: the backend has accepted creation,
   // but the manual-session write can still finish after a newer reader action.
   const create = async (target: AgentDescriptor, projectId?: string, canPresent = () => true) => {
-    await createSessionForPresentation(adapter, target.agentId, projectId, canPresent, session => navigate(session.key));
+    const accepted = await createSessionForPresentation(adapter, target.agentId, projectId, () => canPresent() && adapterActive, session => navigate(session.key));
+    return accepted ? undefined : false;
   };
   let finishStorage!: () => Promise<void>;
   if (pendingStorage) {
@@ -85,6 +87,7 @@ function creationFixture(backend = 'codex', pendingStorage = false) {
   let flight!: ReturnType<NonNullable<typeof presentation.onCreateSession>>;
   act(() => { flight = presentation.onCreateSession!(agent, 'project'); });
   return { agent, adapter, created, createSession, connectionId, ref, presentation, navigate, select, tree,
+    retireAdapter: () => { adapterActive = false; },
     flight: () => flight, storageStarted: () => typeof finishStorage === 'function', finishStorage: () => finishStorage() };
 }
 
@@ -131,6 +134,19 @@ it('keeps an accepted creation after unmount while retiring its UI handoff', asy
   await act(async () => { await f.finishStorage(); outcome = await f.flight(); });
   expect(outcome).toBe(false);
   expect(f.navigate).not.toHaveBeenCalled();
+  expect(JSON.parse((await AsyncStorage.getItem('clawket.manual-sessions.v1'))!))
+    .toContainEqual({ connectionId: f.connectionId, agentId: 'main', key: f.created.key });
+});
+
+it('preserves the panel and accepted session when its adapter retires during persistence', async () => {
+  const f = creationFixture('codex', true);
+  await waitFor(() => expect(f.storageStarted()).toBe(true));
+  f.retireAdapter();
+  let outcome: unknown;
+  await act(async () => { await f.finishStorage(); outcome = await f.flight(); });
+  expect(outcome).toBe(false);
+  expect(f.navigate).not.toHaveBeenCalled();
+  expect(current().visible).toBe(true);
   expect(JSON.parse((await AsyncStorage.getItem('clawket.manual-sessions.v1'))!))
     .toContainEqual({ connectionId: f.connectionId, agentId: 'main', key: f.created.key });
 });
