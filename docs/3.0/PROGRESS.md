@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-03 Codex Desktop 跟随恢复时保留文本、工具和任务顺序（负责人授权全面 Android Codex 体验测试与修复）。
+  - 原快照先把整轮助手文本拼完，再发全部工具，恢复正在运行的会话会把工具后的文字挤到首个工具前；现在每个新工具只先接收它之前的累计文本，最后再更新尾部。重复快照、普通尾部增长及较早文本校正不再临时回放缩短的前缀或重复工具。
+  - 旧任务终止和新任务活动状态同包到达时，先投影并结算精确匹配的旧任务，再用独立 run 开始新任务；旧结果缺失或未知时保留旧 run 与所有权，不猜完成、不重用 run，也不发起本地写入。停止后的迟到跟随快照被拒绝。
+  - 本机串行：Codex `service.test.ts` 164 项、Bridge 类型检查通过；新增顺序、重复/stale、尾部增长/校正、三种 terminal rollover、未知结果与 retirement 回归。完整门禁交由本 PR CI，手机验收由同任务后续 QA 包继续；未重启现有 Bridge、部署或发布。
+
 - 2026-10-03 Codex 冷续聊恢复失败后永久 busy（负责人要求完整安卓实测中的 Bridge 路径审查与修复）。
   - 只读代码与既有回归确认：Desktop broker 可连但原会话已无 owner 时，原来先保存 prompt receipt / run，再恢复本地 thread；速度/权限证据或 writer lock 准备失败抛普通错误，被误当作已发送但结果未知。此时没有 native turn，下一条被 busy 拒绝，停止又因 turnId 缺失报仍在启动。原回归仅覆盖 broker 不可连接时的提前检查。
   - 冷发送新增只读 owner discovery，在 receipt 前完成明确 no-owner 的安全本地恢复。owner 在 discovery 与发送之间消失的竞态中，仅原始 IPC 明确 no-owner / pre-dispatch broker-unavailable 才将本地准备失败结为 rejection；保留已接受 fingerprint，重复同 key 不重发。routed timeout、泛化 handler failure 与随后 native turn/start 的不确定结果仍保留 unknown run，不另开 writer。
