@@ -2645,7 +2645,10 @@ function AssistantBubble({
       joinsNewer={joinsNewer}
     >
       <View>
+        {/* Native Markdown keeps painted text while parsing in the background.
+            A recycled holder must own one stable reply, including its stream. */}
         <EnrichedMarkdownText
+          key={renderKeyOf(message)}
           testID={`thread-markdown-${message.id}`}
           flavor={THREAD_MARKDOWN_FLAVOR}
           markdown={displayText}
