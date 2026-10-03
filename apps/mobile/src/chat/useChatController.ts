@@ -2140,6 +2140,7 @@ export function useChatController({
             history.setMessages((previous) => {
               if (previous.some((message) => message.id === finalMessage.id)) return previous;
               for (let index = previous.length - 1; index >= 0; index -= 1) {
+                if (previous[index].role === "user") break;
                 if (!shouldMergeFinalMessage(previous[index], finalText, activeRunStartedAt)) continue;
                 const next = [...previous];
                 next[index] = { ...previous[index], ...finalMessage };
