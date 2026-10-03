@@ -24,9 +24,16 @@ const record: ConnectionRecord = { id: 'phone', backendKind: 'codex', transportK
 let adapter: CodexAdapter;
 let sockets: Socket[];
 beforeEach(() => {
-  jest.useFakeTimers(); jest.spyOn(Math, 'random').mockReturnValue(0);
+  jest.useFakeTimers();
   sockets = [];
-  adapter = new CodexAdapter(record, { webSocketFactory: () => { const socket = new Socket(); sockets.push(socket); return socket; } });
+  const actualRandom = Math.random;
+  // The transport captures this function; stack symbolication needs real randomness.
+  Math.random = () => 0;
+  try {
+    adapter = new CodexAdapter(record, { webSocketFactory: () => { const socket = new Socket(); sockets.push(socket); return socket; } });
+  } finally {
+    Math.random = actualRandom;
+  }
 });
 afterEach(() => { adapter.disconnect(); jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 it('uses health for Relay authentication without starting an OpenClaw challenge', async () => {
