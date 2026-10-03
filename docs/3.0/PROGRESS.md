@@ -4,7 +4,7 @@
   - 更早历史与自动 head 刷新原共用“最新请求”序号，任一并发刷新会丢掉已接受的分页，或旧分页取消新 head。现在同会话/adapter/选中代次/socket 代次的读操作串行提交；后续分页取刷新后的游标，切换和重连的新代次不等旧请求，旧排队请求不再发出。事件快照保留收到时刻，排队不会把旧活动伪装成新证据；健康探测、发送和 run 恢复不进入此队列。
   - 工具结束的聊天胶囊原用最早工具作 key；分页补出更早步骤会换 key，FlashList 失去可见锚点。改用胶囊所在的最新工具稳定 renderKey。Codex 同 turn 项共享 startedAt，重复 steering/回复原会按时间和文本合并，现用规范 native item ID 保留独立行和文本增长时的身份；原始 Gateway 投影不变。
   - 无工具 run 完成原可倒查到上一条用户之前的相同助手短回复，旧回复缺时间戳或间隔不足一秒时被覆盖，新用户后没有回复。归并现在止于最新用户；当前 turn 已恢复的回复仍可归并为一条。
-  - 本机逐文件串行：useChatHistoryState 165、useChatController.adapter-events 27、controller.contract 60、toolGrouping 6、timestamps 19、ThreadView 166，共 443 项通过；另对事件排队时间证据加强一条定向回归通过。Mobile 类型、246 个 UI 文件风格（66 项检查器结果）、设计系统文档（11 组件/10 token families）、App config 7 项和 check:docs（7 指令对/5 用例）通过。真机分页手感仍由并行主测试验收，不把单测当作手机证据。未打包、安装、发布、部署或重启 Bridge。
+  - 本机逐文件串行：useChatHistoryState 165、useChatController.adapter-events 27、controller.contract 60、toolGrouping 6、timestamps 19、ThreadView 166，共 443 项通过；另对事件排队时间证据加强一条定向回归通过。Mobile 类型、246 个 UI 文件风格（66 项检查器结果）、设计系统文档（11 组件/10 token families）、App config 7 项和 check:docs（7 指令对/5 用例）通过。PR #128 的全部 Mobile 三 shard、rest/static、v1 replay 和源码类型通过；必需门禁仅被两份 lockfile 现有 GHSA-vfj7-8cjw-p6xm / braces 审计阻塞，未合并，例外需负责人批准（HT-BRACES-AUDIT-1003）。真机分页手感仍由并行主测试验收，不把单测当作手机证据。未打包、安装、发布、部署或重启 Bridge。
 
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
@@ -1388,6 +1388,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-BRACES-AUDIT-1003 | 新 braces 公告的临时审计例外决定 | 官方修复或负责人明确批准一条指定公告/包、有原因和到期日的临时例外；不能因 Codex QA 紧急或本地测试通过而绕过门禁。 | root 与 Mobile lockfile 的 GHSA-vfj7-8cjw-p6xm / braces high 消除或通过获批规则；各 PR 对齐 main 后完整门禁再绿。 | PR #128 的功能与类型/static/v1 CI 已通过；现有依赖审计阻塞合并，待负责人决定。 |
 | HT-NATIVE-NAME-1002 | 新增原生连接电脑名修复的 Bridge 交付与手机验收 | 在另行授权的 Bridge 发布/更新后，用旧设备配置执行显式 Codex / Claude Code pair，再在手机新增连接；普通运行不会自行补名称，已有连接可在连接设置手动改名。 | 新连接显示 Product · 电脑名；旧手机继续连接，已有/手动名称不被重配覆盖。本次只改源码并由 CI 验证，不发布、不修改现有配对配置。 | 待负责人授权交付与验收 |
 | HT-USER-FOLD-1002 | 用户消息折叠的双端体验验收 | 在包含本轮代码的开发 App 或后续授权更新中，查看中英文长消息、连续换行、带图片 / 文件的消息；调整字号并在 iPad 分栏查看。 | 默认 6 行，展开 / 收起可达且阅读不被拉向页尾；时间和送达标记不盖文字；长按状态一致、复制 / 分享保留全文；短消息及助手回复照旧。 | 定向自动化已通过；待负责人真机视觉 / 手感验收，本轮未打包或发布。 |
 | HT-HERMES-GATEWAY-KEY-1002 | Hermes gateway 所有权恢复（#69）的发布决定 | 3.1.10 从 `accfe2f4` 起，不含本修复；由负责人决定随哪个 Bridge 版本发布 | 升级后用 `clawket pair --backend hermes --restart-hermes` 让新 bridge 启动并记录 gateway，再 `clawket reset` 后重新配对：手机应直接连上，`hermes-bridge.log` 出现 `owner=clawket`；没有记录的旧 gateway 应在配对时失败并提示 `--restart-hermes` | 待负责人决定；本轮不打包、不发布。 |
