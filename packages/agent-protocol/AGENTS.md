@@ -22,6 +22,8 @@ This package is the platform-neutral contract between Clawket UI and backend ada
 
 `SessionDescriptor.lastActivityAt` is the additive human-activity clock: adapters that can tell a user message or user-facing reply apart from record housekeeping (heartbeats, metadata patches) must set it, `null` when the session never had such activity; adapters that cannot leave it undefined so `sessionActivityAt` falls back to `updatedAt`. `HUMAN_SESSION_KINDS` names the session kinds a person takes part in. Consumers order and unread-mark on this clock only.
 
+`SessionHistory.pagination: cursor` is optional adapter-authored read semantics: `nextCursor` absence means completion, even on the first empty page. Omission retains legacy limit/local-cache handling; a cursor alone remains sufficient to enter cursor paging. Adapters set the marker only for a known cursor API, never infer it from a short result.
+
 `SessionHistory.toolCallAliases` optionally carries confirmed source-to-canonical tool identities; consumers may retire a source copy only with its matching canonical tool in the snapshot. `SessionHistory.activeRun` is an optional backend recovery snapshot (identity, visible text, start time and session-scoped cancellation hint). Peers without it retain their existing behavior; mocks clone it independently.
 
 `agent_message_chunk.textMode` is additive: `snapshot` replaces the whole run text, `delta` appends verbatim (including repeated tokens); omission preserves legacy adapter behavior. This is text semantics, independent of backend capabilities and transport identity.

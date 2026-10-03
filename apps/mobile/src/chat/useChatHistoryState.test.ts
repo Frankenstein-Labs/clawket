@@ -1326,6 +1326,24 @@ describe('useChatHistoryState', () => {
         mainSessionKey: key, routeSessionKey: route, gatewayConfigId: null, currentAgentId: 'main' });
     }, { initialProps: { route: key, source: adapter } });
 
+    it.each([{ ids: [] }, { ids: ['new-user', 'first-reply'] }])('does not offer an older read for the complete first cursor page (%j)', async ({ ids }) => {
+      // The observed new Codex chat has two rows and no nextCursor. An unopened
+      // empty chat is also complete, without a previous window to identify it.
+      const head = { ...page(ids), messages: ids.map((id, index) => ({ ...message(id), role: index ? 'assistant' as const : 'user' as const })), pagination: 'cursor' as const };
+      const adapter = { connection: { backendKind: 'codex' }, state: 'ready',
+        loadSession: jest.fn().mockResolvedValue(head) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.hasMoreHistory).toBe(false);
+      expect(result.current.messages.map(row => row.text)).toEqual(ids);
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+      expect(ChatCacheService.getTimelinePage).not.toHaveBeenCalled();
+      await act(async () => { expect(result.current.applyReconciledHistory(head)).toBe(true); });
+      expect(result.current.hasMoreHistory).toBe(false);
+      expect(result.current.messages.map(row => row.text)).toEqual(ids);
+    });
+
     it('keeps distinct native steering and reply items that share text and their turn timestamp', async () => {
       // Codex stamps every item in one native turn with turn.startedAt.
       const messages = [

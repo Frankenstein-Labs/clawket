@@ -237,7 +237,8 @@ export class CodexAdapter implements AgentAdapter {
     this.sessionCatalog.invalidate();
   }
   loadSession(key: string, options?: { limit?: number; cursor?: string }): Promise<SessionHistory> {
-    return this.rpc<SessionHistory>('chat.history', { sessionKey: key, cursor: options?.cursor }).then(artifactHistoryDisplay);
+    return this.rpc<SessionHistory>('chat.history', { sessionKey: key, cursor: options?.cursor })
+      .then(history => artifactHistoryDisplay({ ...history, pagination: 'cursor' }));
   }
   prompt(key: string, input: PromptInput): Promise<{ runId: string }> {
     if (this.state !== 'ready') throw new AdapterError('bridge_offline', 'Codex Bridge is offline');
@@ -295,6 +296,7 @@ export class CodexAdapter implements AgentAdapter {
     } else if (frame.type === 'event' && frame.event === 'codex.update') {
       let update = artifactUpdateDisplay(frame.payload as SessionUpdate);
       if (!update || typeof update.type !== 'string') return;
+      if (update.type === 'history_reconciled') update = { ...update, history: { ...update.history, pagination: 'cursor' } };
       if (update.type === 'session_activity_update') {
         if (!this.activityEnabled) return;
         const checked = sessionActivityUpdate(update); if (!checked) return; update = checked;

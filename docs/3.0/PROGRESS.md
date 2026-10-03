@@ -1,10 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
-- 2026-10-03 Codex 聊天历史竞争、滚动锚点与相同短回复归并（负责人要求手机深入 QA；本条为该轮代码审查发现的窄修复）。
+- 2026-10-03 Codex 聊天历史、滚动锚点、短回复归并与权限拒绝恢复（负责人要求手机深入 QA；本条为该轮代码审查发现的窄修复）。
   - 更早历史与自动 head 刷新原共用“最新请求”序号，任一并发刷新会丢掉已接受的分页，或旧分页取消新 head。现在同会话/adapter/选中代次/socket 代次的读操作串行提交；后续分页取刷新后的游标，切换和重连的新代次不等旧请求，旧排队请求不再发出。事件快照保留收到时刻，排队不会把旧活动伪装成新证据；健康探测、发送和 run 恢复不进入此队列。
   - 工具结束的聊天胶囊原用最早工具作 key；分页补出更早步骤会换 key，FlashList 失去可见锚点。改用胶囊所在的最新工具稳定 renderKey。Codex 同 turn 项共享 startedAt，重复 steering/回复原会按时间和文本合并，现用规范 native item ID 保留独立行和文本增长时的身份；原始 Gateway 投影不变。
   - 无工具 run 完成原可倒查到上一条用户之前的相同助手短回复，旧回复缺时间戳或间隔不足一秒时被覆盖，新用户后没有回复。归并现在止于最新用户；当前 turn 已恢复的回复仍可归并为一条。
   - 主测试真机追加：六天前 QA 原生会话直接发送命中固定权限恢复拒绝；本机只读核对旧历史仍为 4 项、无今日标记/活跃 turn，Bridge 无 receipt，明确未 dispatch（现场见 `evidence/codex-android-experience-20261003/018-024*`）。原 App 却显示“发送未确认”与通用失败/英文详情，且没有直达恢复入口。现在仅对已协商权限功能的 exact `chat.send` / `codex_error` / 固定权限拒绝标记 typed recovery；恢复原输入为暂停的本地项、设置原会话的 requiresConfirmation，沿用本地化“重新选择权限后再发送”入口直达权限 Sheet，保留新草稿，不显示误导的 uncertainty，不自动重发。普通 server 失败、同文案但未分类、其他方法或旧 peer 均保留既有 uncertainty。
+  - 第六个真机缺陷：新聊天首次问答只有 2 条，Bridge 明确无 nextCursor、无活跃 turn，App 仍显示“加载更早的消息”（现场 `evidence/codex-android-experience-20261003/045-046*`）。此前首次无游标的短页走 legacy 数量/local-cache 分支并假定非空还有历史。Codex adapter 现在显式标记 `SessionHistory.pagination: cursor`，包含旧 Bridge 的 terminal/empty first head 和 reconciled snapshot；客户端据此建立完整窗口，不提供无效的分页按钮。OpenClaw/Hermes/Pi/Claude Code 不自动增加此标记；它们原有游标/limit 行为保留。新增 exact 两消息与空首屏回归及旧 Bridge adapter/event 回归；Codex adapter 31、historyState 167，共 198 项串行通过，fixture 类型收紧后新增 2 项定向再过；Protocol/Mobile 类型与 check:docs 7 指令对/5 用例通过。
   - 权限增补串行：Codex adapter 28、controller.contract 65、modelPicker 60、queue 106、ThreadView 166、ThreadScreen 权限定向 1、protocol capabilities 5，共 431 项通过（包含与首轮重复的契约/UI用例）；Protocol / Mobile 类型、UI 风格 / 设计系统 / App config / check:docs 均通过。完整 CI 随增补提交再验证，手机接受新权限选择后的恢复由主测试继续完成。
   - 本机逐文件串行：useChatHistoryState 165、useChatController.adapter-events 27、controller.contract 60、toolGrouping 6、timestamps 19、ThreadView 166，共 443 项通过；另对事件排队时间证据加强一条定向回归通过。Mobile 类型、246 个 UI 文件风格（66 项检查器结果）、设计系统文档（11 组件/10 token families）、App config 7 项和 check:docs（7 指令对/5 用例）通过。前四项在 PR #128 的 Mobile 三 shard、rest/static、v1 replay 和源码类型均通过；必需门禁仅被两份 lockfile 现有 GHSA-vfj7-8cjw-p6xm / braces 审计阻塞，未合并，例外需负责人批准（HT-BRACES-AUDIT-1003）。真机分页手感仍由并行主测试验收，不把单测当作手机证据。未打包、安装、发布、部署或重启 Bridge。
 

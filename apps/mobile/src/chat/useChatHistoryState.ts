@@ -668,7 +668,7 @@ export function useChatHistoryState({
       } else {
         const head = options?.head ?? await requireAdapter(adapter).loadSession(key, { limit });
         if (isStaleRequest()) return 0;
-        if (head.nextCursor !== undefined || candidate) {
+        if (head.pagination === 'cursor' || head.nextCursor !== undefined || candidate) {
           cursorAttempt = true;
           if (head.key !== key) throw new Error('History belongs to another conversation');
           // A reset may keep the route key while replacing its native thread.
@@ -1316,7 +1316,7 @@ export function useChatHistoryState({
 
   const applyReconciledHistory = useCallback((head: SessionHistory): boolean => {
     const current = cursorWindowRef.current;
-    if (head.nextCursor === undefined && !(current?.scope === readScope && current.key === head.key)) return false;
+    if (head.pagination !== 'cursor' && head.nextCursor === undefined && !(current?.scope === readScope && current.key === head.key)) return false;
     if (readScopeRef.current !== readScope || !sessionKeysMatch(sessionKeyRef.current, head.key)) return true;
     void loadHistory(head.key, historyLimitRef.current, { head });
     return true;
