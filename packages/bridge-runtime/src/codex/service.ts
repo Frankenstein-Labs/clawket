@@ -609,8 +609,11 @@ export class CodexService extends EventEmitter {
         if (typeof item.id !== 'string') continue;
         const old = run.items.get(item.id); run.items.set(item.id, item); this.items.set(item.id, item);
         const tool = codexTool(item); if (!tool) continue;
+        const previousTool = old && codexTool(old);
         if (!old) this.update({ type: 'tool_call', sessionKey: r.id, runId: run.id, toolCallId: item.id, title: tool.name, rawInput: tool.input });
-        if (tool.status !== 'running' && tool.status !== 'unknown' && old?.status !== item.status) this.update({ type: 'tool_call_update', sessionKey: r.id, runId: run.id, toolCallId: item.id, status: tool.status, rawOutput: tool.output });
+        // WebSearch has no native status; exit codes and output may also change
+        // without a status transition. Match the same projection as history.
+        if (tool.status !== 'running' && tool.status !== 'unknown' && (!previousTool || previousTool.status !== tool.status || previousTool.output !== tool.output)) this.update({ type: 'tool_call_update', sessionKey: r.id, runId: run.id, toolCallId: item.id, status: tool.status, rawOutput: tool.output });
       }
     } else if (run?.turnId) {
       const terminal = turns.find((t: any) => (t.turnId ?? t.id) === run!.turnId && ['completed', 'interrupted', 'failed'].includes(t.status));
@@ -1238,7 +1241,10 @@ export class CodexService extends EventEmitter {
       if (this.items.size >= 512) this.items.delete(this.items.keys().next().value!);
       this.items.set(item.id, item);
       if (run.items.size >= 512 && !run.items.has(item.id)) run.items.delete(run.items.keys().next().value!);
-      run.items.set(item.id, item);
+      // Native WebSearch items omit status even in started notifications. Keep
+      // confirmed lifecycle only in this run's overlay, not native storage.
+      run.items.set(item.id, item.type === 'webSearch' && item.status === undefined
+        ? { ...item, status: method === 'item/started' ? 'inProgress' : 'completed' } : item);
       if (item.type === 'agentMessage' && method === 'item/completed') run.final = String(item.text ?? '').slice(-128000);
       const tool = codexTool(item);
       if (tool && method === 'item/started') this.update({ type: 'tool_call', ...base, toolCallId: item.id, title: tool.name, kind: tool.name, rawInput: tool.input });
