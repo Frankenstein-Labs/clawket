@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 真机2033复验检查点；全面验收仍在进行。
+  - 手机私有开发bundle实际为2033源，22,482,541字节/SHA8a52a4604e38348ee78781df6cc63d7979de811db005ead99d18652f04bd7640；C/E隔离QA CLI为SHA09bd77711192409196c1c95b912156b75457b9e554b8e5a51bd65eda53a5c929。已在authenticated idle后仅重启隔离QA owner，配对/config字节保持，Production/store不变。原completed STREAM冷历史三段时间匹配Native持久化lifecycle start，final仍优先completion；旧record/completion时间比较的差异另存解释，不重写原baseline/receipt。
+  - H5录像016三段实际分页/快速滑动窗口的全部658编码帧复核通过，无观察到页首跳转、错正文复用或大片空白；两次分页stable正文RGB一致。仅覆盖该80消息fixture的有界窗口，不是整段6506帧、极端budget或审批崩溃验收。
+  - 新空会话重启保留所选6.1Sol/low/Workspace/Standard，sole init原生完成。新STREAM原main接收两条同文、不同canonical ID且同原turn的guide；三条Next在main活跃时未进入Native，main自然完成后自动发送，最终5starts/5completes/5receipts。编辑操作前main已结束，edited input为0、Stop/promote为0；编辑/移除/held/提升未验，不重放原run。guide2后405正文全白，406恢复；017录像/连续截图/日志保存，持续时间与因果需独立复核。
+  - 源码另确认pending steer ACK仍可选择Current而被静默忽略，以及same-run guide误作新presentation边界导致累计assistant/tool重复/冷恢复漏段。分别开新鲜任务树修复；尚未装入手机，不能直接称405根因已确定。详细分类与剩余范围见`docs/3.1/codex-android-qa-20261003.md`。braces owner-only门禁仍未批准/应用，无release、部署或发布。
+
 - 2026-10-04 Codex clock/history/ring combined QA source checkpoint; phone acceptance continues.
   - PR139 paragraph clocks are integrated with the existing final-completion clock fence. Two integration regressions preserve paragraph timing while eligible finals retain completion time, including a partial legacy page whose paragraph cannot borrow final eligibility. Static independent review confirms all original history/tool/delivery fences remain.
   - Serial narrow checks passed: actual Mobile controller adapter events 48, liveRunThread 12, sessionRunState 6, queue 112; Native history 75 and CodexService 230, totaling 483. Protocol/Mobile/CLI types, local development CLI build and docs 9 instruction pairs/5 checker cases passed. The phone still loads815 and the C/E Preview owners still run274 at this checkpoint; source/build success is not physical acceptance.
