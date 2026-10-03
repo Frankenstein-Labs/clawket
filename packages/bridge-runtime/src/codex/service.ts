@@ -1308,9 +1308,9 @@ export class CodexService extends EventEmitter {
       run.items.set(item.id, ['webSearch', 'imageView'].includes(item.type) && item.status === undefined
         ? { ...item, status: method === 'item/started' ? 'inProgress' : 'completed' } : item);
       if (item.type === 'agentMessage' && method === 'item/completed') run.final = String(item.text ?? '').slice(-128000);
-      const tool = codexTool(item);
-      if (tool && method === 'item/started') this.update({ type: 'tool_call', ...base, toolCallId: item.id, title: tool.name, kind: tool.name, rawInput: tool.input });
-      if (tool && method === 'item/completed') this.update({ type: 'tool_call_update', ...base, toolCallId: item.id, status: tool.status === 'error' ? 'error' : 'success', rawOutput: tool.output });
+      const tool = codexTool(run.items.get(item.id));
+      if (tool && method === 'item/started') this.update({ type: 'tool_call', ...base, toolCallId: item.id, title: tool.name, kind: tool.name, rawInput: tool.input, status: tool.status });
+      if (tool && method === 'item/completed') this.update({ type: 'tool_call_update', ...base, toolCallId: item.id, status: tool.status, rawOutput: tool.output });
     }
     if (method === 'turn/completed' && p.turn?.id === run.turnId && ['completed', 'interrupted', 'failed'].includes(p.turn.status)) {
       this.finish(r, p.turn.status === 'interrupted' ? 'cancelled' : p.turn.status === 'failed' ? 'error' : 'end_turn', p.turn);
