@@ -839,7 +839,8 @@ export function ThreadView({
   const distanceFromBottomRef = useRef(0);
   const scrollMetricsRef = useRef({ height: 0, viewport: 0, offset: 0 });
   const timelineRef = useRef<FlashListRef<ThreadTimelineRow>>(null);
-  const historyAnchor = useHistoryScrollAnchor(historyScope ?? sessionKey ?? '', timelineRef, timelineItems);
+  const historyAnchor = useHistoryScrollAnchor(historyScope ?? sessionKey ?? '', timelineRef, timelineItems,
+    Platform.OS === 'web' ? 500 : 250);
   const { restore: restoreHistoryAnchor, readerScrolled: updateHistoryAnchor,
     beginDrag: beginHistoryDrag, capture: captureHistoryAnchor, release: releaseHistoryAnchor,
     isActive: historyAnchorActive, isCorrectionPending: historyCorrectionPending } = historyAnchor;
@@ -979,7 +980,8 @@ export function ThreadView({
     if (!followNewMessagesRef.current) {
       const { height, viewport } = scrollMetricsRef.current;
       restoreHistoryAnchor({ nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined,
-        nativeOffset: viewport > 0 ? scrollMetricsRef.current.offset : undefined });
+        nativeOffset: viewport > 0 ? scrollMetricsRef.current.offset : undefined, nativeHeight: height, viewport,
+        windowCommitEpoch: historyAnchor.windowCommitEpoch });
     }
     let content: number;
     let viewport: number;
@@ -1013,7 +1015,7 @@ export function ThreadView({
     const withinBudget = Math.abs(growth) <= viewport * FOLLOW_GLIDE_MAX_VIEWPORT_RATIO;
     const grew = growth > 0 && viewport === previous.viewport && (appended || uiFollowRef.current !== null);
     followToEnd(withinBudget && (followGlideRef.current || grew));
-  }, [cancelBottomFollow, followToEnd, releaseComposerHold, restoreHistoryAnchor, timelineLoaded]);
+  }, [cancelBottomFollow, followToEnd, historyAnchor.windowCommitEpoch, releaseComposerHold, restoreHistoryAnchor, timelineLoaded]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollButtonProgress = useSharedValue(0);
   useEffect(() => {
@@ -1133,6 +1135,7 @@ export function ThreadView({
         nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined,
         nativeOffset: scrollMetricsRef.current.offset,
         nativeGeometryCommitted: true,
+        nativeHeight: height, viewport,
       });
       refreshScrollButton();
     }
@@ -1148,6 +1151,7 @@ export function ThreadView({
         nativeMaxOffset: height > 0 ? Math.max(0, scrollMetricsRef.current.height - height) : undefined,
         nativeOffset: scrollMetricsRef.current.offset,
         nativeGeometryCommitted: true,
+        nativeHeight: scrollMetricsRef.current.height, viewport: height,
       });
       refreshScrollButton();
     }
@@ -1549,6 +1553,7 @@ export function ThreadView({
                 testID={`${testID}-timeline`}
                 data={timelineItems}
                 historyAnchorActive={historyAnchor.managed}
+                drawDistance={historyAnchor.drawDistance}
                 onLoad={handleTimelineLoad}
                 onCommitLayoutEffect={handleCommittedLayout}
                 onScrollBeginDrag={handleScrollBeginDrag}

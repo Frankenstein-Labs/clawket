@@ -13,13 +13,30 @@ type Anchor = {
   scope: string; list: List; key: string; viewportY: number; correction: number | null;
   rowIndex: number; nativeHeight: number | undefined; nativeOffset: number;
   retiredGeometry: Array<NativePosition>; geometryPending: boolean;
+  windowPreparations: number;
 };
 type Corrections = {
   scope: string;
   list: List;
   offsets: Array<{ offset: number; clampedOffset: number | undefined; seen: boolean }>;
 };
-type RestoreOptions = { nativeMaxOffset?: number; nativeOffset?: number; nativeGeometryCommitted?: boolean };
+type RestoreOptions = { nativeMaxOffset?: number; nativeOffset?: number; nativeGeometryCommitted?: boolean;
+  nativeHeight?: number; viewport?: number; windowCommitEpoch?: number };
+type WindowPlan = { scope: string; list: List; key: string; epoch: number; distance: number; committed: boolean };
+const WINDOW_ROW_BUDGET = 96;
+const WINDOW_VIEWPORT_BUDGET = 16;
+
+function boundedWindowDistance(list: List, rows: ReadonlyArray<Row>, minimum: number, viewport: number) {
+  // Velocity projection is private and can shift the SDK window past either
+  // edge. Its edge redistribution covers all layouts when 2 * drawDistance
+  // reaches the whole span. Only use that proof for a bounded number of rows
+  // and pixels; counting merely the new page misses old compact rows.
+  if (rows.length > WINDOW_ROW_BUDGET) return null;
+  const last = list.getLayout(rows.length - 1);
+  if (!last || !Number.isFinite(last.y) || last.height === undefined || !Number.isFinite(last.height)) return null;
+  const distance = Math.ceil(Math.max(minimum, (last.y + last.height + list.getFirstItemOffset()) / 2));
+  return distance <= viewport * WINDOW_VIEWPORT_BUDGET ? distance : null;
+}
 
 function retirePrependedGeometry(saved: Anchor, rows: ReadonlyArray<Row>) {
   const index = rows.findIndex(row => row.key === saved.key);
@@ -29,13 +46,14 @@ function retirePrependedGeometry(saved: Anchor, rows: ReadonlyArray<Row>) {
     else saved.retiredGeometry.push({ height: saved.nativeHeight, offset: saved.nativeOffset });
     if (saved.retiredGeometry.length > 32) saved.retiredGeometry.shift();
     saved.geometryPending = true;
+    saved.windowPreparations = 0;
   }
   saved.rowIndex = index;
   return index;
 }
 
 /** A conditional date separator is not a surviving row when an earlier page joins its minute. */
-export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | null>, rows: ReadonlyArray<Row>) {
+export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | null>, rows: ReadonlyArray<Row>, baselineDrawDistance = 250) {
   const latest = useRef({ scope, rows });
   latest.current = { scope, rows };
   const anchor = useRef<Anchor | null>(null);
@@ -43,6 +61,15 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
   const nativePosition = useRef<(NativePosition & { scope: string; list: List }) | null>(null);
   const managedScope = useRef<string | null>(null);
   const [managed, setManaged] = useState<string | null>(null);
+  const windowPlan = useRef<WindowPlan | null>(null);
+  const windowEpoch = useRef(0);
+  const [preparedWindow, setPreparedWindow] = useState<WindowPlan | null>(null);
+  const retireWindow = useCallback(() => {
+    if (!windowPlan.current) return;
+    windowPlan.current = null;
+    windowEpoch.current += 1;
+    setPreparedWindow(null);
+  }, []);
   const isActive = useCallback(() => anchor.current?.scope === latest.current.scope
     && anchor.current.list === listRef.current, [listRef]);
   const isCorrectionPending = useCallback(() => isActive()
@@ -51,16 +78,18 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
     anchor.current = null;
     corrections.current = null;
     nativePosition.current = null;
-  }, []);
+    retireWindow();
+  }, [retireWindow]);
   useLayoutEffect(() => {
     if (anchor.current?.scope !== scope) anchor.current = null;
     if (corrections.current?.scope !== scope) corrections.current = null;
     if (nativePosition.current?.scope !== scope) nativePosition.current = null;
+    if (windowPlan.current?.scope !== scope) retireWindow();
     if (managedScope.current !== scope) {
       managedScope.current = null;
       setManaged(null);
     }
-  }, [scope]);
+  }, [retireWindow, scope]);
   const capture = useCallback((offset?: number, nativeHeight?: number, freshDrag = false) => {
     const list = listRef.current;
     if (!list) return;
@@ -108,7 +137,7 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
       if (!Number.isFinite(viewportY)) return;
       anchor.current = { scope: current.scope, list, key: current.rows[index]!.key, viewportY, correction: null,
         rowIndex: index, nativeHeight: height, nativeOffset: scrollOffset,
-        retiredGeometry: previous?.retiredGeometry ?? [], geometryPending: false };
+        retiredGeometry: previous?.retiredGeometry ?? [], geometryPending: false, windowPreparations: 0 };
       if (height !== undefined) nativePosition.current = { scope: current.scope, list, offset: scrollOffset, height };
       // Keep one correction owner for this list instance. Re-enabling FlashList
       // would apply its stale pre-page layout delta a second time.
@@ -120,7 +149,8 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
       // An unplaced/retired list cannot supply an anchor; its normal placement remains authoritative.
     }
   }, [isActive, listRef]);
-  const restore = useCallback(({ nativeMaxOffset, nativeOffset, nativeGeometryCommitted = false }: RestoreOptions = {}) => {
+  const restore = useCallback(({ nativeMaxOffset, nativeOffset, nativeGeometryCommitted = false,
+    nativeHeight, viewport, windowCommitEpoch }: RestoreOptions = {}) => {
     const saved = anchor.current;
     const current = latest.current;
     if (!saved || saved.scope !== current.scope || saved.list !== listRef.current) return;
@@ -139,8 +169,48 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
           saved.geometryPending = false;
           saved.correction = null;
           saved.nativeOffset = nativeOffset;
+          retireWindow();
         }
         return;
+      }
+      if (viewport !== undefined && viewport > 0 && nativeHeight !== undefined) {
+        // Prepare both the old window and target before moving native. This
+        // public prop can be retired synchronously by a fresh finger/scope.
+        const distance = boundedWindowDistance(saved.list, current.rows, baselineDrawDistance, viewport);
+        const oldChild = saved.retiredGeometry.some(value => Math.abs(value.height - nativeHeight) < 0.5);
+        if (saved.geometryPending || windowPlan.current) {
+          const previousPlan = windowPlan.current;
+          const needsPreparation = !previousPlan || previousPlan.scope !== current.scope || previousPlan.list !== saved.list
+            || previousPlan.key !== saved.key || (distance !== null && previousPlan.distance < distance);
+          const bounded = distance !== null && (!needsPreparation || saved.windowPreparations < 4);
+          if (bounded && distance !== null) {
+            let plan = windowPlan.current;
+            if (!plan || plan.scope !== current.scope || plan.list !== saved.list || plan.key !== saved.key
+              || plan.distance < distance) {
+              plan = { scope: current.scope, list: saved.list, key: saved.key,
+                epoch: ++windowEpoch.current, distance, committed: false };
+              saved.windowPreparations += 1;
+              windowPlan.current = plan;
+              setPreparedWindow(plan);
+              return;
+            }
+            if (windowCommitEpoch === plan.epoch) plan.committed = true;
+            if (!plan.committed) return;
+          } else {
+            // Oversized gaps retain the anchor without unbounded native views.
+            // They still wait for the new child; no uncancellable index scroll.
+            retireWindow();
+          }
+          const last = saved.list.getLayout(current.rows.length - 1);
+          const placedBottom = last && last.height !== undefined
+            ? last.y + last.height + saved.list.getFirstItemOffset() : Infinity;
+          // A newly measured page may shrink old estimates by the same amount
+          // it prepends. An explicit size report covering every placed row is
+          // sufficient reachability even when its total equals the old child.
+          // Neither this nor a React commit is a native paint acknowledgement.
+          if ((oldChild && !(nativeGeometryCommitted && nativeHeight >= placedBottom - 0.5))
+            || (nativeMaxOffset !== undefined && offset > nativeMaxOffset + 0.5)) return;
+        }
       }
       if (!nativeGeometryCommitted && saved.correction !== null && Math.abs(offset - saved.correction) < 0.5) return;
       saved.correction = offset;
@@ -161,7 +231,7 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
     } catch {
       release();
     }
-  }, [listRef, release]);
+  }, [baselineDrawDistance, listRef, release, retireWindow]);
   const readerScrolled = useCallback((offset: number, reading = true, nativeHeight?: number) => {
     const saved = isActive() ? anchor.current : null;
     // The old native event may arrive before FlashList's first commit callback.
@@ -179,6 +249,7 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
         saved.geometryPending = false;
         saved.nativeOffset = offset;
         saved.nativeHeight = nativeHeight ?? saved.nativeHeight;
+        retireWindow();
         if (nativeHeight !== undefined) nativePosition.current = { scope: saved.scope, list: saved.list, offset, height: nativeHeight };
       }
       return true;
@@ -202,12 +273,16 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
     if (list && nativeHeight !== undefined) nativePosition.current = { scope: latest.current.scope, list, offset, height: nativeHeight };
     if (reading && saved) capture(offset, nativeHeight);
     return false;
-  }, [capture, isActive, listRef]);
+  }, [capture, isActive, listRef, retireWindow]);
   const beginDrag = useCallback((pagePending: boolean, position?: NativePosition) => {
+    retireWindow();
     if (isActive() && anchor.current) retirePrependedGeometry(anchor.current, latest.current.rows);
     if (corrections.current) corrections.current.offsets = corrections.current.offsets.filter(value => !value.seen);
     if (managedScope.current === latest.current.scope || (pagePending && isActive())) capture(position?.offset, position?.height, true);
     else release();
-  }, [capture, isActive, release]);
-  return { managed: managed === scope, capture, restore, readerScrolled, beginDrag, release, isActive, isCorrectionPending };
+  }, [capture, isActive, release, retireWindow]);
+  const activeWindow = preparedWindow?.scope === scope && preparedWindow.list === listRef.current
+    && preparedWindow === windowPlan.current ? preparedWindow : null;
+  return { managed: managed === scope, capture, restore, readerScrolled, beginDrag, release, isActive, isCorrectionPending,
+    drawDistance: activeWindow?.distance ?? baselineDrawDistance, windowCommitEpoch: activeWindow?.epoch };
 }
