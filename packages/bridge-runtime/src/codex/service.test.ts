@@ -399,6 +399,46 @@ describe('Codex owned sessions', () => {
     notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     expect(updates.filter(u => u.type === 'run_finished')).toHaveLength(1);
   });
+  it.each(['success', 'error'])('keeps a status-less native search running until completion and retains its %s result after reload', async status => {
+    await start();
+    // Native WebSearchItem has no status, including on item/started.
+    const started = Object.freeze({ id: 'search', type: 'webSearch', query: 'release notes' });
+    notify('item/started', { turnId: 'turn-1', item: started });
+    expect(updates.filter(u => u.type.startsWith('tool_call'))).toEqual([
+      expect.objectContaining({ type: 'tool_call', toolCallId: 'search', title: 'web_search' }),
+    ]);
+    const row = (history: any) => history.messages.find((message: any) => message.id === 'toolcall_search');
+    const active = await request('chat.history', { sessionKey: key });
+    expect(active.hasActiveRun).toBe(true);
+    expect(row(active)).toMatchObject({ tool: { callId: 'search', status: 'running' } });
+    expect(started).not.toHaveProperty('status');
+    const desktop = (service as any).desktop;
+    desktop.broadcast = vi.fn();
+    const followerRow = () => {
+      const state = desktop.broadcast.mock.calls.at(-1)[1].change.conversationState;
+      return row({ messages: codexMessages([state.turnHistory.history.entitiesByKey['turn:turn-1']]) });
+    };
+    desktop.emit('follow', threadId, true);
+    await vi.waitFor(() => expect(desktop.broadcast).toHaveBeenCalled());
+    expect(followerRow()).toMatchObject({ tool: { callId: 'search', status: 'running' } });
+    const completed = Object.freeze({ ...started, ...(status === 'error' ? { error: { message: 'Search unavailable' } } : {}) });
+    notify('item/completed', { turnId: 'turn-1', item: completed });
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual([
+      expect.objectContaining({ toolCallId: 'search', status }),
+    ]);
+    const completedRow = row(await request('chat.history', { sessionKey: key }));
+    expect(completedRow).toMatchObject({ tool: { callId: 'search', status } });
+    expect(completed).not.toHaveProperty('status');
+    desktop.emit('follow', threadId, true);
+    await vi.waitFor(() => expect(followerRow()).toMatchObject({ id: completedRow.id, tool: completedRow.tool }));
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/items/list'
+      ? Promise.resolve({ data: [{ turnId: 'turn-1', item: completed }] }) : original(method, params));
+    const reloaded = await request('chat.history', { sessionKey: key });
+    expect(reloaded.hasActiveRun).toBe(false);
+    expect(row(reloaded)).toEqual(completedRow);
+  });
   it('cancels the exact turn without claiming completion from its acknowledgement', async () => {
     const run = await start(); await request('chat.abort', { sessionKey: key, runId: run.runId });
     expect(mock.request).toHaveBeenCalledWith('turn/interrupt', { threadId, turnId: 'turn-1' });
@@ -821,6 +861,69 @@ describe('device project discovery and desktop routing', () => {
     (service as any)[kind].set('pending', { entry: record });
     expect((desktop as any).followProtected(threadId)).toBe(true);
     (service as any)[kind].clear(); expect((desktop as any).followProtected(threadId)).toBe(false);
+
+  });
+  async function followed() {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); key = `native:${threadId}`;
+    await request('chat.history', { sessionKey: key });
+    return desktop;
+  }
+  it('completes a status-less Desktop search once, consistently with history, without completing unresolved tools or the turn', async () => {
+    const desktop = await followed();
+    const search = { id: 'search', type: 'webSearch', query: 'release notes' };
+    const snapshot = { fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [
+      search,
+      { id: 'running', type: 'commandExecution', status: 'inProgress', command: 'sleep 15' },
+      { id: 'unknown', type: 'commandExecution', command: 'pwd' },
+    ] }], requests: [] } };
+    desktop.emit('snapshot', threadId, snapshot);
+    expect(updates.filter(u => u.type === 'tool_call').map(u => u.toolCallId)).toEqual(['search', 'running', 'unknown']);
+    const terminal = [expect.objectContaining({ type: 'tool_call_update', toolCallId: 'search', status: 'success' })];
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual(terminal);
+    desktop.emit('snapshot', threadId, snapshot);
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.hasActiveRun).toBe(true);
+    expect(history.messages.filter((message: any) => message.role === 'tool').map((message: any) => [message.id, message.tool.status]))
+      .toEqual([['toolcall_search', 'success'], ['toolcall_running', 'running'], ['toolcall_unknown', 'unknown']]);
+    expect(updates.filter(u => u.type === 'tool_call')).toHaveLength(3);
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual(terminal);
+    expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
+    expect(desktop.request).not.toHaveBeenCalled();
+    expect(mock.request.mock.calls.some(([method]) => ['thread/resume', 'turn/start'].includes(method))).toBe(false);
+  });
+  it('finishes an explicitly running Desktop search when a canonical status-less result arrives', async () => {
+    const desktop = await followed();
+    const snapshot = (item: any) => ({ fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [item] }], requests: [] } });
+    const search = { id: 'search', type: 'webSearch', query: 'release notes' };
+    desktop.emit('snapshot', threadId, snapshot({ ...search, status: 'inProgress' }));
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual([]);
+    expect((await request('chat.history', { sessionKey: key })).messages.at(-1).tool.status).toBe('running');
+    desktop.emit('snapshot', threadId, snapshot(search));
+    desktop.emit('snapshot', threadId, snapshot(search));
+    expect(updates.filter(u => u.type === 'tool_call')).toHaveLength(1);
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual([
+      expect.objectContaining({ toolCallId: 'search', status: 'success' }),
+    ]);
+    expect((await request('chat.history', { sessionKey: key })).messages.at(-1).tool.status).toBe('success');
+  });
+  it('applies completed Desktop tool output and exit-code corrections even when native status stays unchanged', async () => {
+    const desktop = await followed();
+    const command = { id: 'command', type: 'commandExecution', command: 'printf result', status: 'completed', exitCode: 0, aggregatedOutput: 'partial' };
+    const publish = (item: any) => desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [item] }], requests: [] } });
+    publish(command);
+    publish({ ...command, aggregatedOutput: 'full result' });
+    publish({ ...command, aggregatedOutput: 'full result', exitCode: 1 });
+    publish({ ...command, aggregatedOutput: 'full result', exitCode: 1, durationMs: 10 });
+    expect(updates.filter(u => u.type === 'tool_call')).toHaveLength(1);
+    expect(updates.filter(u => u.type === 'tool_call_update').map(u => [u.status, u.rawOutput]))
+      .toEqual([['success', 'partial'], ['success', 'full result'], ['error', 'full result']]);
+    expect((await request('chat.history', { sessionKey: key })).messages.at(-1))
+      .toMatchObject({ id: 'toolcall_command', tool: { status: 'error', output: 'full result' } });
   });
   it('uses the last visible native message instead of the first prompt and caches the tail', async () => {
     await device();
