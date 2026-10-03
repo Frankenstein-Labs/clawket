@@ -497,6 +497,8 @@ The official Pi Preview Registry is environment-checked like OpenClaw/Hermes Pre
 
 ## Codex conversations
 
+Codex live paragraphs use an independent first-visible clock, retained through tool commits, scoped run recovery and later deltas. Optional native/Bridge paragraph timestamps never change the run's render identity. Missing or invalid metadata uses that paragraph's first local receipt; do not backdate a new paragraph to the whole run start or describe receipt time as native lifecycle evidence. Other backends retain their existing timing.
+
 Codex entry uses a 12-second slow-hint budget per real connection/catalog stage. Derive `Connecting` versus `Loading sessions` from the current connection readiness; rerenders do not reset the clock. Reuse cold activation’s complete live catalog for the picker, but retain the fallback after failed/cache-only reads. Only exact `sessionCatalogPageIndex: 1` negotiation enables three concurrent frozen catalog pages; retain legacy serial reads, scope/retirement fences, complete atomic validation and all existing size/expiry bounds. See `../../docs/3.1/session-catalog-sync.md`.
 
 An explicit Codex failed completion without a terminal notice, reply text or attachment gets one fixed generic system notice keyed by its Bridge run ID. Preserve authoritative failure explanations and successful/cancelled completions. Silence, disconnection and user-only history from an older Bridge are not failure evidence; never infer an authentication failure or resend from them.

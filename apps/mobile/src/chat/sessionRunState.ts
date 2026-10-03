@@ -2,6 +2,7 @@ export type SessionRunState = {
   runId: string;
   streamText: string | null;
   startedAt: number;
+  streamTimestampMs?: number;
 };
 
 function shouldReplaceStreamText(previous: string | null, next: string): boolean {
@@ -20,6 +21,7 @@ export function markSessionRunStarted(
     runId,
     streamText: prev?.runId === runId ? prev.streamText : null,
     startedAt: prev?.runId === runId ? prev.startedAt : startedAt,
+    streamTimestampMs: prev?.runId === runId ? prev.streamTimestampMs : undefined,
   };
   map.set(sessionKey, next);
   return next;
@@ -32,6 +34,7 @@ export function markSessionRunDelta(
   text: string,
   startedAt = Date.now(),
   authoritative = false,
+  streamTimestampMs?: number,
 ): SessionRunState {
   const prev = map.get(sessionKey);
   const next: SessionRunState = {
@@ -40,6 +43,7 @@ export function markSessionRunDelta(
       ? (authoritative || shouldReplaceStreamText(prev.streamText, text) ? text : prev.streamText)
       : text,
     startedAt: prev?.runId === runId ? prev.startedAt : startedAt,
+    streamTimestampMs: streamTimestampMs ?? (prev?.runId === runId ? prev.streamTimestampMs : undefined),
   };
   map.set(sessionKey, next);
   return next;

@@ -47,6 +47,15 @@ export function codexTool(item: any): ChatMessage['tool'] | undefined {
     output: item.type === 'imageGeneration' ? (item.status === 'completed' && !item.failure ? 'Image generated' : '')
       : String(item.aggregatedOutput ?? (item.result ? JSON.stringify(item.result) : item.error ? JSON.stringify(item.error) : item.type === 'fileChange' ? JSON.stringify(item.changes) : '')).slice(0, 32000) };
 }
+/** Native millisecond item clocks are optional; malformed or reversed pairs are not evidence. */
+export function codexItemTimestamp(started: unknown, completed?: unknown): number | undefined {
+  const valid = (value: unknown): value is number => typeof value === 'number'
+    && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15;
+  if ((started != null && !valid(started)) || (completed != null && !valid(completed))) return undefined;
+  if (valid(started) && valid(completed) && completed < started) return undefined;
+  return valid(started) ? started : valid(completed) ? completed : undefined;
+}
+
 export function codexMessages(turns: any[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   for (const turn of turns) {
@@ -64,7 +73,7 @@ export function codexMessages(turns: any[]): ChatMessage[] {
         }
         messages.push({ ...base, role: 'user', text, ...(typeof item.clientId === 'string' && item.clientId && item.clientId.length <= 200 ? { idempotencyKey: item.clientId } : {}), ...(attachments.length ? { attachments } : {}) });
       } else if (item.type === 'agentMessage' || item.type === 'plan') {
-        messages.push({ ...base, role: 'assistant', text: String(item.text ?? '') });
+        messages.push({ ...base, timestampMs: (turn.itemTimestamps instanceof Map ? turn.itemTimestamps.get(item.id) : undefined) ?? timestampMs, role: 'assistant', text: String(item.text ?? '') });
       } else {
         const tool = codexTool(item);
         if (tool) messages.push({ ...base, id: `toolcall_${item.id}`, role: 'tool', text: '', tool });

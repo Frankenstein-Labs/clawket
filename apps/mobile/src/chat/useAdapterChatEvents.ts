@@ -50,6 +50,7 @@ export type AdapterChatUpdate =
       runId: string;
       text: string;
       textMode?: 'snapshot' | 'delta';
+      timestampMs?: number;
       activeRunId: string;
       isSending: true;
       visible: boolean;

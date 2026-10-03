@@ -21,7 +21,7 @@ export function liveReplyRenderKey(startedAt: number | null, runId: string, segm
 
 /** Recover known text/tool boundaries from the current turn, never earlier turns. */
 export function recoverLiveRunPresentation(text: string, history: UiMessage[]): {
-  segments: StreamSegment[]; tools: UiMessage[]; tail: string;
+  segments: StreamSegment[]; tools: UiMessage[]; tail: string; tailTimestampMs?: number;
 } {
   const start = history.findLastIndex(message => message.role === 'user');
   const segments: StreamSegment[] = [];
@@ -40,8 +40,9 @@ export function recoverLiveRunPresentation(text: string, history: UiMessage[]): 
   }
   // A transcript can contain the still-growing assistant message. Only tools
   // prove a committed boundary; keep the last message in the live tail.
-  while (segments.at(-1)?.afterToolCount === tools.length) segments.pop();
-  return { segments, tools, tail: finalReplyTail(text, segments) };
+  let tailTimestampMs: number | undefined;
+  while (segments.at(-1)?.afterToolCount === tools.length) tailTimestampMs = segments.pop()!.timestampMs;
+  return { segments, tools, tail: finalReplyTail(text, segments), tailTimestampMs };
 }
 
 function finiteTimestamp(message: UiMessage): number | undefined {
@@ -108,6 +109,7 @@ export function buildLiveRunListData(params: {
   toolMessages: UiMessage[];
   liveStreamText: string | null;
   liveStreamStartedAt: number | null;
+  liveMessageTimestampMs?: number | null;
   activeRunId: string | null;
   nowMs?: number;
   includePlaceholder?: boolean;
@@ -166,7 +168,7 @@ export function buildLiveRunListData(params: {
       role: 'assistant',
       text: hasLiveStream ? params.liveStreamText ?? '' : '',
       streaming: true,
-      timestampMs: params.liveStreamStartedAt ?? undefined,
+      timestampMs: params.liveMessageTimestampMs ?? params.liveStreamStartedAt ?? undefined,
     });
   }
 

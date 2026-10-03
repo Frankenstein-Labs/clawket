@@ -16,7 +16,7 @@ import { nativeSettings, matchesNativeSettings, permissionMode, permissionSelect
 import { fastServiceTier, isFastServiceTier, hasServiceTier } from './speed.js';
 import { CodexProfile } from './profile.js';
 import { CodexRpc } from './rpc.js';
-import { codexMessages, codexGeneratedImage, codexTool, codexTurnFailure } from './history.js';
+import { codexMessages, codexGeneratedImage, codexTool, codexTurnFailure, codexItemTimestamp } from './history.js';
 import { loadDesktopHistory } from './desktop-history.js';
 import { nativeResumeSpeed } from './resume-settings.js';
 import { desktopTurns, desktopState } from './desktop-state.js';
@@ -26,7 +26,7 @@ import { DesktopIpc, DesktopIpcError, type DesktopSnapshot } from './desktop-ipc
 export interface CodexRequest { type: 'req'; id: string; method: string; params?: Record<string, unknown> }
 export interface CodexOptions { bridgeVersion?: string; project: string; directory: string; command?: string; env?: NodeJS.ProcessEnv; device?: boolean; desktop?: DesktopIpc }
 type Entry = { permissionsUnconfirmed?: true; archived?: boolean; cwd?: string; native?: boolean; id: string; threadId?: string; title: string; created: number; activity?: number; model?: string; provider?: string; effort?: string; serviceTier?: string | null; speedPreference?: { serviceTier: string | null; provider: string }; preview?: string; keys: Record<string, { hash: string; runId: string }> };
-type Run = { desktop?: boolean; id: string; turnId?: string; text: string; started: number; itemId?: string; final?: string; items: Map<string, any> };
+type Run = { desktop?: boolean; id: string; turnId?: string; text: string; started: number; itemId?: string; final?: string; items: Map<string, any>; itemTimestamps?: Map<string, number> };
 type Consent = { desktop?: boolean; wireId: string | number; entry: Entry; turnId: string; approval: Extract<ApprovalRequest, { kind: 'exec' }>; permissions?: object };
 type QuestionGroup = { desktop?: boolean; wireId: string | number; entry: Entry; turnId: string; pending: Map<string, { question: AgentQuestion; nativeId: string }>; answers: Record<string, { answers: string[] }> };
 type MetadataBaseline = Map<Entry, { threadId: string; revision: number; pending: boolean }>;
@@ -141,7 +141,7 @@ export class CodexService extends EventEmitter {
   }
   private createRpc(): CodexRpc {
     const rpc = new CodexRpc(this.options.command ?? 'codex', this.project, this.options.env);
-    rpc.on('notification', frame => { if (this.rpc === rpc) this.notification(frame.method, frame.params ?? {}); });
+    rpc.on('notification', frame => { if (this.rpc === rpc) this.notification(frame.method, frame.params ?? {}, frame.emittedAtMs); });
     rpc.on('request', frame => { if (this.rpc === rpc) { try { this.interaction(frame); } catch { rpc.refuse(frame.id); } } });
     rpc.on('diagnostic', diagnostic => { if (this.rpc === rpc) this.emit('diagnostic', diagnostic); });
     rpc.on('gap', () => {
@@ -1112,8 +1112,11 @@ export class CodexService extends EventEmitter {
       const grouped = new Map<string, any>();
       for (const row of [...result.data].reverse()) {
         if (typeof row.turnId !== 'string' || !row.item || typeof row.item.id !== 'string') throw new Error('Invalid native history item');
-        if (!grouped.has(row.turnId)) grouped.set(row.turnId, { ...(metadataByTurn.get(row.turnId) as object ?? {}), id: row.turnId, items: [] });
-        grouped.get(row.turnId).items.push(row.item);
+        if (!grouped.has(row.turnId)) grouped.set(row.turnId, { ...(metadataByTurn.get(row.turnId) as object ?? {}), id: row.turnId, items: [], itemTimestamps: new Map() });
+        const turn = grouped.get(row.turnId);
+        turn.items.push(row.item);
+        const timestamp = codexItemTimestamp(row.startedAtMs, row.completedAtMs);
+        if (timestamp !== undefined) turn.itemTimestamps.set(row.item.id, timestamp);
       }
       turns = [...grouped.values()];
     }
@@ -1123,6 +1126,8 @@ export class CodexService extends EventEmitter {
       const combined = new Map((liveTurn.items ?? []).map((item: any) => [item.id, item]));
       for (const [id, item] of active.items) combined.set(id, item);
       liveTurn.items = [...combined.values()];
+      liveTurn.itemTimestamps ??= new Map();
+      for (const [id, timestamp] of active.itemTimestamps ?? []) if (!liveTurn.itemTimestamps.has(id)) liveTurn.itemTimestamps.set(id, timestamp);
     }
     const messages = this.artifacts.project(String(key), codexMessages(turns), [metadata.thread.cwd], artifactEpoch, cursor);
     const end = page.end ?? messages.length;
@@ -1133,7 +1138,7 @@ export class CodexService extends EventEmitter {
     const identity = legacyCursor ? {} : { kind: 'items' };
     const next = start ? { ...identity, native: page.native, end: start } : result.nextCursor ? { ...identity, native: result.nextCursor } : undefined;
     const run = owned ? this.runs.get(owned.id) : undefined;
-    return { key: String(key), messages: messages.slice(start, end), nextCursor: next ? Buffer.from(JSON.stringify(next)).toString('base64url') : undefined, sessionId: threadId, thinkingLevel: owned?.effort, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, sessionAbortable: !!run.turnId } : undefined };
+    return { key: String(key), messages: messages.slice(start, end), nextCursor: next ? Buffer.from(JSON.stringify(next)).toString('base64url') : undefined, sessionId: threadId, thinkingLevel: owned?.effort, hasActiveRun: !!run, activeRun: run ? { runId: run.id, text: run.text, startedAtMs: run.started, messageTimestampMs: run.itemId ? run.itemTimestamps?.get(run.itemId) : undefined, sessionAbortable: !!run.turnId } : undefined };
   }
   private prompt(r: Entry, input: PromptInput, desktopOverrides?: Record<string, unknown>): Promise<{ runId: string }> {
     return this.serial(r, async () => {
@@ -1203,7 +1208,7 @@ export class CodexService extends EventEmitter {
       return { runId };
     });
   }
-  private notification(method: string, p: any): void {
+  private notification(method: string, p: any, emittedAtMs?: unknown): void {
     const r = this.records.find(row => row.threadId === p.threadId); if (!r) return;
     if (method === 'thread/settings/updated' && this.loaded.has(r.id)) {
       const settings = nativeSettings(p.threadSettings);
@@ -1226,15 +1231,26 @@ export class CodexService extends EventEmitter {
     if (method === 'turn/started') { if (!run.turnId) run.turnId = p.turn?.id; return; }
     if (p.turnId && run.turnId && p.turnId !== run.turnId) return;
     const base = { sessionKey: r.id, runId: run.id };
+    const itemTimestamp = (id: string): number => {
+      const clocks = run.itemTimestamps ??= new Map();
+      if (!clocks.has(id)) {
+        if (clocks.size >= 512) clocks.delete(clocks.keys().next().value!);
+        // This is first notification emission/receipt, not an invented Native item start.
+        clocks.set(id, codexItemTimestamp(emittedAtMs) ?? Date.now());
+      }
+      return clocks.get(id)!;
+    };
     if (method === 'item/agentMessage/delta' && typeof p.delta === 'string') {
+      if (typeof p.itemId !== 'string') return;
       if (run.itemId !== p.itemId) { run.itemId = p.itemId; if (run.text) run.text += '\n\n'; }
       const item = run.items.get(p.itemId) ?? { id: p.itemId, type: 'agentMessage', text: '' };
       item.text = (item.text + p.delta).slice(-128000); run.items.set(p.itemId, item);
-      run.text = (run.text + p.delta).slice(-128000); this.update({ type: 'agent_message_chunk', ...base, text: run.text, textMode: 'snapshot' });
+      run.text = (run.text + p.delta).slice(-128000); this.update({ type: 'agent_message_chunk', ...base, text: run.text, textMode: 'snapshot', timestampMs: itemTimestamp(p.itemId) });
     }
     if (method === 'item/reasoning/summaryTextDelta' && typeof p.delta === 'string') this.update({ type: 'agent_thought_chunk', ...base, text: p.delta });
     if (method === 'item/started' || method === 'item/completed') {
       const item = p.item; if (!item || typeof item.id !== 'string') return;
+      if (item.type === 'agentMessage') itemTimestamp(item.id);
       if (this.items.size >= 512) this.items.delete(this.items.keys().next().value!);
       this.items.set(item.id, item);
       if (run.items.size >= 512 && !run.items.has(item.id)) run.items.delete(run.items.keys().next().value!);

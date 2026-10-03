@@ -244,7 +244,7 @@ export interface SessionHistory {
   nextCursor?: string;
   hasActiveRun: boolean;
   /** Backend recovery snapshot; absent on peers that do not expose live runs. */
-  activeRun?: { runId: string; text: string; startedAtMs?: number; sessionAbortable?: boolean };
+  activeRun?: { runId: string; text: string; startedAtMs?: number; messageTimestampMs?: number; sessionAbortable?: boolean };
   sessionId?: string;
   thinkingLevel?: string;
 }
