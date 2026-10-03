@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-03 Codex 冷续聊恢复失败后永久 busy（负责人要求完整安卓实测中的 Bridge 路径审查与修复）。
+  - 只读代码与既有回归确认：Desktop broker 可连但原会话已无 owner 时，原来先保存 prompt receipt / run，再恢复本地 thread；速度/权限证据或 writer lock 准备失败抛普通错误，被误当作已发送但结果未知。此时没有 native turn，下一条被 busy 拒绝，停止又因 turnId 缺失报仍在启动。原回归仅覆盖 broker 不可连接时的提前检查。
+  - 冷发送新增只读 owner discovery，在 receipt 前完成明确 no-owner 的安全本地恢复。owner 在 discovery 与发送之间消失的竞态中，仅原始 IPC 明确 no-owner / pre-dispatch broker-unavailable 才将本地准备失败结为 rejection；保留已接受 fingerprint，重复同 key 不重发。routed timeout、泛化 handler failure 与随后 native turn/start 的不确定结果仍保留 unknown run，不另开 writer。
+  - 新增 12 项确定性回归覆盖 unknown speed、unknown permission profile、writer busy、缺失 native settings 的提前拒绝与 owner 消失竞态、discovery 中发现已有 active turn 保留原身份，以及修复后显式新发送、Desktop / native uncertain dispatch 不重放。独立 worktree / heavy 租约下逐项串行：Codex service 170/170、Bridge 类型、check:docs 7 指令对/5 检查器用例通过；完整门禁由 PR CI 验证。未操作手机或重启现有 Bridge，安装版取得修复仍需要后续授权交付；本轮未发布或部署。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。
