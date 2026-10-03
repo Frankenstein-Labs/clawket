@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 全面 Android QA 中间验收（持续进行，未完成）。
+  - 专用 Preview / QA App 保留原数据；新会话和六天前 QA 会话真实单次发送完成，八个模型均由实际 native turn/context/usage 验证。旧会话可能保留 warm owner，Fast 仅 settings 元数据，均不冒充 cold resume / actual tier。原 Production Bridge、商店 App 与其他后端服务未变。
+  - 真实原生 Plan 阻塞请求两题：推荐选项、自定义答案在关闭 Sheet、后台与 force-stop/cold launch 后保留；手机一次 Submit 后唯一 same-call / original-turn output 证明两题答案收到，原回合完成。记录只读 live observer 与 native rollout 各自证据边界。
+  - 长历史录屏已复现两轮无手势跳页；最新 native content-height clamp 修复装入 QA JS，fresh 80 消息/40完成turn副本准备好，仍待真机验收。答题后的同一最终回复时间从完成时刻回退到提问时刻，前后截图/录屏已保全，正在窄修复。
+  - 持续验收矩阵与版本边界见 `docs/3.1/codex-android-qa-20261003.md`；尚缺 steering/queue/Stop、审批、设置恢复、媒体/产物、profile、网络/cold owner 及后端 smoke。源代码回归和 CI 通过不记作手机通过。全部任务 PR 因 braces 高危审计等待现有 HUMAN TODO 的 owner 决策，未应用例外、未合并或发布。
+
 - 2026-10-03 Codex 引导消息确认与原生历史竞态（用户要求持续真机测试时发现的源码边界）。
   - fresh main 的实际 controller hook 两项确定性基线红：原生引导历史先到、时间继承两分钟前的 turn start；随后 ACK 再加一份，旧 turn 完成且新 turn 开始时还会落到新末尾。这是测试复现，尚不宣称真机复现。
   - Codex ACK 按 dispatch 消息身份/位置归并：已有明确新 native echo 保留；否则插存活 dispatch anchor 后；窗口替换无旧锚点只读 canonical，不猜新 turn 位置。dispatch 时钟与单调本地序号保持两次同文/同毫秒引导独立，晚 ACK 不覆盖新 run clock；新草稿、失败草稿、scope 和无自动重发边界保留。独立有 send key 的下一条消息不吞并引导，OpenClaw 能力门禁与 Hermes/Pi 既有确认路径保持。同行复核补出引导先于已有助手 A 的 same-native-ID/render alias 形状，两项合并基线红后修复：echo 用 user lineage，与 local 插入用 full lineage 分离；实际 adapter recovery 原生 ID 无 history alias 也归并，local/queued row 不能证明 echo。
