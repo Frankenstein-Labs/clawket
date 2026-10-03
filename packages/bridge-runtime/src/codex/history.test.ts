@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { codexMessages, codexTurnFailure } from './history.js';
+import { codexMessages, codexTool, codexTurnFailure } from './history.js';
+
+describe('Codex tool execution evidence', () => {
+  it.each([
+    [{ type: 'imageView', path: 'file:///image.png' }, 'success'],
+    [{ type: 'imageView', status: 'inProgress' }, 'running'],
+    [{ type: 'imageView', status: 'failed' }, 'error'],
+    [{ type: 'imageView', error: { message: 'Cannot read image' } }, 'error'],
+    [{ type: 'imageView', status: 'future-native-state' }, 'unknown'],
+    [{ type: 'webSearch', query: 'release notes' }, 'success'],
+    [{ type: 'webSearch', status: 'future-native-state' }, 'unknown'],
+    [{ type: 'commandExecution', command: 'pwd' }, 'unknown'],
+    [{ type: 'mcpToolCall', tool: 'read' }, 'unknown'],
+  ])('preserves native completion, failure and missing-state boundaries for %j', (item, status) => {
+    // ImageViewThreadItem is {id, path, type}; the canonical history inserts it
+    // from the completed-only legacy ViewImageToolCall, not ItemStarted.
+    const tool = codexTool({ id: 'tool', ...item });
+    expect(tool).toMatchObject({ callId: 'tool', status, statusReported: true });
+    expect(codexMessages([{ id: 'turn', status: 'completed', items: [{ id: 'tool', ...item }] }])[0]?.tool).toEqual(tool);
+  });
+});
 
 describe('Codex failed turn history', () => {
   const unsupported = "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";

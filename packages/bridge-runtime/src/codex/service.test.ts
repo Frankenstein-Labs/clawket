@@ -399,13 +399,13 @@ describe('Codex owned sessions', () => {
     notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     expect(updates.filter(u => u.type === 'run_finished')).toHaveLength(1);
   });
-  it.each(['success', 'error'])('keeps a status-less native search running until completion and retains its %s result after reload', async status => {
+  it.each(['webSearch', 'imageView'].flatMap(type => ['success', 'error'].map(status => [type, status])))('keeps status-less native %s running until completion and retains its %s result after reload', async (type, status) => {
     await start();
-    // Native WebSearchItem has no status, including on item/started.
-    const started = Object.freeze({ id: 'search', type: 'webSearch', query: 'release notes' });
+    // Both native item schemas omit status, including on item/started.
+    const started = Object.freeze({ id: 'search', type, query: 'release notes', path: 'file:///image.png' });
     notify('item/started', { turnId: 'turn-1', item: started });
     expect(updates.filter(u => u.type.startsWith('tool_call'))).toEqual([
-      expect.objectContaining({ type: 'tool_call', toolCallId: 'search', title: 'web_search' }),
+      expect.objectContaining({ type: 'tool_call', toolCallId: 'search', title: type === 'webSearch' ? 'web_search' : 'view_image' }),
     ]);
     const row = (history: any) => history.messages.find((message: any) => message.id === 'toolcall_search');
     const active = await request('chat.history', { sessionKey: key });
@@ -686,7 +686,8 @@ describe('device project discovery and desktop routing', () => {
     ] }], requests: [] } };
     desktop.emit('snapshot', threadId, snapshot);
     expect(updates.filter(u => u.type === 'tool_call').map(u => u.toolCallId)).toEqual(['search', 'running', 'unknown']);
-    const terminal = [expect.objectContaining({ type: 'tool_call_update', toolCallId: 'search', status: 'success' })];
+    const terminal = [expect.objectContaining({ type: 'tool_call_update', toolCallId: 'search', status: 'success' }),
+      expect.objectContaining({ type: 'tool_call_update', toolCallId: 'unknown', status: 'unknown' })];
     expect(updates.filter(u => u.type === 'tool_call_update')).toEqual(terminal);
     desktop.emit('snapshot', threadId, snapshot);
     const history = await request('chat.history', { sessionKey: key });
@@ -698,6 +699,26 @@ describe('device project discovery and desktop routing', () => {
     expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
     expect(desktop.request).not.toHaveBeenCalled();
     expect(mock.request.mock.calls.some(([method]) => ['thread/resume', 'turn/start'].includes(method))).toBe(false);
+  });
+  it('recovers ten completed image views and one running command without inventing execution for unknown items', async () => {
+    const desktop = await followed();
+    const images = Array.from({ length: 10 }, (_, i) => ({ id: `image-${i}`, type: 'imageView', path: `file:///image-${i}.png` }));
+    const publish = (status?: string) => desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [
+      ...images, { id: 'running', type: 'commandExecution', status: 'inProgress', command: 'sleep 15' },
+      { id: 'unknown', type: 'mcpToolCall', tool: 'read', ...(status ? { status } : {}) },
+    ] }], requests: [] } });
+    publish(); publish();
+    expect(updates.filter(u => u.type === 'tool_call').map(u => [u.toolCallId, u.status]))
+      .toEqual([...images.map(item => [item.id, 'success']), ['running', 'running'], ['unknown', 'unknown']]);
+    expect(updates.filter(u => u.type === 'tool_call_update')).toHaveLength(11);
+    const active = await request('chat.history', { sessionKey: key });
+    expect(active.hasActiveRun).toBe(true);
+    expect(active.messages.filter((message: any) => message.tool?.status === 'running').map((message: any) => message.id)).toEqual(['toolcall_running']);
+    expect(active.messages.at(-1).tool).toMatchObject({ status: 'unknown', statusReported: true });
+    publish('inProgress'); publish('inProgress'); publish(); publish();
+    expect(updates.filter(u => u.type === 'tool_call_update' && u.toolCallId === 'unknown').map(u => u.status)).toEqual(['unknown', 'running', 'unknown']);
+    expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
+    expect(desktop.request).not.toHaveBeenCalled();
   });
   it('finishes an explicitly running Desktop search when a canonical status-less result arrives', async () => {
     const desktop = await followed();
