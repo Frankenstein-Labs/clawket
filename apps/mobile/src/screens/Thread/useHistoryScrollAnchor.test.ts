@@ -14,7 +14,8 @@ function fixture(initial: Row[] = [date('date:25'), message('25'), message('26')
   let positions: number[] = [0, 60, 220];
   const list = {
     getFirstVisibleIndex: () => first,
-    getLayout: (index: number) => positions[index] === undefined ? undefined : { y: positions[index]! },
+    getLayout: (index: number) => positions[index] === undefined ? undefined
+      : { y: positions[index]!, height: rows[index]?.type === 'date' ? 60 : 160 },
     getFirstItemOffset: () => header,
     getAbsoluteLastScrollOffset: () => offset,
     scrollToOffset: jest.fn(({ offset: next }: { offset: number; animated: boolean }) => { offset = next; }),
@@ -145,20 +146,76 @@ it('keeps the new reader position when a fresh drag supersedes an old clamped co
   const f = fixture();
   let nativeMaxOffset = 1500;
   f.list.scrollToOffset.mockImplementation(({ offset }) => f.setOffset(Math.min(offset, nativeMaxOffset)));
-  act(() => f.result.current.capture());
+  act(() => f.result.current.capture(100, 2100));
   f.setRows([message('09'), message('21'), message('25'), message('26')], [0, 1260, 2060, 2220]);
   act(() => f.result.current.restore({ nativeMaxOffset }));
   f.setFirst(1);
-  act(() => f.result.current.readerScrolled(1500));
+  act(() => f.result.current.readerScrolled(1500, true, 2100));
   f.setOffset(1450);
-  act(() => f.result.current.beginDrag(true));
+  // This is the new native page's current reading position, after its child
+  // geometry has become visible; the pending old correction cannot reclaim it.
+  act(() => f.result.current.beginDrag(true, { offset: 1450, height: 4100 }));
   f.setOffset(1400);
-  act(() => f.result.current.readerScrolled(1400));
+  act(() => f.result.current.readerScrolled(1400, true, 4100));
   const readingY = f.getViewportY('21');
   nativeMaxOffset = 3500;
   act(() => f.result.current.restore({ nativeMaxOffset, nativeGeometryCommitted: true }));
   expect(f.list.scrollToOffset).toHaveBeenCalledTimes(1); // The new drag's native position already matches.
   expect(f.getViewportY('21')).toBe(readingY);
+});
+
+it('keeps a fresh finger displacement in the old native page while the new child has not committed', () => {
+  const f = fixture();
+  f.list.scrollToOffset.mockImplementation(() => {});
+  act(() => f.result.current.capture(100, 2100));
+  f.setRows([date('date:09'), message('09'), message('25'), message('26')], [0, 60, 2060, 2220]);
+  act(() => f.result.current.restore({ nativeMaxOffset: 1500, nativeOffset: 100 }));
+  f.setOffset(90);
+  f.setFirst(0);
+  act(() => f.result.current.beginDrag(true, { offset: 90, height: 2100 }));
+  act(() => f.result.current.capture()); // The new gesture also reaches the automatic paging threshold.
+  act(() => f.result.current.readerScrolled(80, true, 2100));
+  act(() => f.result.current.restore({ nativeMaxOffset: 4300, nativeOffset: 80, nativeGeometryCommitted: true }));
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2080, animated: false });
+  f.setOffset(2080);
+  expect(f.getViewportY('25')).toBe(60);
+});
+
+it('fences the old page release even when it arrives before the first new layout callback', () => {
+  const f = fixture();
+  f.list.scrollToOffset.mockImplementation(() => {});
+  act(() => f.result.current.capture(0, 2100));
+  f.setRows([date('date:09'), message('09'), message('25'), message('26')], [0, 60, 2060, 2220]);
+  act(() => f.result.current.readerScrolled(0, true, 2100));
+  act(() => f.result.current.restore({ nativeMaxOffset: 4300, nativeOffset: 0 }));
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2000, animated: false });
+});
+
+it('does not reinterpret the new child initial zero offset before its compensation is acknowledged', () => {
+  const f = fixture();
+  f.list.scrollToOffset.mockImplementation(() => {});
+  act(() => f.result.current.capture(0, 2100));
+  f.setRows([date('date:09'), message('09'), message('25'), message('26')], [0, 60, 2060, 2220]);
+  act(() => f.result.current.restore({ nativeMaxOffset: 1500, nativeOffset: 0 }));
+  act(() => f.result.current.readerScrolled(0, true, 4900));
+  act(() => f.result.current.restore({ nativeMaxOffset: 4300, nativeOffset: 0, nativeGeometryCommitted: true }));
+  expect(f.list.scrollToOffset).toHaveBeenCalledTimes(2);
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2000, animated: false });
+});
+
+it('preserves additional reader movement in the old page coordinate space while its prepend is committing', () => {
+  const f = fixture();
+  f.list.scrollToOffset.mockImplementation(() => {});
+  act(() => f.result.current.capture(100, 2100));
+  f.setRows([date('date:09'), message('09'), message('25'), message('26')], [0, 60, 2060, 2220]);
+  act(() => f.result.current.restore({ nativeMaxOffset: 1500, nativeOffset: 100 }));
+  f.setFirst(0);
+  // The original finger moves another 10 points before the native child grows.
+  act(() => f.result.current.readerScrolled(90, true, 2100));
+  act(() => f.result.current.restore({ nativeMaxOffset: 4300, nativeOffset: 90, nativeGeometryCommitted: true }));
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2090, animated: false });
+  f.setOffset(2090);
+  expect(f.getViewportY('25')).toBe(50);
 });
 
 it('keeps a late clamp acknowledgement after retrying the same target against the new native size', () => {
@@ -184,6 +241,64 @@ it('keeps a late clamp acknowledgement after retrying the same target against th
   f.setOffset(2500);
   act(() => f.result.current.readerScrolled(2500, false));
   expect(f.getViewportY('25')).toBe(before);
+});
+
+it('keeps the old page reader row when its zero-offset end-drag arrives after the prepend layout', () => {
+  const f = fixture();
+  f.setOffset(0);
+  const before = f.getViewportY('25');
+  f.list.scrollToOffset.mockImplementation(() => {});
+  act(() => f.result.current.capture(0, 2100));
+  f.setRows([date('date:09'), message('09'), message('25'), message('26')], [0, 60, 2060, 2220]);
+  act(() => f.result.current.restore({ nativeMaxOffset: 1500, nativeOffset: 0 }));
+  // Native is still reporting the old page's geometry and viewability. This
+  // is the end of the same drag, not a new reading intent at the new page head.
+  f.setFirst(0);
+  act(() => f.result.current.readerScrolled(0, true, 2100));
+  act(() => f.result.current.restore({ nativeMaxOffset: 4300, nativeOffset: 0, nativeGeometryCommitted: true }));
+  expect(f.list.scrollToOffset).toHaveBeenCalledTimes(2);
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 2000, animated: false });
+  f.setOffset(2000);
+  act(() => f.result.current.readerScrolled(2000, false, 4900));
+  expect(f.getViewportY('25')).toBe(before);
+  // A delayed old-page duplicate remains harmless even after the true ACK.
+  act(() => f.result.current.readerScrolled(0, false, 2100));
+  act(() => f.result.current.restore({ nativeOffset: 2000 }));
+  expect(f.list.scrollToOffset).toHaveBeenCalledTimes(2);
+});
+
+it('uses the native offset rather than a header-shifted FlashList getter when restoring', () => {
+  const f = fixture();
+  act(() => f.result.current.capture(100, 900));
+  f.setHeader(100);
+  // FlashList stores an offset relative to its old header; updating the header
+  // changes its absolute getter before the native view has actually moved.
+  f.setOffset(120);
+  act(() => f.result.current.restore({ nativeOffset: 100 }));
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 120, animated: false });
+});
+
+it('keeps reader movement authoritative when a new reply appends below the reading row', () => {
+  const f = fixture();
+  act(() => f.result.current.capture(100, 2100));
+  f.setRows([...f.currentRows(), message('27')], [0, 60, 220, 400]);
+  act(() => f.result.current.restore({ nativeOffset: 100 }));
+  f.setOffset(90);
+  act(() => f.result.current.readerScrolled(90, true, 2100));
+  act(() => f.result.current.restore({ nativeOffset: 90 }));
+  expect(f.list.scrollToOffset).not.toHaveBeenCalled();
+  expect(f.getViewportY('25')).toBe(50);
+});
+
+it('derives a fresh native reading row from layouts when the list viewability getter is stale', () => {
+  const f = fixture([message('09'), message('25'), message('26')]);
+  f.setRows(f.currentRows(), [0, 2060, 2220]);
+  f.setOffset(0);
+  f.setFirst(0);
+  act(() => f.result.current.capture(2100, 4900));
+  f.setRows([message('01'), ...f.currentRows()], [0, 1800, 4060, 4220]);
+  act(() => f.result.current.restore({ nativeOffset: 2100 }));
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 4100, animated: false });
 });
 
 it('fences anchors across scope and native list replacement', () => {
