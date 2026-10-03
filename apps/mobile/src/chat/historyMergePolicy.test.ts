@@ -11,6 +11,12 @@ describe('reconcileAcceptedSteeringMessage', () => {
     expect(reconcileAcceptedSteeringMessage([prompt], current, accepted)).toBe(current);
   });
 
+  it.each([false, true])('finds accepted input persisted before an already visible assistant row (%s)', alias => {
+    const assistant: UiMessage = { id: 'live-assistant', renderKey: 'stable-assistant', role: 'assistant', text: 'Working' };
+    const current = [prompt, echo, { ...assistant, id: alias ? 'native-assistant' : assistant.id }];
+    expect(reconcileAcceptedSteeringMessage([prompt, assistant], current, accepted)).toBe(current);
+  });
+
   it('keeps intentional repeated guidance after a previous canonical echo', () => {
     const second = { ...echo, id: 'second', historyMessageId: 'second-native' };
     const current = [prompt, echo, second];
@@ -32,6 +38,13 @@ describe('reconcileAcceptedSteeringMessage', () => {
     const inbound = { ...echo, id: 'inbound', historyMessageId: 'inbound-native', attribution: { channel: 'slack', sender: { id: 'other' } } };
     const current = [echo, prompt, tool, attachment, inbound];
     expect(reconcileAcceptedSteeringMessage([prompt, tool], current, accepted)).toEqual([echo, prompt, tool, accepted, attachment, inbound]);
+  });
+
+  it('does not treat locally queued or accepted rows as new native steering echoes', () => {
+    const queued: UiMessage = { ...echo, historyMessageId: undefined, delivery: 'queued' };
+    const local: UiMessage = { ...echo, id: 'usr_120000', historyMessageId: undefined };
+    const current = [prompt, queued, local];
+    expect(reconcileAcceptedSteeringMessage([prompt], current, accepted)).toEqual([prompt, accepted, queued, local]);
   });
 
   it('keeps all repeated native echoes without adding an ACK copy and does not guess placement in a replaced window', () => {

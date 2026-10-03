@@ -2,8 +2,8 @@
 
 - 2026-10-03 Codex 引导消息确认与原生历史竞态（用户要求持续真机测试时发现的源码边界）。
   - fresh main 的实际 controller hook 两项确定性基线红：原生引导历史先到、时间继承两分钟前的 turn start；随后 ACK 再加一份，旧 turn 完成且新 turn 开始时还会落到新末尾。这是测试复现，尚不宣称真机复现。
-  - Codex ACK 按 dispatch 消息身份/位置归并：已有明确新 native echo 保留；否则插存活 dispatch anchor 后；窗口替换无旧锚点只读 canonical，不猜新 turn 位置。dispatch 时钟与单调本地序号保持两次同文/同毫秒引导独立，晚 ACK 不覆盖新 run clock；新草稿、失败草稿、scope 和无自动重发边界保留。独立有 send key 的下一条消息不吞并引导，OpenClaw 能力门禁与 Hermes/Pi 既有确认路径保持。
-  - acceptance 必须在旧 in-flight history 完成后再读，且 adapter/session 退休即阻止该追加 read。本机单文件串行 controller 72、historyMergePolicy 61，共 133 项通过；Mobile 类型、check:docs 7 指令对/5 检查器用例及 diff 检查通过。完整门禁由本 PR CI 继续验证。未操作手机、Native/Bridge 服务、账号或现有会话，未构建/发布。
+  - Codex ACK 按 dispatch 消息身份/位置归并：已有明确新 native echo 保留；否则插存活 dispatch anchor 后；窗口替换无旧锚点只读 canonical，不猜新 turn 位置。dispatch 时钟与单调本地序号保持两次同文/同毫秒引导独立，晚 ACK 不覆盖新 run clock；新草稿、失败草稿、scope 和无自动重发边界保留。独立有 send key 的下一条消息不吞并引导，OpenClaw 能力门禁与 Hermes/Pi 既有确认路径保持。同行复核补出引导先于已有助手 A 的 same-native-ID/render alias 形状，两项合并基线红后修复：echo 用 user lineage，与 local 插入用 full lineage 分离；实际 adapter recovery 原生 ID 无 history alias 也归并，local/queued row 不能证明 echo。
+  - acceptance 必须在旧 in-flight history 完成后再读，且 adapter/session 退休即阻止该追加 read；多个 ACK 等同一旧 read 时只共享一条 fresh read。本机单文件串行 controller 74、historyMergePolicy 64，共 138 项通过；Mobile 类型、check:docs 7 指令对/5 检查器用例及 diff 检查通过。完整门禁由本 PR CI 继续验证。未操作手机、Native/Bridge 服务、账号或现有会话，未构建/发布。
 
 - 2026-10-03 全局会话面板创建晚完成覆盖后来选择（Codex 真机 QA 后续只读审查确认，独立窄修复）。
   - 全局 Host 在创建等待期间没有 UI 代次保护；关闭后重开或选择其他行，后端创建/本地持久化晚完成仍会导航到新会话并关闭后来面板。创建成功原本应自动进入；真机 118 的 XML 仍 pending、同名 PNG 已在关闭动画末端，不能据此断言正常自动进入失败。
