@@ -1,5 +1,16 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 Codex 9959 会话管理真机检查发现重置后旧正文留屏；立即修复继续。
+  - 新独立C管理会话首发恰好1输入/回执/start/complete、0工具；重命名及恢复显示名在手机、Bridge和Native name字段确认（不是SQLite title字段）。归档/恢复在两端确认，同Native身份与原问答保留；Markdown251B与JSON445B实文件含完整2消息，系统分享均取消，未选接收者。手机本地副本阅读、置顶/取消置顶通过。
+  - 唯一Reset确认后，Bridge绑定/activity已清且旧Native已归档，原任务仍1 start/complete、0新Send；1188当前页面仍2旧消息/1旧回复，Root亲看截图。1193返回首页重入后为空；本次不声称重入持续旧缓存。QA PID15648固定W/E窗口0行，不能当无错误证明。显式成功ACK的同scope历史退休窄修已启动，修复/新fixture真机复测尚待。
+  - 原9959在Metro充分预热后，同E固定历史行1046和新管理行1093均能正常长按；此前失败被开发服务状态混杂，未证明实际Native事件序列。PR161保留为未整合源码候选，撤回手机缺陷/已修因果。高速ADB搜索/长名称输入有缺字现场，逐字对照完整70字符；没有确定Android包装层缺陷，不修改iOS或宣称真实IME已验。原历史样本未改。
+  - 独立录屏审查完成045–049的147张contact/1749编码帧；047包含Preview/Close/Remove，048后续审片见Start反馈，Root当时未亲见ACK的992/993纠正仍保留。VFR间隔和233.741秒容器时长不证明连续绘制或180秒场景覆盖；044旧部分失败留存，050–054及056传输/视觉范围继续分开记录。全面验收未完成，未绕braces审计/合并/发布。
+
+- 2026-10-05 Codex 9959 历史闲置、后台返回与较早正文检查；原空白仍未定因。
+  - 新15648的QA历史正文在143.626秒闲置检查及小幅滚动后可见；一次实际70.235秒后台后，同PID前台正文也可见，初帧短暂“正在重连”不冒称持续断线。后续较早正文24与25/26有序出现，小幅滚动前后未见大空白；该次加载的请求数/精准像素锚点未测，不以turn号代替SDK分页阈值。
+  - 一次新Start点击后未亲见started Toast；原992误标ack已用993独立纠正，不重写原件。当前完整生产encoder合法cache216,762B/SHA549b5643…、256样本、raw/SDK差>1px为0；文件capturing及最后旧raw事件不证明绘制或当下采样活性。048–050录屏完整字节/SHA与前后stat转存，尚不代替全编码帧视觉验收。
+  - 59ad仅新增QA文档，手机JS仍9959。exact CI37226059643的类型、功能/static、Mobile三片、v1、secrets、macOS/Windows通过；已读失败job，唯一实质阻挡仍两锁braces GHSA-vfj7-8cjw-p6xm。上游当前无已发布修复，未应用未批准例外或绕过门禁；PR141仍未合并/发布，独立全面手机测试继续。
+
 - 2026-10-05 Codex 相机权限/取消与实际拍照真机检查；保留中断现场，全面验收继续。
   - 拒绝权限及临时授权后Cancel保留exact草稿/0附件。临时权限回合等待期间10636退出，Android reason8 permission_change/后台importance400；959只有shutter、0确认，不能记为accepted image丢失或Native crash。系统重建14313遇QA开发script加载失败，两USB reverse实际丢失；仅恢复QA开发连接及一次QA保数据重启，新15648，Native Desktop/商店/Production不动。原时间解析/时区误差保留并另记纠正；device实际+0800。
   - 15648前后完整cache size/SHA与早先9959全传输相同（22,536,264B/8c7c206e…），不是第二次完整传输。应用时权限下one shutter/Okay、1附件中心预览、Close保1、明确Remove0与原草稿通过，0Send。当前Mobile没有Expo pending-result消费者；未确认回合不冒称成功结果丢失，真实confirmed-result重建与原会话恢复仍待。
