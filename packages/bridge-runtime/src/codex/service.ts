@@ -16,7 +16,7 @@ import { nativeSettings, matchesNativeSettings, permissionMode, permissionSelect
 import { fastServiceTier, isFastServiceTier, hasServiceTier } from './speed.js';
 import { CodexProfile } from './profile.js';
 import { CodexRpc } from './rpc.js';
-import { codexMessages, codexGeneratedImage, codexTool, codexTurnFailure } from './history.js';
+import { codexMessages, codexGeneratedImage, codexTool, codexTurnFailure, codexItemTimestamp } from './history.js';
 import { loadDesktopHistory } from './desktop-history.js';
 import { nativeResumeSpeed } from './resume-settings.js';
 import { desktopTurns, desktopState } from './desktop-state.js';
@@ -1112,8 +1112,13 @@ export class CodexService extends EventEmitter {
       const grouped = new Map<string, any>();
       for (const row of [...result.data].reverse()) {
         if (typeof row.turnId !== 'string' || !row.item || typeof row.item.id !== 'string') throw new Error('Invalid native history item');
-        if (!grouped.has(row.turnId)) grouped.set(row.turnId, { ...(metadataByTurn.get(row.turnId) as object ?? {}), id: row.turnId, items: [] });
-        grouped.get(row.turnId).items.push(row.item);
+        if (!grouped.has(row.turnId)) grouped.set(row.turnId, { ...(metadataByTurn.get(row.turnId) as object ?? {}), id: row.turnId, items: [], itemTimestamps: new Map() });
+        const turn = grouped.get(row.turnId);
+        turn.items.push(row.item);
+        if (row.item.type === 'userMessage') {
+          const timestamp = codexItemTimestamp(row.startedAtMs, row.completedAtMs);
+          if (timestamp !== undefined) turn.itemTimestamps.set(row.item.id, timestamp);
+        }
       }
       turns = [...grouped.values()];
     }

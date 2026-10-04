@@ -367,6 +367,44 @@ describe('Codex owned sessions', () => {
     await expect(request('chat.send', { sessionKey: '../foreign', text: 'x' })).rejects.toThrow('read-only');
     await expect(request('thread/start', { cwd: '/' })).rejects.toThrow('Unsupported');
   });
+  it('projects two native same-turn guides with their own item clocks through history', async () => {
+    await start();
+    const original = mock.request.getMockImplementation()!;
+    const user = (id: string, clientId?: string) => ({ id, type: 'userMessage', content: [{ type: 'text', text: 'Keep waiting' }], ...(clientId ? { clientId } : {}) });
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/items/list') return Promise.resolve({ data: [
+        { turnId: 'turn-1', startedAtMs: 220100, completedAtMs: 220100, item: user('guide-2') },
+        { turnId: 'turn-1', startedAtMs: 160100, completedAtMs: 160100, item: user('guide-1') },
+        { turnId: 'turn-1', startedAtMs: 100100, completedAtMs: 100100, item: user('main', 'send-1') },
+      ] });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: [{ id: 'turn-1', startedAt: 100, status: 'inProgress' }] });
+      return original(method, params);
+    });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.messages.map((message: any) => [message.id, message.timestampMs])).toEqual([
+      ['main', 100100], ['guide-1', 160100], ['guide-2', 220100],
+    ]);
+    expect(history.messages[0].idempotencyKey).toBe('send-1');
+    expect(history.messages[1].idempotencyKey).toBeUndefined();
+    expect(history.messages[2].idempotencyKey).toBeUndefined();
+  });
+
+  it.each([
+    [160100, 160200, 160100], [undefined, 160200, 160200], [160100, undefined, 160100],
+    [160100, 160099, 100000], ['160100', 160200, 100000], [160100, NaN, 100000],
+    [0, 160200, 100000], [8.64e15 + 1, undefined, 100000], [undefined, undefined, 100000],
+  ])('validates native user item timing pairs before history projection: %s / %s', async (startedAtMs, completedAtMs, expected) => {
+    await start();
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/items/list') return Promise.resolve({ data: [{ turnId: 'turn-1', startedAtMs, completedAtMs,
+        item: { id: 'guide', type: 'userMessage', content: [{ type: 'text', text: 'Keep waiting' }] } }] });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: [{ id: 'turn-1', startedAt: 100 }] });
+      return original(method, params);
+    });
+    expect((await request('chat.history', { sessionKey: key })).messages[0].timestampMs).toBe(expected);
+  });
+
   it('preserves older item-page timestamps using bounded metadata-only pages', async () => {
     await start(); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     const original = mock.request.getMockImplementation()!;
