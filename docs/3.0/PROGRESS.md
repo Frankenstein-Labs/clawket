@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 共享 Thread 空白现场的最小开发诊断（Codex 安卓 QA 范围，默认关闭）。
+  - `__DEV__` Inspector 内存入口 `__CLAWKET_CHAT_GEOMETRY_QA__` 支持 start/read/stop；不依赖 logcat，不增 UI、不触发 React render、滚动或布局。对照既有 raw native 事件与 FlashList 公共坐标/可见范围，最多读取四个 layout。
+  - 1 Hz、256 条、20 分钟、一个在途查询；会话/连接/焦点/list/native binding/后台退役及迟到回调栅栏。仅有限数字、布尔和固定类别，不输出正文、ID、key、路径或凭据。
+  - 公共 SDK 无 engaged/paint ACK；诊断和注入 SDK 时序的回归不能作为 586 闲置空白的根因证据。真机采集仍由负责人在明确加载候选后执行；未操作设备/Native/QA 服务、未发布。
+  - 独立依赖、heavy 串行验证：collector 11、observer hook 8、UI follow 13、原 Thread 166（共 198）通过；Mobile typecheck、docs 7 对/5 用例、UI 248 文件通过。Release 模块不装 Inspector 入口，默认关闭和损坏/越界字段、迟到/重复采样及退役都有回归；CI 及真实设备采集另行验证。
+
 - 2026-10-04 Codex 组合 527e 实际加载与首轮配置请求失败现场；全面验收继续。
   - Root 串行组合 CodexService 297、ThreadView 201、history anchor 20、真实 installed FlashList contract 2 全绿；Mobile/Runtime/CLI 类型、docs 9 指令对/5 用例与本地开发 CLI 通过。实际旧 C/E 认证 idle（C 17/E 1057，全部 0 active）、同代检查后各只一次 parent SIGTERM，旧 parent/精确 Native child/端口消失；新 CLI 2712826b… 与手机完整缓存 512bc17b…（22,503,924 字节）校验。Development reverse 丢失导致停在启动页；恢复同两开发端口后加载新缓存。仅 QA 冷启且保留数据，Production/Native Desktop/商店包未更改。
   - fresh A4L 新建 empty 会话，GPT6.1Sol/Low/Standard 正常；首次 Read-only 626 仍拒绝。真实 metadata diagnostic 是 request_failed，所有 response/thread 字段 absent，未进入解析；固定创建窗唯一 record 为 0 receipts/permissionsUnconfirmed，固定 first/cwd Native 只读查询 0 行。0 初始化/审批主输入、0决定/Retry/fixture read mode；关闭现场不重放，Readonly execution/Allow Once 尚未验收。

@@ -66,6 +66,32 @@ Generated `ios/` and `android/` projects are local build products in this reposi
 
 `npm run check:docs` verifies the agent-document topology and key current references. It must fail when a symlink drifts into a copied file or an obsolete path returns.
 
+## Opt-in chat geometry QA
+
+Development bundles expose `globalThis.__CLAWKET_CHAT_GEOMETRY_QA__` for an already attached React Native Inspector. It is absent in production bundles and capture is off by default. While the QA Thread is focused and its connection is active, evaluate these expressions in that app's Inspector JavaScript context:
+
+```js
+globalThis.__CLAWKET_CHAT_GEOMETRY_QA__.start()
+JSON.stringify(globalThis.__CLAWKET_CHAT_GEOMETRY_QA__.read())
+globalThis.__CLAWKET_CHAT_GEOMETRY_QA__.stop()
+```
+
+`start()` returns `started`, `already_active` or `unavailable`; it does not change page state. `read()` returns a copied, bounded memory ring, including after `stop()`. No UI button, console/logcat delivery, disk write, network request or analytics is involved. Save extracted metadata with the private screenshot/recording evidence; do not extract a different app or thread context. An Inspector expression is an extraction route, not proof that the actual QA device has that Inspector attached.
+
+The observer samples at most once per second, waiting one second after each UI response, with one outstanding query across scope retirement and Fast Refresh. It retains the latest 256 samples and counts overwritten samples. A capture expires after 20 minutes, even if its UI query never returns. Navigation, focus loss, connection/session scope change, list/native binding replacement, background and unmount stop capture and fence late responses; foreground never restarts it. A pending old query prevents a new capture until it returns.
+
+Each record contains only fixed enums, booleans and bounded numeric geometry/counters. Invalid or unavailable numbers are `null`; absent raw events are reported separately from raw registration availability. Raw sequence and data revision are capture-local counters, not stable identities. The data revision counts sampled array changes, not React commits.
+
+The UI raw snapshot and the later JS/public-SDK read are not an atomic measurement. Raw event age is calculated on the UI thread; it does not include a delayed delivery back to JS. Record Inspector extraction times and compare successive records rather than claiming both layers were observed on one frame.
+
+| Layer | Evidence | Limit |
+|---|---|---|
+| Existing raw Reanimated `useEvent` registration | Last native scroll event offset, content/viewport heights, event kind, sequence and age | Available only when the existing native tag registration succeeds (currently Android follow binding). No event does not prove no native scroll. |
+| FlashList public ref | SDK offset, first-item offset, content/viewport heights, visible start/end and at most four nearby layouts | `computeVisibleIndices()` describes SDK coordinates. There is no public engaged-window or paint acknowledgement. |
+| Existing Thread refs | Last JS offset/content/viewport, reading/follow/paging flags and row count | SDK-ignored native events may never reach the JS scroll callback. |
+
+The observer does not call scroll, measure, interaction/viewability reset, projection or private manager APIs, add a native event registration, or set React state. It cannot fix or reveal a blank page by itself. Compare a captured blank screenshot with the next single user scroll and the associated raw/SDK coordinates. Matching coordinates do not rule out clipping, opacity or native text rendering; divergent coordinates do not prove the cause of a specific earlier incident. Keep screenshot/video observations distinct from injected SDK test timing.
+
 ## iOS deployment targets
 
 The current app minimum is iOS 16.4, matching the SDK 57 support floor. Local module podspecs use the same minimum. Xcode 27 rejects targets below iOS 15, including resource bundles inherited from older podspecs. `plugins/with-ios-pod-deployment-target.js` inserts an idempotent Podfile post-install block after React Native processing. Every explicit Pod target minimum below the greater of the React Native minimum and `ios.deploymentTarget` is raised to that floor; higher minima and inherited settings are preserved. Do not fix generated Pods in Xcode manually: Expo prebuild and every subsequent `pod install` must reproduce the correction. Plugin template drift fails with an actionable error. Future toolchains that require a higher app minimum need an explicit compatibility review.

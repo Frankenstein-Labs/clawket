@@ -229,6 +229,8 @@ Current-task guidance stays serial while its acknowledgement is pending. Keep th
 
 ## Analytics, privacy, and subscriptions
 
+- Chat geometry QA is opt-in and `__DEV__` only, through the Inspector's `__CLAWKET_CHAT_GEOMETRY_QA__` memory API; see `docs/engineering-baseline.md`. Preserve its one-query, 1 Hz, 256-record and 20-minute bounds and focus/scope/list/background retirement. It reads the existing raw event observer and public FlashList getters only: no private SDK access, layout/scroll commands, React state, analytics, payloads, IDs, keys or paths. Native events and SDK geometry are not paint or engaged-window evidence.
+
 - Add semantic analytics helpers in `src/services/analytics/events.ts`; never scatter raw `posthog.capture` calls.
 - Events use small enums, booleans, counts, and normalized error codes. Never include message text, prompts, raw IDs, credentials, invitation material, or secret-bearing URLs.
 - Navigation exposure is centralized in `src/utils/posthog-navigation.ts`.
