@@ -12,7 +12,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync, lstatSync, realpath
 import { join, basename } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import type { SessionDescriptor, SessionUpdate, SessionHistory, PromptInput, AgentQuestion, ApprovalRequest } from '@clawket/agent-protocol';
-import { nativeSettings, matchesNativeSettings, permissionMode, permissionSelectionPatch, type NativeSettings } from './settings.js';
+import { nativeSettings, nativePermissionSettings, matchesNativeSettings, permissionMode, permissionSelectionPatch, type NativeSettings } from './settings.js';
 import { fastServiceTier, isFastServiceTier, hasServiceTier } from './speed.js';
 import { CodexProfile } from './profile.js';
 import { CodexRpc } from './rpc.js';
@@ -43,6 +43,8 @@ const requestedPermissionSettings = (previous: NativeSettings | undefined, patch
 };
 // Native catalog/index metadata may lack a model; the wire field is optional string.
 const modelName = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
+const reportedType = (value: any, field: string) => !value || !Object.hasOwn(value, field) ? 'absent'
+  : value[field] === null ? 'null' : Array.isArray(value[field]) ? 'array' : typeof value[field];
 
 /** Device pairing discovers local projects; native writes retain the authoritative owner. */
 export class CodexService extends EventEmitter {
@@ -243,18 +245,42 @@ export class CodexService extends EventEmitter {
     const current = () => this.rpc === rpc && !this.stopped && !this.disconnected && this.loaded.has(r.id)
       && this.records.includes(r) && !r.native && r.threadId === threadId && !this.runs.has(r.id)
       && this.effectiveSettings.get(r.id) === expected;
+    let response: any;
+    let failureCategory = 'context_unavailable';
     try {
       if (!threadId || !expected || !current()) throw new Error(UNCONFIRMED_PERMISSIONS);
       // No overrides: this uses the already-owned thread, retains its listener and acquires no new writer.
-      const response = await rpc.request('thread/resume', { threadId, excludeTurns: true });
+      failureCategory = 'request_failed';
+      response = await rpc.request('thread/resume', { threadId, excludeTurns: true });
+      failureCategory = 'context_changed';
       if (!current()) throw new Error(UNCONFIRMED_PERMISSIONS);
-      const configured = nativeSettings(response, true);
+      failureCategory = 'response_invalid';
+      const configured = nativePermissionSettings(response);
       const valid = response?.thread?.id === threadId && response.thread.cwd === cwd
         && response.thread.status?.type === 'idle' && configured?.cwd === cwd;
       // A resume snapshot must not overwrite newer settings or fields it omits.
-      if (!valid || !matchesNativeSettings(configured!, permissionSettings(expected))
-        || (requested && !matchesNativeSettings(configured!, requested))) throw new Error(UNCONFIRMED_PERMISSIONS);
+      if (!valid) throw new Error(UNCONFIRMED_PERMISSIONS);
+      failureCategory = 'permission_mismatch';
+      if (!matchesNativeSettings(configured!, permissionSettings(expected))) throw new Error(UNCONFIRMED_PERMISSIONS);
+      failureCategory = 'requested_permission_mismatch';
+      // Full settings ACK confirmation already covers mixed model/mode writes.
+      // This independent view confirms only permissions, without filling omitted fields from the cache.
+      const requestedPermissions = requested && Object.fromEntries(Object.entries(requested)
+        .filter(([key]) => ['permissions', 'sandboxPolicy', 'approvalPolicy', 'approvalsReviewer', 'activePermissionProfile'].includes(key)));
+      if (requestedPermissions && !matchesNativeSettings(configured!, requestedPermissions)) throw new Error(UNCONFIRMED_PERMISSIONS);
     } catch {
+      const mode = (value: ReturnType<typeof nativePermissionSettings>) => {
+        const mode = permissionMode(value); return mode === 'custom' || mode === null ? 'unknown' : mode;
+      };
+      try { this.emit('permissionDiagnostic', { failureCategory,
+        expectedPermissionMode: mode(expected), observedPermissionMode: mode(nativePermissionSettings(response)),
+        sameThreadId: !!threadId && response?.thread?.id === threadId,
+        sameProjectCwd: response?.cwd === cwd && response?.thread?.cwd === cwd,
+        idleThreadReported: response?.thread?.status?.type === 'idle',
+        responseFieldTypes: Object.fromEntries(['cwd', 'approvalPolicy', 'approvalsReviewer', 'sandbox', 'activePermissionProfile',
+          'model', 'modelProvider', 'reasoningEffort', 'serviceTier', 'collaborationMode', 'thread'].map(field => [field, reportedType(response, field)])),
+        threadFieldTypes: Object.fromEntries(['id', 'cwd', 'status'].map(field => [field, reportedType(response?.thread, field)])),
+      }); } catch { /* Metadata logging cannot change rejection or native ownership. */ }
       if (this.rpc === rpc && this.records.includes(r) && r.threadId === threadId) { r.permissionsUnconfirmed = true; this.save(); }
       // This failed before input receipt/dispatch, including a timed-out metadata probe.
       throw new Error(UNCONFIRMED_PERMISSIONS);

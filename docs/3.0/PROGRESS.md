@@ -18,6 +18,8 @@
   - exact PR141 / 1c02 CI 37173096138 的 Mobile 三分片、types、tests/static、v1、secret scan、macOS/Windows Bridge 全绿；已读取失败 job，唯一 blocker 仍两 lockfile 的未批准 braces GHSA-vfj7-8cjw-p6xm。当前组合未合并、未发布；负责人审计决策和 Desktop GUI 验收仍保留 HUMAN TODO。
 
 - 2026-10-04 Codex 0.160 已确认权限与配置读回漂移围栏（本轮安卓真机发现，独立任务）。
+  - 后续 A4K 首次权限选择和 R4M 首次发送均被配置围栏拒绝；原现场关闭且未重试。源码确证完整 settings parser 错将 schema 可省略的 effort/tier/collaboration 字段用于权限核验，新增 4 条合法省略回归基线全红。权限独立投影保留 cwd/policy/reviewer/sandbox/profile、代际/idle/cache/receipt 围栏和混合写完整 ACK，并增加 metadata-only 固定失败类别/字段类型诊断；现场具体返回尚未捕获，不能认定 606/614 由这些省略字段导致，实际 Read-only 验收仍待新 QA。
+  - 独立 service 单文件 193 项、Runtime/CLI 类型（自身依赖声明构建）与 docs 7 对/5 项通过；新增 16 项包含可选字段、混合写、损坏权限字段和逐字段日志隐私。源码 peer 通过；仅发布代码 PR，未重启现场或更改 Native/global/Production。
   - A4H 发送前手机 Read-only 已确认，但唯一初始化 Native turn context 与发送后设置均为 Workspace；模型/推理、唯一输入/receipt、终态、usage 和零工具均成立，不能归因于证据助手或 UI 乐观更新。原现场与 baseline 冻结。
   - 已 loaded 的 Bridge-created 0.160 会话在权限 ACK 后及 receipt 前，通过同一 owned writer、无 override 的 warm resume 独立核验保存的未来配置权限；严格同 RPC/thread/cwd/idle/settings generation。漂移、缺字段/失败确认要求重新确认，0 receipt/0 input dispatch；被动权限通知不得静默扩大下一次发送。Legacy/imported/Desktop owner 路径保留，不创建第二 writer 或自动重发。
   - 隔离空 HOME/CODEX_HOME 离线生成 installed 0.160 experimental schema，确证受支持权限字段；未启动 AppServer/RPC/inference 或改 Native/global/Production。reference 完整 caller 链确认 warm response 是 future configuration；Thread-origin 正常切权应可用，Owner-configured 环境另保原profile。撤回基于旧 active snapshot 推断会必拒下一 turn 的局部结论。参数支持不等于实际执行已恢复，本修复是配置读回安全围栏；新的 Read-only 真机执行验收仍待负责人 A4K 场景。新增 19 项定向回归在旧实现 18 红；术语修订后重验 service 单文件 177 项、Bridge-runtime 类型与 docs 7 对/5 项通过，涵盖 ACK/首发漂移、部分权限写、保留设置缓存的配置确认、迟到旧代与 legacy/imported 兼容。

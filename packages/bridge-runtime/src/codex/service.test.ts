@@ -185,6 +185,80 @@ describe('Codex owned sessions', () => {
       expect((service as any).effectiveSettings.get(key)).toBe(saved);
       expect(saved).toMatchObject({ summary: 'concise', personality: 'pragmatic' });
     });
+    it.each(['serviceTier', 'reasoningEffort', 'collaborationMode', 'all-optional'])('confirms permissions independently of omitted non-permission resume metadata: %s', async field => {
+      await prepare();
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('read-only'));
+        for (const name of field === 'all-optional' ? ['serviceTier', 'reasoningEffort', 'collaborationMode'] : [field]) delete configured[name];
+        return configured;
+      });
+      await expect(request('models.permissions', { sessionKey: key, mode: 'read-only' })).resolves.toMatchObject({
+        permissions: { mode: 'read-only', requiresConfirmation: false },
+      });
+      const saved = (service as any).effectiveSettings.get(key);
+      await request('chat.send', { sessionKey: key, text: 'explicit readonly input', idempotencyKey: 'optional-metadata' });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect((service as any).effectiveSettings.get(key)).toBe(saved);
+      expect(saved).toMatchObject({ model: 'native-model', serviceTier: null, effort: null, collaborationMode: { mode: 'default' } });
+    });
+    it('keeps full native ACK confirmation for mixed Desktop permission and model writes', async () => {
+      await prepare();
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('read-only'));
+        for (const field of ['model', 'modelProvider', 'reasoningEffort', 'serviceTier', 'collaborationMode']) delete configured[field];
+        return configured;
+      });
+      await expect((service as any).desktopRequest('thread-follower-update-thread-settings', { conversationId: threadId,
+        threadSettings: { permissions: ':read-only', model: 'new-native-model', effort: 'high' } })).resolves.toMatchObject({ applied: true });
+      expect((service as any).effectiveSettings.get(key)).toMatchObject({ model: 'new-native-model', effort: 'high', activePermissionProfile: { id: ':read-only' } });
+      expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it.each(['missing-policy', 'empty-policy', 'array-policy', 'null-reviewer', 'array-reviewer', 'null-sandbox',
+      'array-sandbox', 'empty-sandbox-type', 'invalid-roots', 'array-profile'])('rejects invalid permission evidence before receipt and reports only its shape: %s', async field => {
+      await prepare();
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('workspace'));
+        if (field === 'missing-policy') delete configured.approvalPolicy;
+        if (field === 'empty-policy') configured.approvalPolicy = '';
+        if (field === 'array-policy') configured.approvalPolicy = [];
+        if (field === 'null-reviewer') configured.approvalsReviewer = null;
+        if (field === 'array-reviewer') configured.approvalsReviewer = [];
+        if (field === 'null-sandbox') configured.sandbox = null;
+        if (field === 'array-sandbox') configured.sandbox = [];
+        if (field === 'empty-sandbox-type') configured.sandbox = { type: '' };
+        if (field === 'invalid-roots') configured.sandbox = { ...configured.sandbox, writableRoots: [123] };
+        if (field === 'array-profile') configured.activePermissionProfile = [];
+        return configured;
+      });
+      const diagnostics: any[] = []; service.on('permissionDiagnostic', value => diagnostics.push(value));
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: field })).rejects.toThrow(restored);
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]).toMatchObject({ failureCategory: 'response_invalid', observedPermissionMode: 'unknown',
+        sameThreadId: true, sameProjectCwd: true, idleThreadReported: true });
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect((service as any).runs.size).toBe(0);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('keeps native identifiers, paths, profiles, model values and errors out of permission diagnostics', async () => {
+      await prepare();
+      const privateThreadId = randomUUID(), privateProfile = 'private-profile-name', privateModel = 'private-model-name';
+      const privateCwd = join(root, 'private-path'), privateError = 'private-native-error';
+      overrideConfigured(() => ({ ...configuredView(permissionState('workspace')), cwd: privateCwd, model: privateModel,
+        error: privateError, activePermissionProfile: { id: privateProfile, extends: 'private-parent-profile' },
+        thread: { id: privateThreadId, cwd: privateCwd, status: { type: 'idle' } } }));
+      const diagnostics: any[] = []; service.on('permissionDiagnostic', value => diagnostics.push(value));
+      await expect(request('chat.send', { sessionKey: key, text: 'private-user-input', idempotencyKey: 'private-client-key' })).rejects.toThrow(restored);
+      expect(diagnostics).toEqual([{ failureCategory: 'response_invalid', expectedPermissionMode: 'workspace', observedPermissionMode: 'unknown',
+        sameThreadId: false, sameProjectCwd: false, idleThreadReported: true,
+        responseFieldTypes: { cwd: 'string', approvalPolicy: 'string', approvalsReviewer: 'string', sandbox: 'object', activePermissionProfile: 'object',
+          model: 'string', modelProvider: 'string', reasoningEffort: 'null', serviceTier: 'null', collaborationMode: 'object', thread: 'object' },
+        threadFieldTypes: { id: 'string', cwd: 'string', status: 'object' } }]);
+      const serialized = JSON.stringify(diagnostics);
+      for (const secret of [threadId, key, project, privateThreadId, privateProfile, privateModel, privateCwd, privateError,
+        'private-parent-profile', 'private-user-input', 'private-client-key']) expect(serialized).not.toContain(secret);
+      expect((service as any).records[0].keys).toEqual({});
+    });
     it('requires confirmation after a passive native permission change instead of silently widening a send', async () => {
       await prepare();
       await request('models.permissions', { sessionKey: key, mode: 'read-only' });
