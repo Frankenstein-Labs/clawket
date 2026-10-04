@@ -1,5 +1,7 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 同原生回合引导的工作胶囊计时与步骤边界：在 fresh main 独立树明确依赖 f722 + 7d，以实际 Thread 只插入引导和未加载原始输入的分页窗口先复现 2 项失败。消费者复用 turnIdentity 和当前控制器拥有的会话/执行/原始输入证据，保持总计时、步骤编号及已完成的首步等待；不同执行/发送 key、未知旧后端和 partial/scope/terminal 保留边界。工具自身计时不在本修复范围。本机串行逐文件：ThreadView 169、turn-work 19、work-dock-model 7、controller contract 62，共 257 项通过；Mobile 类型、UI/设计系统、check:docs 7 指令对/5 用例通过。真机仍由主任务验收；没有操作 Native、设备、QA RPC 或 Production，未发布/部署。
+
 - 2026-10-04 Codex 017 全帧现场复核与旧版本历史对照；真机全面验收继续。
   - 017完整传输462,908,981字节/SHA2aaad119d9dda26556420b5c231ab6d680e8d276e613264f929b1ed99119f354；独立复核PTS838–918的全部6,296编码帧及17张全分辨率关键帧。正文全白状态由851.389733持续到首恢复851.812867，约0.423秒，不把截图间隔说成持续一分钟或精确render latency。恢复含空助手气泡、阅读位置变化及同第二步工作栏1:36→0:01；这些现象分开记录，不能据源码直接断定空白根因。
   - 在实际旧QA CLI09bd/精确owner代次下仅一次authenticated controlOnly+chat.history：完整25消息/7canonical user，无游标，两guide各精确Native ID/正文一次且原序，missing/duplicate/unexpected皆0；Native及索引前后字节不变。固定2033 Git对象及原dist重建的14-source review严格等原baseline，新的Mobile源码不冒称旧运行版本。完成后的历史未丢guide，不证明当时live/UI正确；原5completed/5receipt、未验Stop/edit/remove/promotion的分类保持，不重放。

@@ -190,3 +190,53 @@ describe('formatTurnReceipt', () => {
     expect(formatTurnReceipt([call('exec'), call('exec'), call('read', { path: 'b.ts' })], t)).toBe('Ran 2 commands · 3 steps');
   });
 });
+
+
+describe('native work turn identity', () => {
+  it('keeps two exact same-turn guides inside the live work and one final receipt', () => {
+    const main = prompt('main', { turnId: 'turn', idempotencyKey: 'main-key' });
+    const first = call('exec', {}, { turnId: 'turn' });
+    const second = call('exec', {}, { turnId: 'turn', toolStatus: 'running' });
+    const guide1 = prompt('same', { turnId: 'turn' });
+    const guide2 = prompt('same', { turnId: 'turn' });
+    const answer = reply('done', { turnId: 'turn' });
+    const messages = newestFirst(main, first, guide1, second, guide2, answer);
+    expect(collectLiveTurnWork(messages).steps).toEqual([first, second]);
+    expect(collectTurnWorkAround(messages, first.id).steps).toEqual([first, second]);
+    expect(foldTurnSteps(messages, true).receipts.size).toBe(0);
+    expect(foldTurnSteps(messages, true).pills.size).toBe(0);
+    expect(foldTurnSteps(messages, false).receipts.get(answer.id)?.steps).toEqual([first, second]);
+  });
+
+  it.each([{ turnId: 'other-turn' }, { turnId: 'turn', idempotencyKey: 'new-send' }, {}])('keeps a genuine or unreported next input separate: %j', patch => {
+    const main = prompt('main', { turnId: 'turn', idempotencyKey: 'main-key' });
+    const first = call('exec', {}, { turnId: 'turn' });
+    const next = prompt('same', patch);
+    const second = call('exec', {}, { toolStatus: 'running' });
+    expect(collectLiveTurnWork(newestFirst(main, first, next, second)).steps).toEqual([second]);
+    expect(foldTurnSteps(newestFirst(main, first, next, second), true).pills.get(first.id)?.steps).toEqual([first]);
+  });
+
+  it('does not hide or attach older unreported work to a partial active run', () => {
+    const oldUser = prompt('old');
+    const unreported = call('exec', {}, { toolStatus: 'unknown' });
+    const current = call('exec', {}, { turnId: 'turn', toolStatus: 'running' });
+    const guide = prompt('guide', { turnId: 'turn' });
+    const identity = { scope: {}, sessionKey: 'session', runId: 'run', turnId: 'turn', inputMessageId: 'unloaded-main', startedAt: 1000 };
+    const folded = foldTurnSteps(newestFirst(oldUser, unreported, current, guide), true, identity);
+    expect(folded.messages).toEqual([guide, unreported, oldUser]);
+    expect(folded.pills.get(unreported.id)?.steps).toEqual([unreported]);
+    expect(folded.receipts.size).toBe(0);
+    expect(foldTurnSteps(newestFirst(oldUser, unreported, current), true, identity).messages).toEqual([unreported, oldUser]);
+  });
+
+  it('accepts only positively matching work on a partial active page and stops at an unproven user', () => {
+    const current = call('exec', {}, { turnId: 'turn', toolStatus: 'running' });
+    const guide = prompt('guide', { turnId: 'turn' });
+    const old = call('exec', {}, { turnId: 'older-turn' });
+    const identity = { scope: {}, sessionKey: 'session', runId: 'run', turnId: 'turn', inputMessageId: 'unloaded-main', startedAt: 1000 };
+    expect(collectLiveTurnWork(newestFirst(old, prompt('unknown'), current, guide), identity).steps).toEqual([current]);
+    expect(collectLiveTurnWork(newestFirst(old, current, guide), identity).steps).toEqual([current]);
+    expect(collectLiveTurnWork(newestFirst(old, current, guide)).steps).toEqual([]);
+  });
+});

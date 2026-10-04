@@ -2872,6 +2872,10 @@ it('does not restore an old history snapshot after a live terminal event', async
     expect(rows.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['toolcall_1', 'toolcall_2']);
     expect(rows.filter(row => row.role === 'assistant').map(row => row.text)).toEqual(['First paragraph.', 'Second paragraph.', 'Live tail.']);
     expect(new Set(rows.map(row => row.renderKey ?? row.id)).size).toBe(rows.length);
+    expect(result.current.runWorkIdentity).toMatchObject({ sessionKey: 'agent:main:main', runId: 'run', turnId: 'native-turn', inputMessageId: 'main', startedAt: 1000 });
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events.onUpdate?.({ type: 'run_finished', sessionKey: 'agent:main:main', runId: 'run', activeRunId: null, isSending: false, stopReason: 'end_turn', finalMessage: { id: 'final', role: 'assistant', text: 'Live tail.' } }); });
+    expect(result.current.runWorkIdentity).toBeUndefined();
     expect(adapter.prompt).not.toHaveBeenCalled();
   });
 

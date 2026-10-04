@@ -979,6 +979,7 @@ function ThreadScreenContent({
         model={controller.currentModelHeaderLabel}
         modelDisplayName={controller.currentModelDisplayName}
         activityLabel={controller.activityLabel}
+        runWorkIdentity={controller.runWorkIdentity}
         interactionAttention={rosterSession ? rosterSession.attention : currentSession?.attention}
         capabilities={timelineCapabilities}
         readOnlyFooter={nativeReadOnly && !sessionPreview ? <View style={{ padding: Space.lg, paddingBottom: Math.max(insets.bottom, Space.lg), gap: Space.md }}>

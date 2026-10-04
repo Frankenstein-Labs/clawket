@@ -1,5 +1,16 @@
 import type { UiMessage } from '../types/chat';
 
+/** Current controller-owned execution evidence, never a transcript or wire identity. */
+export type RunWorkIdentity = Readonly<{
+  scope: object;
+  sessionKey: string;
+  runId: string;
+  turnId: string;
+  inputMessageId: string;
+  inputMessageKey?: string;
+  startedAt: number;
+}>;
+
 /** Optional execution identity is evidence only when bounded and nonempty. */
 export function validTurnIdentity(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value
