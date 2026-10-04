@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 0.160 已确认权限与执行环境漂移围栏（本轮安卓真机发现，独立任务）。
+  - A4H 发送前手机 Read-only 已确认，但唯一初始化 Native turn context 与发送后设置均为 Workspace；模型/推理、唯一输入/receipt、终态、usage 和零工具均成立，不能归因于证据助手或 UI 乐观更新。原现场与 baseline 冻结。
+  - 已 loaded 的 Bridge-created 0.160 会话在权限 ACK 后及 receipt 前，通过同一 owned writer、无 override 的 metadata resume 核验实际环境权限；严格同 RPC/thread/cwd/idle/settings generation。漂移、缺字段/失败确认要求重新确认，0 receipt/0 input dispatch；被动权限通知不得静默扩大下一次发送。Legacy/imported/Desktop owner 路径保留，不创建第二 writer 或自动重发。
+  - 隔离空 HOME/CODEX_HOME 离线生成 installed 0.160 experimental schema，确证受支持权限字段；未启动 AppServer/RPC/inference 或改 Native/global/Production。参数支持不等于 ready environment 同步，本修复是发送安全围栏；新的 Read-only 真机执行验收仍待负责人 A4K 场景。新增 19 项定向回归在旧实现 18 红，修复后 service 单文件 177 项、Bridge 类型与 docs 7 对/5 项通过，涵盖 ACK/首发漂移、部分权限写、保留设置缓存的执行确认、迟到旧代与 legacy/imported 兼容。
+
 - 2026-10-04 Codex Desktop 逐客户端跟随退役（负责人授权全面 Codex QA 修复，并补充远程续聊后 Desktop 重开报错）。
   - 只读实际安装包核对：本地 IPC 跟随有 source client，生命周期广播 version 0；此前 Bridge 只按 thread 保存一个 boolean，两个客户端跟随后任一 unfollow 会停掉另一个客户端的后续状态广播。改为每 thread 最多 128 个独立客户端，精确退役；连接丢失、Native owner 退出及 thread archive/reset/delete 清旧订阅和调度。
   - 已有订阅对新客户端和 version-1 local following-status 请求定向续订；不加载完整历史、不调用 Native dispatch。实际 owner 断开只使其 snapshot stale，不生成 no-owner／终态或自动重发。显式完整历史请求保留 IPC-frame source，完整 settings/turn 状态契约和旧 socket 栅栏保持。
@@ -1566,6 +1571,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 | HT-TOOL-DOCK-1002 | 工具过程方案 C 真机验收（iOS 与负责人设备） | 在包含本轮代码的开发 App 或后续授权更新中，分别让 OpenClaw / Codex / Claude Code / Hermes / Pi 执行会调用工具的任务；各触发一次执行审批，并让 Claude Code 或 Codex 提问一次。 | 工具步骤不进对话；工具运行超过 1 秒停靠条升起，点开是工作面板；审批时停靠条变琥珀色，「查看」跳到卡片；提问时停靠条换成「回答」；结束后最后一条回复下有带时长的工作记录 chip，记录里有每一步、审批结果和问答。 | 安卓 QA 包已逐个后端实测（见 PROGRESS 2026-10-02 工具过程条目）；Claude Code 权限弹窗因本机 Claude 设置预先允许工具未能触发，由单元测试覆盖；iOS 未测。未升版本、未分发。 |
 | HT-HISTORY-PAGING-1002 | 聊天历史分页真机体验验收 | 在包含本轮代码的开发 App 或后续授权更新中，打开 Claude Code / Codex 的长历史，连续翻页；同时检查 OpenClaw / Hermes / Pi。 | 顶部请求即时转圈、慢读不需重复触发、旧消息插入保持阅读位置；失败可重试，短会话不被拉回底部；OpenClaw reset 与 Pro 预览保持原语义。 | 388 项定向自动化已通过；按现行工作流待负责人真机视觉 / 手感验收，本轮不发起打包或发布。 |
 | HT-CODEX-TITLE-1002 | Codex 标题盾牌删除 PR 的依赖门禁范围决定 | 独立 CI 修复已在 PR #107 合并；PR #103 更新至最新 main，使用批准的有期限审计规则。 | 当前提交通过完整 CI 后合并，不改依赖锁文件或另加例外。 | 范围决定已完成；负责人 2026-10-02 要求继续合并。213 项本地测试通过；更新至 #107 后的源代码提交 c8957bd2 已通过全部适用 CI。合并仍要求当前分支与 main 同步且门禁通过。 |
+| HT-CODEX-READONLY-1004 | Native 0.160 Read-only 实际执行与权限漂移验收 | 保留 A4H 原始 Workspace mismatch；负责人在已授权独立 QA 新会话 A4K 上选择 Read-only，再单次发送并核对原生实际 context/审批。 | 原生实际为 Read-only；若执行 readback 不一致，手机明确要求重新确认且没有新 receipt/turn/start。不得将永久拒绝 Read-only 当能力验收。 | 同 owned writer 的执行确认围栏与 177 项 service 回归/类型已通过；原生环境同步与真实 Read-only 场景待验，未发布、部署或更改 Production。 |
 | HT-CODEX-LATENCY-1002 | Codex 原手机连接耗时与慢提示验收 | 后续分别获授权交付兼容 App 与 Bridge 后，用原 Production/Preview 连接冷启、切换连接及打开会话面板；无需刷新配对。 | 分别记录握手和完整目录完成时间；正常四五秒等待不显示慢提示，真实阶段停滞 12 秒仍提供连接设置入口；旧 Bridge 与其他后端可用。 | 源码实现与本地受控验证完成；未发布、部署、重启已安装 Bridge 或操作原手机。实机提升待负责人验收。 |
 | HT-CODEX-PAIR-1002 | 本机 Codex 配对恢复后的手机验收 | 重跑 `npx @p697/clawket@latest pair choose` 并选择 Codex；已有手机连接可先直接重连。 | 配对命令正常显示结果，手机连接后可读取会话；新对话真实回复由负责人验收。 | 本机 public 3.1.9 已通过认证控制安全重启；配置逐字节保持，原生健康与 Desktop IPC 读回正常。手机/推理未验收；源码错误处理修复不包含于公开 3.1.9。 |
 | HT-PLAY-311-1002 | Google Play 3.1.1 送审决定 | 在快速检查完成后，由负责人决定是否点击「提交 58 项更改以供审核」；包含 3.1.1/30102 和已授权的 57 项截图。 | 确認检查结果与候选版本；点击后必须看到正在审核，审核通过后仍保留自管式发布。 | 待负责人授权下一步：本轮已打包、上传并保存，未提审、未公开上线。 |

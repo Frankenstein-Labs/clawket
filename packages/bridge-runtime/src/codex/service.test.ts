@@ -114,6 +114,196 @@ describe('Codex owned sessions', () => {
     expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
   });
 
+  describe('0.160 execution permissions', () => {
+    const restored = 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.';
+    const permissionState = (mode: 'workspace' | 'read-only' | 'full-access') => ({
+      ...permissionPatch(mode, project), activePermissionProfile: {
+        id: mode === 'full-access' ? ':danger-full-access' : mode === 'read-only' ? ':read-only' : ':workspace', extends: null,
+      },
+    });
+    const executionView = (state: object) => ({ ...response(project), ...state, thread: { id: threadId, cwd: project, status: { type: 'idle' } },
+      sandbox: (state as any).sandboxPolicy ?? settings.sandboxPolicy });
+    const overrideExecution = (read: () => any | Promise<any>) => {
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/resume' && params.excludeTurns === true && !params.cwd
+        ? read() : original(method, params));
+    };
+    const prepare = async () => {
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation(async (method, params) => {
+        const value = await original(method, params);
+        return method === 'thread/start' || method === 'thread/resume'
+          ? { ...value, thread: { ...value.thread, status: { type: 'idle' } } } : value;
+      });
+      await request('models.list', { sessionKey: key });
+    };
+    it('does not confirm a Read-only ACK while the owned execution environment remains Workspace', async () => {
+      await prepare();
+      overrideExecution(() => executionView(permissionState('workspace')));
+      await expect(request('models.permissions', { sessionKey: key, mode: 'read-only' })).rejects.toThrow(restored);
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect((await request('models.list', { sessionKey: key })).permissions).toMatchObject({ mode: 'read-only', requiresConfirmation: true });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('rejects first-send permission drift before allocating a receipt or dispatching input', async () => {
+      await prepare();
+      expect((await request('models.permissions', { sessionKey: key, mode: 'read-only' })).permissions)
+        .toMatchObject({ mode: 'read-only', requiresConfirmation: false });
+      overrideExecution(() => executionView(permissionState('workspace')));
+      await expect(request('chat.send', { sessionKey: key, text: 'first input', idempotencyKey: 'first-read-only' })).rejects.toThrow(restored);
+      expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'first-read-only' })).toEqual({ status: 'unknown' });
+      expect((service as any).records[0].keys).toEqual({});
+      expect((service as any).runs.size).toBe(0);
+      expect(updates.some(update => update.type === 'run_started')).toBe(false);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+      // Repair is explicit; the failed input is never automatically replayed.
+      await request('models.permissions', { sessionKey: key, mode: 'workspace' });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+      await request('chat.send', { sessionKey: key, text: 'explicit new input', idempotencyKey: 'explicit-workspace' });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+    });
+    it('keeps actually confirmed Read-only usable on the same already-owned writer', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      settings = { ...settings, summary: 'concise', personality: 'pragmatic' };
+      notify('thread/settings/updated', { threadSettings: settings });
+      const saved = (service as any).effectiveSettings.get(key);
+      overrideExecution(() => {
+        const execution = executionView(permissionState('read-only'));
+        delete execution.summary; delete execution.personality;
+        return execution;
+      });
+      mock.request.mockClear();
+      await request('chat.send', { sessionKey: key, text: 'read-only input', idempotencyKey: 'safe-read-only' });
+      expect(mock.request).toHaveBeenCalledWith('thread/resume', { threadId, excludeTurns: true });
+      expect(mock.request.mock.calls.find(([method]) => method === 'thread/resume')?.[1]).not.toHaveProperty('permissions');
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(0);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+      expect((service as any).effectiveSettings.get(key)).toBe(saved);
+      expect(saved).toMatchObject({ summary: 'concise', personality: 'pragmatic' });
+    });
+    it('requires confirmation after a passive native permission change instead of silently widening a send', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      settings = { ...settings, ...permissionState('workspace') };
+      notify('thread/settings/updated', { threadSettings: settings });
+      expect((await request('models.list', { sessionKey: key })).permissions).toMatchObject({ mode: 'workspace', requiresConfirmation: true });
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'passive-change' })).rejects.toThrow(restored);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('does not authorize unrelated permission widening during a partial approval-policy write', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/settings/update'
+        ? original(method, { ...params, permissions: ':workspace' }) : original(method, params));
+      await expect((service as any).desktopRequest('thread-follower-update-thread-settings', { conversationId: threadId,
+        threadSettings: { approvalPolicy: 'never' } })).rejects.toThrow(restored);
+      expect((service as any).records[0].permissionsUnconfirmed).toBe(true);
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'partial-permission' })).rejects.toThrow(restored);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('lets an explicit Desktop permission selection repair the same owned writer without replaying input', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      settings = { ...settings, ...permissionState('workspace') };
+      notify('thread/settings/updated', { threadSettings: settings });
+      expect((service as any).records[0].permissionsUnconfirmed).toBe(true);
+      await (service as any).desktopRequest('thread-follower-update-thread-settings', { conversationId: threadId,
+        threadSettings: { permissions: ':workspace', approvalPolicy: 'on-request', approvalsReviewer: 'user' } });
+      expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it.each(['profile', 'thread', 'cwd', 'sandbox', 'reviewer', 'invalid-profile', 'active', 'status'])('fails closed on an unproven execution readback: %s', async field => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      overrideExecution(() => {
+        const value = executionView(permissionState('read-only'));
+        if (field === 'profile') delete value.activePermissionProfile;
+        if (field === 'thread') value.thread = { ...value.thread, id: randomUUID() };
+        if (field === 'cwd') value.cwd = join(root, 'outside');
+        if (field === 'sandbox') delete value.sandbox;
+        if (field === 'reviewer') delete value.approvalsReviewer;
+        if (field === 'invalid-profile') value.activePermissionProfile = { id: ':future-permission' };
+        if (field === 'active') value.thread.status = { type: 'active' };
+        if (field === 'status') delete (value.thread as any).status;
+        return value;
+      });
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: `invalid-${field}` })).rejects.toThrow(restored);
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('never treats a failed metadata confirmation as uncertain prompt dispatch', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      overrideExecution(() => Promise.reject(Object.assign(new Error('private metadata timeout'), { outcome: 'uncertain' })));
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'metadata-timeout' })).rejects.toThrow(restored);
+      expect((service as any).records[0].keys).toEqual({});
+      expect((service as any).runs.size).toBe(0);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('rejects a late execution snapshot after the original owned AppServer has closed', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      let resolve!: (value: any) => void;
+      overrideExecution(() => new Promise(done => { resolve = done; }));
+      const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'retired-owner' });
+      await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+      mock.instances.at(-1).emit('closed');
+      resolve(executionView(permissionState('read-only')));
+      await expect(pending).rejects.toThrow(restored);
+      expect((service as any).loaded.size).toBe(0);
+      expect((service as any).records[0].keys).toEqual({});
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('does not overwrite a newer native permission notification with an older metadata response', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      let resolve!: (value: any) => void;
+      overrideExecution(() => new Promise(done => { resolve = done; }));
+      const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'late-snapshot' });
+      await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+      settings = { ...settings, ...permissionState('workspace') };
+      notify('thread/settings/updated', { threadSettings: settings });
+      resolve(executionView(permissionState('read-only')));
+      await expect(pending).rejects.toThrow(restored);
+      expect((service as any).effectiveSettings.get(key).activePermissionProfile.id).toBe(':workspace');
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('does not mark the replacement RPC generation unconfirmed from a late old readback', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      let resolve!: (value: any) => void;
+      overrideExecution(() => new Promise(done => { resolve = done; }));
+      const originalRpc = (service as any).rpc;
+      const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'replaced-owner' });
+      await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+      (service as any).rpc = { nativeVersion: '0.160.0' };
+      try {
+        resolve(executionView(permissionState('read-only')));
+        await expect(pending).rejects.toThrow(restored);
+        expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+        expect((service as any).records[0].keys).toEqual({});
+        expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+      } finally { (service as any).rpc = originalRpc; }
+    });
+    it('does not add a warm-resume probe to legacy or imported ownership paths', async () => {
+      await request('models.list', { sessionKey: key });
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      mock.request.mockClear();
+      await request('chat.send', { sessionKey: key, text: 'legacy input', idempotencyKey: 'legacy-read-only' });
+      expect(mock.request).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+      notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      (service as any).records[0].native = true;
+      mock.request.mockClear();
+      await request('chat.send', { sessionKey: key, text: 'imported owned input', idempotencyKey: 'imported-owned' });
+      expect(mock.request).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+    });
+  });
   it.each([null, 42, false, { name: 'private-native-value' }, ['private-native-value']])(
     'keeps the complete catalog when a native model is not a string: %j', async model => {
       const knownId = randomUUID();
