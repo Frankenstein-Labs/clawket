@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 共享 Thread 空白现场的最小开发诊断（Codex 安卓 QA 范围，默认关闭）。
+  - `__DEV__` Inspector 内存入口 `__CLAWKET_CHAT_GEOMETRY_QA__` 支持 start/read/stop；不依赖 logcat，不增 UI、不触发 React render、滚动或布局。对照既有 raw native 事件与 FlashList 公共坐标/可见范围，最多读取四个 layout。
+  - 1 Hz、256 条、20 分钟、一个在途查询；会话/连接/焦点/list/native binding/后台退役及迟到回调栅栏。仅有限数字、布尔和固定类别，不输出正文、ID、key、路径或凭据。
+  - 公共 SDK 无 engaged/paint ACK；诊断和注入 SDK 时序的回归不能作为 586 闲置空白的根因证据。真机采集仍由负责人在明确加载候选后执行；未操作设备/Native/QA 服务、未发布。
+  - 独立依赖、heavy 串行验证：collector 11、observer hook 8、UI follow 13、原 Thread 166（共 198）通过；Mobile typecheck、docs 7 对/5 用例、UI 248 文件通过。Release 模块不装 Inspector 入口，默认关闭和损坏/越界字段、迟到/重复采样及退役都有回归；CI 及真实设备采集另行验证。
+
 - 2026-10-04 分页确认后同总高度的新阅读手势（独立任务，依赖 PR #128 / #149；不是闲置空白根因结论）。
   - 源码确认：prepend 与估高修正可以让原生内容总高保持不变。旧高度记录在补偿 ACK 后仍保留，新手势虽重新捕捉内容，随后的真实移动却按旧高度被吞；下一次布局会拉回上一位置。仅在几何已确认、新鲜 drag 的实际有限原生高度到达后退休同高旧记录，再尝试捕捉内容；起始布局暂缺时，同一手势后续有效事件仍能捕捉。保持 pending old-child 位移、未确认 offset 命令 ledger、scope/list 与底部跟随边界。
   - 实际 hook 两项与 Thread Codex/OpenClaw/Hermes 三项先红，布局错误回到 960 而非读者选择的 920；首版成功 capture 才退休的补丁又被缺起始布局的同 5 项打红。最终仅新手势入口收紧，hook 整文件 24、Thread 整文件 199 共 223 项逐文件串行通过，含迟到未确认命令与缺起始布局组合；Mobile 类型、247 UI 文件/66 检查器结果、App config 7 项、设计文档 5 项与 check:docs 7 指令对/5 用例通过。不宣称解决 586–588 闲置空白、原生绘制或崩溃，不操作手机/Native/服务或发布。
