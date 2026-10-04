@@ -608,7 +608,7 @@ describe('Codex owned sessions', () => {
       const state = desktop.broadcast.mock.calls.at(-1)[1].change.conversationState;
       return row({ messages: codexMessages([state.turnHistory.history.entitiesByKey['turn:turn-1']]) });
     };
-    desktop.emit('follow', threadId, true);
+    desktop.emit('follow', threadId, true, 'desktop-tool-reader');
     await vi.waitFor(() => expect(desktop.broadcast).toHaveBeenCalled());
     expect(followerRow()).toMatchObject({ tool: { callId: 'search', status: 'running' } });
     const completed = Object.freeze({ ...started, ...(type === 'webSearch' ? { query: 'release notes', action: { type: 'search', query: 'release notes' },
@@ -621,7 +621,7 @@ describe('Codex owned sessions', () => {
     expect(completedRow).toMatchObject({ tool: { callId: 'search', status } });
     if (type === 'webSearch') expect(completedRow.tool.output).toBe(JSON.stringify(completed.results));
     expect(completed).not.toHaveProperty('status');
-    desktop.emit('follow', threadId, true);
+    desktop.emit('follow', threadId, true, 'desktop-tool-reader');
     await vi.waitFor(() => expect(followerRow()).toMatchObject({ id: completedRow.id, tool: completedRow.tool }));
     notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     const original = mock.request.getMockImplementation()!;
