@@ -12,9 +12,12 @@ const config = {
     // ESM-only dependencies used by host tests need CommonJS lowering.
     'node_modules/@react-navigation/routers/.*\\.js$': 'babel-jest',
     'node_modules[/\\\\]remend[/\\\\]dist[/\\\\]index\\.js$': 'babel-jest',
+    // The history window regression exercises FlashList's installed tracker,
+    // rather than a second implementation of its engaged-row calculation.
+    'node_modules[/\\\\]@shopify[/\\\\]flash-list[/\\\\]dist[/\\\\](recyclerview/helpers/(EngagedIndicesTracker|ConsecutiveNumbers)|native/config/PlatformHelper)\\.js$': 'babel-jest',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(tweetnacl|js-sha256|remend|@react-navigation/routers)/)',
+    'node_modules/(?!(tweetnacl|js-sha256|remend|@react-navigation/routers)/|@shopify/flash-list/dist/(recyclerview/helpers/(EngagedIndicesTracker|ConsecutiveNumbers)|native/config/PlatformHelper)\\.js$)',
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   setupFiles: ['./jest.setup.ts'],
