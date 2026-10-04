@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 QA 几何记录单文件缓存提取（负责人授权独立任务，默认关闭，本机窄验证完成）。
+  - 在现有开发内存 collector 上增加 Android QA 专用 Dev Menu Start/Stop，需 `__DEV__`、Android、精确 QA 包名和静态环境 opt-in 四门；注册不采样。仅已接受 Start 消耗进程级一次资格，拒绝可显式重试、未知结果封闭；Fast Refresh/新 Thread 不复活旧采集。
+  - 只读已有 ring，不新增 raw/SDK 查询、React render、布局或滚动；固定缓存 tmp/final、10 秒/122 次/20 分钟/单在途写，最多 256 条/256 KiB 严格标量重验。不能宣称 sandbox chmod/fsync、持久完成、原闲置空白根因或真机已采集。
+  - fresh origin/main 独立 worktree，显式依赖原 geometry collector；独立安装、heavy 串行执行实际 partial Start 基线红→绿，cache 17/绑定 11/原 collector 11/原 hook 8 共 47 回归通过；Mobile typecheck、docs 7 对/5 用例、UI 250 文件通过。补齐 installed Expo 公开 cacheDirectory/moveAsync 的两条类型声明。负责人组合树、设备/Native/QA 服务未改；真机捕捉需要新明确 QA opt-in 与实际加载字节、PID、Start intent/文件时效证据，远端 CI 和现场验收独立进行。
+
 - 2026-10-04 共享 Thread 空白现场的最小开发诊断（Codex 安卓 QA 范围，默认关闭）。
   - `__DEV__` Inspector 内存入口 `__CLAWKET_CHAT_GEOMETRY_QA__` 支持 start/read/stop；不依赖 logcat，不增 UI、不触发 React render、滚动或布局。对照既有 raw native 事件与 FlashList 公共坐标/可见范围，最多读取四个 layout。
   - 1 Hz、256 条、20 分钟、一个在途查询；会话/连接/焦点/list/native binding/后台退役及迟到回调栅栏。仅有限数字、布尔和固定类别，不输出正文、ID、key、路径或凭据。
