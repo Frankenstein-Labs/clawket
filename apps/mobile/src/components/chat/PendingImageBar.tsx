@@ -118,7 +118,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
     item: {
       position: 'relative',
       paddingTop: Space.md,
-      paddingRight: Space.md,
+      // Keep the 44pt remove target and hitSlop clear of the thumbnail center.
+      paddingRight: Space.xl,
     },
     fileItem: {
       width: '75%',

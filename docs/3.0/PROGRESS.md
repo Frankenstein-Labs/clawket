@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 修复草稿附件中心误删（Codex 真机 QA 发现，所有后端共享组件）。
+  - 56 点缩略图中心被右上角 44 点删除 target 与 hitSlop 覆盖；附件 wrapper 右侧预留从 12 改为 24 点，中心打开预览，删除 target 尺寸、文件卡片与动画保持原样。
+  - 实际组件几何与 Pressable 路由回归先 4 红 / 1 兼容通过，修复后 PendingImageBar 单文件 8 项、Mobile 类型、UI 246 文件、设计文档 11 组件及 check:docs 7 指令对 / 5 用例通过。涵盖 GIF/PNG/JPEG 中心、独立删除、多附件索引、文件卡片和可访问标签。宿主测试不运行原生 hit testing，负责人将合入后真机复测；未操作手机、Native、发布或 Root 组合源码。
+
 - 2026-10-05 Codex b2 真机普通阅读、R4Q partial 与隔离 Profile 开始；图片 MIME/引用项目修复整合，全面验收继续。
   - b2 完整手机缓存22,534,963字节/SHA0fb6996b…的全传输属29347；开发reload白屏后仅一次保数据QA冷开，新10636前后size/SHA相同，不能冒称第二次全传输。同高修复已实际加载；Root亲看9帧/18次历史drag由37–40读至1–4未见大空白，不是精确pixel anchor或闲置空白已修证明。
   - 032/033串行naturalEOF全解120/21编码帧，独立12contact及原帧审查，Root另看3sheet与关键原帧；032正文存在、033始终菜单遮挡，稀疏VFR不等连续绘制覆盖。034–040待传输/容器/视觉审查。R4Q正常Create/init及oneCurrent成立，second draft在freshgate见工具完成后未发，0secondCurrent/0TaskStop，2 starts/receipts/completes、1guide/0abort，自然终态保留，partial不冒称全链通过。
