@@ -1586,7 +1586,7 @@ test('voice widget waits for focus, capability, restored draft and the matching 
     mockRuntime.getSnapshot.mockReturnValue({ activeConnectionId: 'connection-1', activeAdapter: adapter } as any);
     const view = render(<ThreadScreen {...props} />);
     await act(async () => mockThreadViewProps?.messageActions?.onBranch?.(reply));
-    expect(createReplyConversation).toHaveBeenCalledWith(adapter, 'atlas', 'agent:atlas:main', reply);
+    expect(createReplyConversation).toHaveBeenCalledWith(adapter, 'atlas', 'agent:atlas:main', reply, undefined);
     expect(props.navigation.push).toHaveBeenCalledWith('Thread', expect.objectContaining({ sessionKey: 'new-chat' }));
     jest.mocked(props.navigation.push).mockClear();
     let finish!: (value: any) => void;
@@ -1595,6 +1595,31 @@ test('voice widget waits for focus, capability, restored draft and the matching 
     view.unmount();
     await act(async () => finish({ key: 'late-chat' }));
     expect(props.navigation.push).not.toHaveBeenCalled();
+  });
+
+  test.each(['codex', 'pi', 'claude-code'] as const)('quotes a reply using only the current scoped %s project', async backend => {
+    const props = createNavigationProps();
+    const reply = { id: 'project-reply', role: 'assistant' as const, text: 'Selected project answer' };
+    const currentAdapter = { ...adapter, connection: { ...adapter.connection, backendKind: backend }, capabilities: { ...CAPABILITY_MATRIX[backend] } };
+    mockConnections.activeAdapter = currentAdapter;
+    mockConnections.roster = [
+      { connection: { id: 'other-connection' }, agents: [{ agent: { agentId: 'atlas' }, sessions: [{ key: props.route.params.sessionKey, project: { id: 'foreign-project' } }] }] },
+      { connection: currentAdapter.connection, agents: [
+        { agent: { agentId: 'other-agent' }, sessions: [{ key: props.route.params.sessionKey, project: { id: 'other-agent-project' } }] },
+        { agent: { agentId: 'atlas' }, sessions: [
+          { key: 'other-session', project: { id: 'other-session-project' } },
+          { key: props.route.params.sessionKey, project: { id: 'opaque-selected-project', name: 'QA', path: '/qa/selected' } },
+        ] },
+      ] },
+    ];
+    jest.mocked(createReplyConversation).mockResolvedValueOnce({ key: 'project-quote-chat' } as any);
+    mockRuntime.getSnapshot.mockReturnValue({ activeConnectionId: 'connection-1', activeAdapter: currentAdapter } as any);
+    const view = render(<ThreadScreen {...props} />);
+    await act(async () => mockThreadViewProps?.messageActions?.onBranch?.(reply));
+    expect(createReplyConversation).toHaveBeenLastCalledWith(currentAdapter, 'atlas', props.route.params.sessionKey, reply, 'opaque-selected-project');
+    expect(props.navigation.push).toHaveBeenCalledWith('Thread', expect.objectContaining({ sessionKey: 'project-quote-chat' }));
+    expect(mockController.onSend).not.toHaveBeenCalled();
+    view.unmount();
   });
 
   test.each(['camera', 'photos'] as const)('%s widget waits for a restored draft and opens its native picker once', async (shortcut) => {

@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 引用回复「新对话」保留源项目（本轮 Codex 全面 QA 的确定源码缺口，真机待验）。
+  - ThreadScreen 原有当前连接/Agent/会话描述符已报告 project.id，但引用创建没有传给 ManualSessions，设备多项目连接可能采用默认项目。现在仅把该 opaque ID 传入普通 createSession 并加入草稿重试的作用域；没有项目的 OpenClaw/Hermes/Codex/Pi/Claude Code 保持原路径。仍只保存选中回复为可编辑草稿，不使用 fromSession、不发送或修改源会话。
+  - 新增实际 ThreadScreen scoped-project 与未 mock ManualSessions 的服务回归；基线 3 个 screen 用例和 4 个 service 用例失败，5 个缺项目兼容用例通过。逐文件 in-band：项目服务 9、原服务 4、ThreadScreen 72，共 85 项通过；Mobile 类型、UI 样式 246 文件、check:docs 7 指令对/5 用例通过。非默认 QA 项目的零发送真机检查尚未执行；不将源码/单测当实机验收。没有设备、Native、生产或发布动作。
+
 - 2026-10-04 Codex 组合 c6 真机问答取消与几何留证，同高阅读修复继续复测（全面验收未完成）。
   - c6 手机完整实际缓存22,534,470字节/SHA98a9f4b6…；QA数据保留冷开后再次完整传输、当前PID/前后SHA/源marker确认。C/E仍开发CLI dd5ecfe9…；未重启Native owner、Desktop、Production或替换商店App。原cc4 Start未知闭合；c6独立Start实际started、一次sampler Stop、合法stopped缓存256条，raw/SDK仅一项差0.000015258789px、超过1px为0，不能证明绘制/闲置空白根因。
   - fresh Q4G原Read-only init+Plan question，选项/自定义draft经关闭重开、前后页、Back、后台返回保留；一次form Stop使原任务abort且pending0，2 starts/receipts、1 complete/1 abort，0 answers/error/approval/额外tool。冷开不重发。旧严格reader仍因raw参数省略flags未验证；官方schema允许省略、handler另补custom，不能据此补造wire/blocking证明。
