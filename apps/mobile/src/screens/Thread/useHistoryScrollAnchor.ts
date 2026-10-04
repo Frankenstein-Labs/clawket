@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import type { ViewportQaInput, ViewportQaObserver, ViewportQaObservation } from './chatViewportQa';
 
 type Row = Readonly<{ key: string; type: string }>;
 type List = {
@@ -18,7 +19,7 @@ type Anchor = {
 type Corrections = {
   scope: string;
   list: List;
-  offsets: Array<{ offset: number; clampedOffset: number | undefined; seen: boolean }>;
+  offsets: Array<{ offset: number; clampedOffset: number | undefined; seen: boolean; commandObservation: ViewportQaObservation | null }>;
 };
 type RestoreOptions = { nativeMaxOffset?: number; nativeOffset?: number; nativeGeometryCommitted?: boolean;
   nativeHeight?: number; viewport?: number; windowCommitEpoch?: number };
@@ -53,7 +54,12 @@ function retirePrependedGeometry(saved: Anchor, rows: ReadonlyArray<Row>) {
 }
 
 /** A conditional date separator is not a surviving row when an earlier page joins its minute. */
-export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | null>, rows: ReadonlyArray<Row>, baselineDrawDistance = 250) {
+export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | null>, rows: ReadonlyArray<Row>, baselineDrawDistance = 250,
+  observe?: ViewportQaObserver) {
+  const observer = useRef(observe); observer.current = observe;
+  const emit = useCallback((value: ViewportQaInput, command?: ViewportQaObservation | null) => {
+    try { return observer.current?.(value, command) ?? null; } catch { return null; }
+  }, []);
   const latest = useRef({ scope, rows });
   latest.current = { scope, rows };
   const anchor = useRef<Anchor | null>(null);
@@ -192,6 +198,9 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
               saved.windowPreparations += 1;
               windowPlan.current = plan;
               setPreparedWindow(plan);
+              emit({ kind: 'geometry_pending', targetOffset: offset, anchorIndex: index, anchorY: layout.y,
+                contentHeight: nativeHeight, viewportHeight: viewport, geometryPending: saved.geometryPending,
+                windowEpoch: plan.epoch, drawDistance: distance, maxOffset: nativeMaxOffset });
               return;
             }
             if (windowCommitEpoch === plan.epoch) plan.committed = true;
@@ -209,7 +218,12 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
           // sufficient reachability even when its total equals the old child.
           // Neither this nor a React commit is a native paint acknowledgement.
           if ((oldChild && !(nativeGeometryCommitted && nativeHeight >= placedBottom - 0.5))
-            || (nativeMaxOffset !== undefined && offset > nativeMaxOffset + 0.5)) return;
+            || (nativeMaxOffset !== undefined && offset > nativeMaxOffset + 0.5)) {
+            emit({ kind: 'geometry_pending', targetOffset: offset, anchorIndex: index, anchorY: layout.y,
+              contentHeight: nativeHeight, viewportHeight: viewport, geometryPending: saved.geometryPending,
+              maxOffset: nativeMaxOffset, windowEpoch: windowPlan.current?.epoch, drawDistance: distance });
+            return;
+          }
         }
       }
       if (!nativeGeometryCommitted && saved.correction !== null && Math.abs(offset - saved.correction) < 0.5) return;
@@ -224,14 +238,17 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
         && nativeMaxOffset >= 0 && offset > nativeMaxOffset + 0.5 ? nativeMaxOffset : undefined;
       const existing = pending.find(value => Math.abs(value.offset - offset) < 0.5
         && value.clampedOffset === clampedOffset);
-      if (existing) existing.seen = false;
-      else pending.push({ offset, clampedOffset, seen: false });
+      const commandObservation = emit({ kind: 'offset_command', targetOffset: offset, anchorIndex: index, anchorY: layout.y,
+        offset: nativeOffset, contentHeight: nativeHeight, viewportHeight: viewport, maxOffset: nativeMaxOffset,
+        geometryPending: saved.geometryPending, windowEpoch: windowPlan.current?.epoch });
+      if (existing) { existing.seen = false; existing.commandObservation = commandObservation; }
+      else pending.push({ offset, clampedOffset, seen: false, commandObservation });
       if (pending.length > 32) pending.splice(0, pending.length - 32);
       saved.list.scrollToOffset({ offset, animated: false });
     } catch {
       release();
     }
-  }, [baselineDrawDistance, listRef, release, retireWindow]);
+  }, [baselineDrawDistance, emit, listRef, release, retireWindow]);
   const readerScrolled = useCallback((offset: number, reading = true, nativeHeight?: number) => {
     const saved = isActive() ? anchor.current : null;
     // The old native event may arrive before FlashList's first commit callback.
@@ -243,6 +260,9 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
     // Several estimated-height corrections may be in flight. An older native
     // event, clamp or end-drag duplicate must not replace the reader anchor.
     if (acknowledged.length) {
+      acknowledged.forEach(correction => emit({ kind: Math.abs(offset - correction.offset) >= 0.5 ? 'clamp_ack'
+        : saved?.correction === correction.offset ? 'offset_ack' : 'older_ack', offset, contentHeight: nativeHeight,
+        targetOffset: correction.offset, geometryPending: saved?.geometryPending }, correction.commandObservation));
       acknowledged.forEach(correction => { correction.seen = true; });
       if (saved?.correction !== null && saved?.correction !== undefined && Math.abs(offset - saved.correction) < 0.5) {
         saved.correction = null;
@@ -257,6 +277,7 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
     const oldGeometry = nativeHeight === undefined ? undefined
       : saved?.retiredGeometry.find(value => Math.abs(value.height - nativeHeight) < 0.5);
     if (oldGeometry) {
+      emit({ kind: 'old_geometry', offset, contentHeight: nativeHeight, geometryPending: saved?.geometryPending });
       // Keep this gesture's old coordinate space until the native child has
       // acknowledged the surviving row; later old-frame duplicates are inert.
       if (reading && saved?.geometryPending) {
@@ -268,14 +289,17 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
     // A grown native child can first report its uncorrected old offset. The
     // original gesture cannot turn that transient page head into a new anchor.
     // A fresh drag with that new geometry explicitly takes over in capture().
-    if (saved?.geometryPending) return true;
+    if (saved?.geometryPending) {
+      emit({ kind: 'geometry_pending', offset, contentHeight: nativeHeight, geometryPending: true });
+      return true;
+    }
     const list = listRef.current;
     if (list && nativeHeight !== undefined) nativePosition.current = { scope: latest.current.scope, list, offset, height: nativeHeight };
     // A first drag may precede placed rows. Its next native event can still
     // elect the reader; waiting for a second drag leaves two scroll owners.
     if (reading) capture(offset, nativeHeight);
     return false;
-  }, [capture, isActive, listRef, retireWindow]);
+  }, [capture, emit, isActive, listRef, retireWindow]);
   const beginDrag = useCallback((_pagePending: boolean, position?: NativePosition) => {
     retireWindow();
     const saved = isActive() ? anchor.current : null;

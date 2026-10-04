@@ -1,4 +1,5 @@
 import type { ChatGeometryQaApi } from './chatGeometryQa';
+import { validViewportQaEvent } from './chatViewportQa';
 
 const INTERVAL_MS = 10_000;
 const LIFETIME_MS = 20 * 60_000;
@@ -25,8 +26,9 @@ const SAMPLE_KEYS = ['elapsedMs', 'rawAvailable', 'rawSequence', 'rawAgeMs', 'ra
 /** Reject corrupt snapshots before serializing; arbitrary fields never reach disk. */
 export function encodeQaGeometryCache(value: unknown): string | null {
   try {
-    if (!keys(value, ['version', 'status', 'reason', 'inFlight', 'elapsedMs', 'dropped', 'samples'])
-      || value.version !== 1 || !['idle', 'capturing', 'stopped'].includes(value.status as string)
+    const version = value !== null && typeof value === 'object' ? (value as Record<string, unknown>).version : null;
+    if (!keys(value, ['version', 'status', 'reason', 'inFlight', 'elapsedMs', 'dropped', 'samples', ...(version === 2 ? ['viewport'] : [])])
+      || !(version === 1 || version === 2) || !['idle', 'capturing', 'stopped'].includes(value.status as string)
       || !(value.reason === null || ['manual', 'background', 'scope', 'expired', 'unavailable', 'replaced'].includes(value.reason as string))
       || typeof value.inFlight !== 'boolean' || !number(value.elapsedMs, 0, LIFETIME_MS)
       || !number(value.dropped, 0, MAX_NUMBER, true) || !Array.isArray(value.samples) || value.samples.length > 256) return null;
@@ -47,8 +49,28 @@ export function encodeQaGeometryCache(value: unknown): string | null {
       }
       samples.push({ ...Object.fromEntries(SAMPLE_KEYS.filter(key => key !== 'layouts').map(key => [key, sample[key]])), layouts });
     }
-    const json = JSON.stringify({ version: 1, status: value.status, reason: value.reason, inFlight: value.inFlight,
-      elapsedMs: value.elapsedMs, dropped: value.dropped, samples });
+    let viewport;
+    if (version === 2) {
+      const stage = value.viewport;
+      if (!keys(stage, ['sequence', 'dropped', 'throttled', 'rejected', 'initialIncomplete', 'events'])
+        || stage.initialIncomplete !== true || !['sequence', 'dropped', 'throttled', 'rejected'].every(key => number(stage[key], 0, MAX_NUMBER, true))
+        || !Array.isArray(stage.events) || stage.events.length > 32
+        || stage.sequence !== (stage.dropped as number) + (stage.throttled as number) + (stage.rejected as number) + stage.events.length) return null;
+      let previousSequence = 0, previousElapsed = 0;
+      const lastSequence = stage.sequence as number;
+      const elapsedMs = value.elapsedMs as number;
+      const events = [];
+      for (const event of stage.events) {
+        if (!validViewportQaEvent(event) || event.sequence <= previousSequence || event.sequence > lastSequence
+          || event.elapsedMs < previousElapsed || event.elapsedMs > elapsedMs) return null;
+        previousSequence = event.sequence; previousElapsed = event.elapsedMs;
+        events.push({ ...event });
+      }
+      viewport = { sequence: stage.sequence, dropped: stage.dropped, throttled: stage.throttled,
+        rejected: stage.rejected, initialIncomplete: true, events };
+    }
+    const json = JSON.stringify({ version, status: value.status, reason: value.reason, inFlight: value.inFlight,
+      elapsedMs: value.elapsedMs, dropped: value.dropped, samples, ...(viewport ? { viewport } : {}) });
     // Allowed fields contain only ASCII enum/field names and JSON scalar syntax.
     return json.length <= MAX_BYTES ? json : null;
   } catch { return null; }
