@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 组合 c6 真机问答取消与几何留证，同高阅读修复继续复测（全面验收未完成）。
+  - c6 手机完整实际缓存22,534,470字节/SHA98a9f4b6…；QA数据保留冷开后再次完整传输、当前PID/前后SHA/源marker确认。C/E仍开发CLI dd5ecfe9…；未重启Native owner、Desktop、Production或替换商店App。原cc4 Start未知闭合；c6独立Start实际started、一次sampler Stop、合法stopped缓存256条，raw/SDK仅一项差0.000015258789px、超过1px为0，不能证明绘制/闲置空白根因。
+  - fresh Q4G原Read-only init+Plan question，选项/自定义draft经关闭重开、前后页、Back、后台返回保留；一次form Stop使原任务abort且pending0，2 starts/receipts、1 complete/1 abort，0 answers/error/approval/额外tool。冷开不重发。旧严格reader仍因raw参数省略flags未验证；官方schema允许省略、handler另补custom，不能据此补造wire/blocking证明。
+  - R4P主任务两sleep成功；Root迟到输入且未做最后active检查，guide作为普通第三turn发送。实际0 Current/0 Task Stop、3 starts/receipts/completes且0 error/abort，原case闭合，不算App故障或steering通过。新更长窗口case待测，旧baseline/严格结果不放宽。032/033实际容器122.022/119.354s、120/21编码帧，Root与独立审片员亲看PTS0两帧；033菜单挡正文，非Start ACK，尚未全帧视觉验收。
+  - Root整合同高reader修复，实际hook24/Thread207逐文件串行、Mobile类型通过；尚未加载手机，不宣称修复586–588空白。c6 exact CI功能/types/static/v1/secrets/macOS/Windows绿，唯一braces审计阻挡未批准；PR141未merge/release。Desktop额外只读源审无新确定性缺陷，原Retry仍owner-only GUI。媒体/Profile/管理/兼容手机覆盖继续。
+
 - 2026-10-04 分页确认后同总高度的新阅读手势（独立任务，依赖 PR #128 / #149；不是闲置空白根因结论）。
   - 源码确认：prepend 与估高修正可以让原生内容总高保持不变。旧高度记录在补偿 ACK 后仍保留，新手势虽重新捕捉内容，随后的真实移动却按旧高度被吞；下一次布局会拉回上一位置。仅在几何已确认、新鲜 drag 的实际有限原生高度到达后退休同高旧记录，再尝试捕捉内容；起始布局暂缺时，同一手势后续有效事件仍能捕捉。保持 pending old-child 位移、未确认 offset 命令 ledger、scope/list 与底部跟随边界。
   - 实际 hook 两项与 Thread Codex/OpenClaw/Hermes 三项先红，布局错误回到 960 而非读者选择的 920；首版成功 capture 才退休的补丁又被缺起始布局的同 5 项打红。最终仅新手势入口收紧，hook 整文件 24、Thread 整文件 199 共 223 项逐文件串行通过，含迟到未确认命令与缺起始布局组合；Mobile 类型、247 UI 文件/66 检查器结果、App config 7 项、设计文档 5 项与 check:docs 7 指令对/5 用例通过。不宣称解决 586–588 闲置空白、原生绘制或崩溃，不操作手机/Native/服务或发布。
