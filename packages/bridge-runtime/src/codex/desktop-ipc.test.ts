@@ -268,7 +268,7 @@ describe('Desktop per-client follow lifecycle', () => {
 
 it('reads per-client lifecycle controls and targeted renewal on an actual framed broker connection', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'clawket-ipc-membership-'));
-  const path = process.platform === 'win32' ? `\\.\pipe\clawket-membership-${randomUUID()}` : join(directory, 'ipc.sock');
+  const path = process.platform === 'win32' ? String.raw`\\.\pipe\clawket-membership-${randomUUID()}` : join(directory, 'ipc.sock');
   const peers = new Set<Socket>(), received: any[] = [];
   let remote!: Socket, renewed!: () => void;
   const renewal = new Promise<void>(resolve => { renewed = resolve; });
