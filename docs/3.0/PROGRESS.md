@@ -1,10 +1,15 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex R4L idle 正文空白现场与滚动/冷开恢复对照（仍未修复验收）。
+  - Root未发后续手势期间，586–588截图完全同SHA：在线header/首时间chip/底边guide仍可见，正文大面积空白。ownQA-PID 250日志entry实际4,752行/552,480字节，记录Reanimated SurfaceMountingManager找不到tag警告，无Fatal/ShadowTree；不据此定因。UIA visible message节点7→2，同guide/随后assistant原点均+1,205px；屏外clipped bounds在正常585也存在，不能当新增非法布局证据。
+  - 负责人实际滚动后恢复，589显示init/main/assistant重新出现；Root未代发手势或消息。只在QA包做一次保数据冷开，591Roster/593同会话tail/595两guide正常；actual cache仍26af/d874，Native仍4starts/4receipts/3complete/1abort且0新增输入，两guide presentation keys均回canonical Native IDs。冷开与手势恢复不证明具体根因。
+  - ordinary reading未分页时App anchor尚未接管，FlashList默认MVCP仍开启；SDK短暂忽略scroll校正可能留下旧engaged window，是待复现候选。独立alias修复实际3红→65绿并通过types/docs/功能CI，PR148仍受未批准braces审计阻止合并；不称该13行修复覆盖idle空白。
+
 - 2026-10-04 Codex R4L 运行中编辑/移除与第二条 held 立即发送：输入控制通过，显示验收仍未完成。
   - actual26af9a8 的 fresh v10 冻结门验证 sole init/main、两同文 Current 同原 turn 三个 distinct 用户项，三 Next 全部 Native absent。原第二条命令 pending 中 Edit 恢复完整 Q1，改稿 Next 后实际顺序 Q2/DROP/EDIT，再运行中移除 DROP；空草稿 Stop 一次后两条保持 held，实际第二条 EDIT 的立即发送提升为 EDIT→Q2。最终 4 starts/receipts、3 completes、1 original abort，0 原稿/已移除输入/extra tool/error/approval/question；不冒称 OS child 已终止。
   - 547/548、553/555 expanded Send 自动隐藏键盘，Current/Next 完整可见，无 manual Hide；同第二步整轮计时持续。两 guide canonical 分钟独立为10:39/10:41，但 live556/557 第一条不在原可见序列，完成后585历史又出现两条。585父节点关联确认两 distinct Native message IDs，但第一条 renderKey 错配第二次 local dispatch；旧 testID 报告误把 renderKey 当 message.id，已保留并以更正版取代。一次同代 C controlOnly/head 97ms 返回完整20消息/6用户，无游标；两guide ID/正文/时钟各一次、用户原序，Native/Bridge记录字节不变。这是完成后新样本，不证明556时Mobile已收全；显示归因与窄修复继续。设备缺少 scoped SQLite read primitive，未复制/读取整库或其他会话。
   - 018 有界审片完成：7,143选定帧RGB/PTS处理，1,229连续帧+112原图overview视觉审阅；确认键盘遮chooser，下降后才露Current/Next。guide短窗已旧时间但无回退瞬间；首decoder额外tail扫描已披露且不算覆盖，子进程清理/heavy release exit0。权限PR146与Desktop会员PR147各自窄回归/类型/功能CI通过，仍仅未批准braces high阻止合并；尚未集成真机或宣称Desktop原报错修复。
-  - R4L四段录像完整传输与容器probe分别为179.982s/9,595帧、40.877s/3,292帧、179.973s/15,312帧、4.206s/298帧，非四段180秒；exit255/0与录制上限不当场景覆盖证据，尚未解码审阅。权限执行围栏发现 warm ready 可能合法反映旧轮，而下一turn才应用Thread defaults，先暂停整合该候选、继续官方源码和installed schema核查；拒发不等于Read-only能力恢复。
+  - R4L四段录像完整传输与容器probe分别为179.982s/9,595帧、40.877s/3,292帧、179.973s/15,312帧、4.206s/298帧，非四段180秒；exit255/0与录制上限不当场景覆盖证据，尚未解码审阅。权限候选先暂停整合：局部测试曾被误读为warm响应必反映旧轮，完整caller链已撤回此判断；reference warm resume取saved future config，Thread-origin保留FromThread，Owner-origin另有独立配置。继续核对configured环境/线程defaults/实际turn与installed行为；拒发不等于Read-only能力恢复。
 
 - 2026-10-04 Codex combined focus/user-clock 候选实际加载；A4H 权限偏差及 R4J 部分验证（全面验收仍未完成）。
   - 串行组合 Composer 6、Screen 71、Native history 86、CodexService 244 共 407 通过，Mobile/Runtime 类型、开发 CLI build、docs 9 指令对/5 检查器通过。只在认证全 idle 后更新隔离 C/E owners，配置字节保持；手机 actual cached bundle 26af9a8，22,502,884 字节/SHA d87476bab8e819cd30a6a0a48e9c18aa922d0bc221d58b5c0def2a007f1a96ef，开发 CLI SHA3df5cbaaed289755fe30aa891ba28cb530fbe1aac1e0b89ed8dd11f8bb31f7cf。Production/store 未变。
