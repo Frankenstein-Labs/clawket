@@ -114,7 +114,8 @@ export function codexMessages(turns: any[], options: { unconfirmedLegacyTurnId?:
           const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]*={0,2})$/.exec(part.url);
           if (match) attachments.push({ type: 'image', mimeType: match[1], content: match[2] });
         }
-        messages.push({ ...base, role: 'user', text, ...(typeof item.clientId === 'string' && item.clientId && item.clientId.length <= 200 ? { idempotencyKey: item.clientId } : {}), ...(attachments.length ? { attachments } : {}) });
+        messages.push({ ...base, timestampMs: codexItemTimestamp(turn.itemTimestamps instanceof Map ? turn.itemTimestamps.get(item.id) : undefined) ?? timestampMs,
+          role: 'user', text, ...(typeof item.clientId === 'string' && item.clientId && item.clientId.length <= 200 ? { idempotencyKey: item.clientId } : {}), ...(attachments.length ? { attachments } : {}) });
       } else if (item.type === 'agentMessage' || item.type === 'plan') {
         messages.push({ ...base, timestampMs: (item.id === finalReplyId ? completedAtMs : undefined)
           ?? (turn.itemTimestamps instanceof Map ? turn.itemTimestamps.get(item.id) : undefined) ?? timestampMs,

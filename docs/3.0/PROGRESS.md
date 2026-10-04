@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex Current 补充消息在历史刷新后回到主任务时间（安卓 R4H 实测拆出的独立修复）。
+  - 两条同文补充消息的原生 `UserMessage` ID 不同、同属原 turn，并各自报告有效毫秒时间；Bridge 用户历史投影却只用了原 turn 的开始秒数。现从原生 item 页保留校验后的用户项时间，优先开始、缺失时用完成时间；非法或倒序时间保留旧回退。消息 ID、client key、顺序与其他后端不变，时间不作为续发或重放依据。
+  - 修复前历史投影 1 项、实际服务历史 4 项红；修复后逐文件串行 `history.test.ts` 30、`service.test.ts` 168 全绿，Bridge Runtime 类型和文档检查通过。覆盖两个同文 guide 的独立时间/ID、原输入 receipt、缺省与非法时间及完成时间回退。
+  - 本任务只修改源码、回归和文档；未发送真实消息、重放、操作手机、启动原生进程、更新现有 Bridge、发包或部署。候选整合仍需保留既有助手逐项时钟与最终回复完成时钟；真机修复验收由当前独立 QA 继续完成。
+
 - 2026-10-04 Codex 真机 R4H 控制链继续验收（仍未完成）。
   - 手机实际缓存验证 d96be1e bundle（22,502,297 字节，SHA aca01e8636379348bd188f67a848624da8b7094321a90edeca1d11cde2d59e6d）；C/E Preview owners 已按 authenticated explicit-idle 校验更新到 bba5a2e5 development CLI，配置字节不变。先前 IPv6 Metro / reverse 缺失是开发加载问题，现 IPv4 / reverse 修复后载入候选，非 Codex 连接失败。
   - fresh 初始化与唯一主任务后，两次同文 Current 由独立原生项绑定同一 original turn；实际第二条命令持续 pending，第 2 步与整轮计时未重置。三条 Next 保持 Native absent；空草稿 Stop 一次后原 turn aborted，三条可见 held。随后 Edit 恢复完整原稿，移除第三条，再 explicit idle Send 编辑稿，先编辑稿后第二条各自完成；4 starts/receipts、3 completes、1 abort，无旧稿/被移除输入。此次先 Stop 再编辑，不能冒称运行中编辑后 second-held Send now；该组合仍待 fresh 复测。冻结 v8 对官方 same-call cancellation 非 Script 字串保持 unverified，不改旧 baseline/验收器，也不把它当额外命令或 OS child 已终止。
