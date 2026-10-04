@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+
+- 2026-10-04 Codex 安卓 QA 菜单 Start 状态反馈（独立源码任务）。
+  - 真机首次 Start 点击后固定缓存未出现，现有菜单忽略采集器返回值；目前不能区分绑定拒绝和异步文件失败，原次操作保持 unreported，不重试、不补造 accepted ACK。
+  - 仅四门成立的 Android QA 显式 Start 显示固定 started/unavailable Toast；started 只指采集器接受 arm，不指缓存落盘。注册不反馈/采样/IO，过期菜单在 gate 关闭后静默；旧菜单仍读取当前绑定，单次 arm、未知部分成功阻塞和 Stop 路径保持。
+  - actual register+collector 4 项基线红，修后 registry16/cache17 逐文件串行绿，Mobile 类型、设计系统和 docs7 指令对/5 检查器用例通过；不操作手机、Native、Production，不改变产品或发布状态。
+
 - 2026-10-04 QA 几何记录单文件缓存提取（负责人授权独立任务，默认关闭，本机窄验证完成）。
   - 在现有开发内存 collector 上增加 Android QA 专用 Dev Menu Start/Stop，需 `__DEV__`、Android、精确 QA 包名和静态环境 opt-in 四门；注册不采样。仅已接受 Start 消耗进程级一次资格，拒绝可显式重试、未知结果封闭；Fast Refresh/新 Thread 不复活旧采集。
   - 只读已有 ring，不新增 raw/SDK 查询、React render、布局或滚动；固定缓存 tmp/final、10 秒/122 次/20 分钟/单在途写，最多 256 条/256 KiB 严格标量重验。不能宣称 sandbox chmod/fsync、持久完成、原闲置空白根因或真机已采集。
