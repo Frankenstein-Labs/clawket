@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex Desktop 逐客户端跟随退役（负责人授权全面 Codex QA 修复，并补充远程续聊后 Desktop 重开报错）。
+  - 只读实际安装包核对：本地 IPC 跟随有 source client，生命周期广播 version 0；此前 Bridge 只按 thread 保存一个 boolean，两个客户端跟随后任一 unfollow 会停掉另一个客户端的后续状态广播。改为每 thread 最多 128 个独立客户端，精确退役；连接丢失、Native owner 退出及 thread archive/reset/delete 清旧订阅和调度。
+  - 已有订阅对新客户端和 version-1 local following-status 请求定向续订；不加载完整历史、不调用 Native dispatch。实际 owner 断开只使其 snapshot stale，不生成 no-owner／终态或自动重发。显式完整历史请求保留 IPC-frame source，完整 settings/turn 状态契约和旧 socket 栅栏保持。
+  - 独立依赖、串行回归：旧实现 IPC 4 项红、实际 service 4 项红／1 项兼容通过；修复后 desktop-ipc 单文件 32、service 单文件 168，共 200 项通过（含真实 framed socket、延期历史读与 v1/v2 设置旧回归），runtime 类型及文档 7 指令对／5 检查器用例通过。当前用户原 Desktop 报错原因仍未确定，已有 null.settings 完整投影修复保留；工具明确禁止 Desktop GUI 自动化，实际窗口验收仍在 HT-CODEX-DESKTOP-0929，不能用源审或合成协议测试替代。未操作设备、Native、账号或现有 Bridge，未发布／部署。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。
