@@ -1060,7 +1060,7 @@ function ThreadScreenContent({
           if (!value) { setSelectedSkill(null); controller.setInput(''); }
           else controller.setInput(activeSkill ? `${activeSkill.prefix}${value}` : value);
         }}
-        onSend={sessionPreview ? openSessionPaywall : controller.canSteer ? () => { controller.composerRef.current?.blur(); setRunInputId(controller.activeRunId); } : controller.onSend}
+        onSend={sessionPreview ? openSessionPaywall : controller.canSteer ? () => { controller.composerRef.current?.blur(); Keyboard.dismiss(); setRunInputId(controller.activeRunId); } : controller.onSend}
         onCancel={requestCancelCurrentRun}
         onOpenAddMenu={addMenuAvailable ? handleOpenAddMenu : undefined}
         onVoice={controller.voiceInputSupported ? controller.toggleVoiceInput : undefined}

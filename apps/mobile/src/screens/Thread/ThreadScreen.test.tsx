@@ -7,12 +7,14 @@ jest.mock('./components/SessionFilesSheet', () => ({ SessionFilesSheet: () => nu
 import { createReplyConversation } from '../../services/reply-conversation';
 jest.mock('../../services/reply-conversation', () => ({ createReplyConversation: jest.fn(), replyConversationDraft: (message: any) => message.role === 'assistant' && !message.streaming ? message.text : null }));
 jest.mock('./components/DraftRecoverySheet', () => ({ DraftRecoverySheet: () => null }));
-jest.mock('./components/RunInputSheet', () => ({ RunInputSheet: () => null }));
+let mockRunInputSheetProps: Record<string, any> | null = null;
+jest.mock('./components/RunInputSheet', () => ({ RunInputSheet: (props: any) => { mockRunInputSheetProps = props; return null; } }));
 let mockSkillPickerProps: { sessionKey?: string; onSelect: (skill: any) => void } | null = null;
 jest.mock('./components/SkillPickerSheet', () => ({ SkillPickerSheet: (props: any) => { mockSkillPickerProps = props; return null; } }));
 jest.mock('./components/SelectedSkill', () => ({ SelectedSkill: () => null }));
 jest.mock('../../services/incoming-share', () => ({ IncomingShareStore: { list: jest.fn(async () => []), remove: jest.fn(async () => undefined) } }));
 import React from 'react';
+import { Keyboard } from 'react-native';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { CAPABILITY_MATRIX } from '@clawket/agent-protocol';
 import type { ComposerHandle } from '../../components/ui/Composer';
@@ -306,6 +308,23 @@ function createApp(): Record<string, unknown> {
 }
 
 describe('ThreadScreen connection container', () => {
+  it('dismisses the editing keyboard before presenting the current-or-next chooser without sending', () => {
+    const props = createNavigationProps();
+    const blur = jest.fn();
+    mockController.composerRef = { current: { blur, focus: jest.fn(), clear: jest.fn() } };
+    mockController.canSteer = true;
+    mockController.onSteer = jest.fn();
+    mockController.activeRunId = 'current-run';
+    (Keyboard.dismiss as jest.Mock).mockClear();
+    render(<ThreadScreen {...props} />);
+    act(() => mockThreadViewProps?.onSend());
+    expect(blur).toHaveBeenCalledTimes(1);
+    expect(Keyboard.dismiss).toHaveBeenCalledTimes(1);
+    expect(mockRunInputSheetProps?.visible).toBe(true);
+    expect(mockController.onSend).not.toHaveBeenCalled();
+    expect(mockController.onSteer).not.toHaveBeenCalled();
+  });
+
   it('routes a required native permission confirmation directly to permission selection', () => {
     const props = createNavigationProps();
     mockController.runtimeSettingsUnconfirmed = true;
