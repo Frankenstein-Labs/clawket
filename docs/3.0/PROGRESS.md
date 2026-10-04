@@ -1,5 +1,17 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex R4L 运行中编辑/移除与第二条 held 立即发送：输入控制通过，显示验收仍未完成。
+  - actual26af9a8 的 fresh v10 冻结门验证 sole init/main、两同文 Current 同原 turn 三个 distinct 用户项，三 Next 全部 Native absent。原第二条命令 pending 中 Edit 恢复完整 Q1，改稿 Next 后实际顺序 Q2/DROP/EDIT，再运行中移除 DROP；空草稿 Stop 一次后两条保持 held，实际第二条 EDIT 的立即发送提升为 EDIT→Q2。最终 4 starts/receipts、3 completes、1 original abort，0 原稿/已移除输入/extra tool/error/approval/question；不冒称 OS child 已终止。
+  - 547/548、553/555 expanded Send 自动隐藏键盘，Current/Next 完整可见，无 manual Hide；同第二步整轮计时持续。两 guide canonical 分钟独立为10:39/10:41，但 live556/557 第一条不在原可见序列，完成后585历史又出现两条。585父节点关联确认两 distinct Native message IDs，但第一条 renderKey 错配第二次 local dispatch；旧 testID 报告误把 renderKey 当 message.id，已保留并以更正版取代。一次同代 C controlOnly/head 97ms 返回完整20消息/6用户，无游标；两guide ID/正文/时钟各一次、用户原序，Native/Bridge记录字节不变。这是完成后新样本，不证明556时Mobile已收全；显示归因与窄修复继续。设备缺少 scoped SQLite read primitive，未复制/读取整库或其他会话。
+  - 018 有界审片完成：7,143选定帧RGB/PTS处理，1,229连续帧+112原图overview视觉审阅；确认键盘遮chooser，下降后才露Current/Next。guide短窗已旧时间但无回退瞬间；首decoder额外tail扫描已披露且不算覆盖，子进程清理/heavy release exit0。权限PR146与Desktop会员PR147各自窄回归/类型/功能CI通过，仍仅未批准braces high阻止合并；尚未集成真机或宣称Desktop原报错修复。
+  - R4L四段录像完整传输与容器probe分别为179.982s/9,595帧、40.877s/3,292帧、179.973s/15,312帧、4.206s/298帧，非四段180秒；exit255/0与录制上限不当场景覆盖证据，尚未解码审阅。权限执行围栏发现 warm ready 可能合法反映旧轮，而下一turn才应用Thread defaults，先暂停整合该候选、继续官方源码和installed schema核查；拒发不等于Read-only能力恢复。
+
+- 2026-10-04 Codex combined focus/user-clock 候选实际加载；A4H 权限偏差及 R4J 部分验证（全面验收仍未完成）。
+  - 串行组合 Composer 6、Screen 71、Native history 86、CodexService 244 共 407 通过，Mobile/Runtime 类型、开发 CLI build、docs 9 指令对/5 检查器通过。只在认证全 idle 后更新隔离 C/E owners，配置字节保持；手机 actual cached bundle 26af9a8，22,502,884 字节/SHA d87476bab8e819cd30a6a0a48e9c18aa922d0bc221d58b5c0def2a007f1a96ef，开发 CLI SHA3df5cbaaed289755fe30aa891ba28cb530fbe1aac1e0b89ed8dd11f8bb31f7cf。Production/store 未变。
+  - A4H sole pure init 前 picker 已确认 Read-only，但原生实际 Workspace，重开 picker 也 Workspace；其他原生 input/usage/complete/receipt/model/effort 门均匹配。严格初始门拒绝，不建 baseline、不发 approval main/decision/file；执行视图确认与 fresh 真 Read-only 待修复复验，不能算审批崩溃修复通过。
+  - R4J sole init/main 后 frozen v9 因 static JS 对象字段为带引号的 Literal 而 unverified；调用语义符合两个限定 sleep，没有继续 Current/Next。手机 Stop 一次记录原 abort：2 starts/receipts、1 complete、1 abort，0 error/approval/question，旧 baseline 不改；不是 App 故障或完整控制链通过。020 recorder exit255、完整传输其部分文件，不能冒称覆盖全部现场。018 完整视频已传输566,749,625字节/SHAb28b070905b50819b19107615676e3398d0568da07606be56bec69605a75ef4a，有界视觉检查继续。
+  - 负责人补充 Desktop 旧会话远程多次回复后重开报错、Retry 无效、全退出恢复。真实 Desktop-owner 和 Bridge-owner/Desktop-follower 路径分开；当前 computer-use 明确禁止 Codex GUI 访问，没有绕过或全局重启。per-client membership 源码缺口独立调查，不能冒称原两次报错原因已证。PR141 exact26af CI 功能/完整类型/static/v1/desktop 全通过，唯一实质门是未批准 braces high，仍未合并/发布。
+
 - 2026-10-04 Codex Current 补充消息在历史刷新后回到主任务时间（安卓 R4H 实测拆出的独立修复）。
   - 两条同文补充消息的原生 `UserMessage` ID 不同、同属原 turn，并各自报告有效毫秒时间；Bridge 用户历史投影却只用了原 turn 的开始秒数。现从原生 item 页保留校验后的用户项时间，优先开始、缺失时用完成时间；非法或倒序时间保留旧回退。消息 ID、client key、顺序与其他后端不变，时间不作为续发或重放依据。
   - 修复前历史投影 1 项、实际服务历史 4 项红；修复后逐文件串行 `history.test.ts` 30、`service.test.ts` 168 全绿，Bridge Runtime 类型和文档检查通过。覆盖两个同文 guide 的独立时间/ID、原输入 receipt、缺省与非法时间及完成时间回退。
@@ -1553,6 +1565,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 | HT-NPM-315-0930 | Bridge 3.1.5 npm 发布两步验证 | 在 npm 官方浏览器流程完成验证，不在聊天中发送密码或验证码。 | npm 发布成功，公开 latest=3.1.5，公开包与固定候选逐字节一致。 | 已完成：npm 两步验证成功；公开 latest=3.1.5，下载包逐字节及 SHA-1/SHA-512 校验通过。 |
 | HT-NPM-314-0929 | Bridge 3.1.4 npm 发布安全密钥验证 | 在已打开的 npm 官方页面完成安全密钥/Touch ID，无需提供密钥。 | npm发布成功，公开latest及下载包SHA与固定候选一致。 | 已完成：五Relay已发布并核验；npm latest=3.1.4，公开下载包三项哈希与固定候选一致。 |
 | HT-COMPOSER-PASTE-0928 | 输入框系统菜单与语音共存验收 | 在后续开发包分别测试 iOS/Android：空白框轻点进入编辑，再长按粘贴；已有草稿双击选词、全选、拖选择手柄、替换粘贴；展开/收起后重复。 | 文本/图片粘贴沿用原入口；不误开麦克风、不因向下拖选择手柄收键盘；空白未聚焦长按语音和麦克风点击/按住松手/上滑取消正常。 | 代码与回归用例已更新；原生菜单和语音触摸待设备验证。 |
+| HT-CODEX-DESKTOP-ROUNDTRIP-1004 | 远程连续消息后 Codex Desktop 重开及 Retry 实机验收 | 使用已 materialized 的独立 QA 同 ID，分别验证真实 Desktop owner 与 Bridge owner/Desktop follower；保存报错现场，Retry 仅一次，不能靠 IPC/手机回复替代 GUI。 | 两次串行手机发送各有唯一原生终态，回到桌面同会话正常加载且历史/设置保持；若失败先保现场再独立评估恢复，不全局重启其他活跃任务。 | 当前 computer-use 工具明确拒绝 com.openai.codex，未绕过限制；源码/窄回归与手机独立工作继续，桌面 GUI 检查待负责人。 |
 | HT-CODEX-DESKTOP-0929 | 原始 Desktop 恢复报错验收 | 在候选 Bridge 下，用 Codex Desktop 打开原先出现 null.settings 的会话，检查显示并继续一条无副作用消息。 | 不再出现恢复对话失败，原 ID/历史保留，消息成功；不能用 IPC 探针代替实际 GUI 验收。 | 完整设置契约、两个安装版本的真实 IPC 与同 ID 冷恢复已通过；本轮 Desktop GUI 自动化访问不可用，未绕过限制，仍待负责人窗口验收。 |
 | HT-CONNECTION-0928 | 原故障 iPhone 路径与新等待动画验收 | 确认实际 TestFlight 版本/build 与测试时区；在后续授权的 App 更新后重测 OpenClaw/Codex/Claude QR、Profile/模型及前后台，并验证飞行模式/切网时的诊断分类。 | 对齐准确失败时间/阶段；诊断只含固定元数据，不能把超时直接认作网络故障；本机 Codex 已保留配对恢复，不要求重新生成凭据。小猫不延迟成功导航。 | 本地修复和日志交叉核对完成；UI 自动化窗口不可用，未做真机端到端验收。详见 connection-incident-2026-09-28.md；未发起发布。 |
 | HT-PLAY-REVIEW-0928 | Google Play 全权限审核访问与真机验收 | 独立云环境、重复 QR、真实 DeepSeek、永久兑换及 Pro 恢复已验证；英文访问表单已保存。 | 已完成：三星 Play 正式版 30001 实测扫码/聊天、清空本次测试数据后同码重配、Pro 终身恢复及付费日志；30101 用同源协议实测和计费源码一致性补证，未原生运行。 | 现有 3.1.0/30101 与 77 项更改已重新送审，后台显示正在审核；快速检查已结束、新内部测试证书已验证。托管发布开启，未公开发布。详见 ../3.1/google-play-review-environment-2026-09-28.md。 |
