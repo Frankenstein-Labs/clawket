@@ -270,7 +270,8 @@ it('reads per-client lifecycle controls and targeted renewal on an actual framed
   const directory = mkdtempSync(join(tmpdir(), 'clawket-ipc-membership-'));
   const path = process.platform === 'win32' ? String.raw`\\.\pipe\clawket-membership-${randomUUID()}` : join(directory, 'ipc.sock');
   const peers = new Set<Socket>(), received: any[] = [];
-  let remote!: Socket, renewed!: () => void;
+  let remote!: Socket, renewed!: () => void, discovered!: () => void;
+  const discovery = new Promise<void>(resolve => { discovered = resolve; });
   const renewal = new Promise<void>(resolve => { renewed = resolve; });
   const send = (socket: Socket, value: object) => {
     const body = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4); header.writeUInt32LE(body.length);
@@ -285,6 +286,10 @@ it('reads per-client lifecycle controls and targeted renewal on an actual framed
         const size = buffer.readUInt32LE(), frame = JSON.parse(buffer.subarray(4, 4 + size).toString()); buffer = buffer.subarray(4 + size);
         received.push(frame);
         if (frame.method === 'initialize') send(socket, { type: 'response', requestId: frame.requestId, resultType: 'success', result: { clientId: 'bridge' } });
+        if (frame.type === 'request' && frame.method === 'thread-owner-discovery') {
+          send(socket, { type: 'response', requestId: frame.requestId, resultType: 'success', result: { supportsUntrustedAppInput: false } });
+          discovered();
+        }
         if (frame.targetClientIds?.[0] === 'owner-b') renewed();
       }
     });
@@ -292,7 +297,7 @@ it('reads per-client lifecycle controls and targeted renewal on an actual framed
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(path, resolve); });
   const ipc = new DesktopIpc([path]), follow = vi.fn(); ipc.on('follow', follow);
   try {
-    await ipc.connect(); ipc.follow('opened');
+    await ipc.connect(); ipc.follow('opened'); await discovery;
     const snapshot = new Promise<void>(resolve => ipc.once('snapshot', () => resolve()));
     send(remote, { type: 'broadcast', method: 'thread-stream-state-changed', version: 11, sourceClientId: 'owner-a',
       params: { hostId: 'local', conversationId: 'opened', change: { type: 'snapshot', revision: 1, conversationState: { turns: [], requests: [] } } } });
@@ -310,7 +315,11 @@ it('reads per-client lifecycle controls and targeted renewal on an actual framed
     expect(ipc.snapshots.get('opened')?.fresh).toBe(false); expect(ipc.ready).toBe(true);
     expect(received.filter(frame => frame.targetClientIds)).toEqual([expect.objectContaining({ method: 'thread-stream-following-changed',
       version: 1, targetClientIds: ['owner-b'], params: { hostId: 'local', conversationId: 'opened', following: true } })]);
-    expect(received.some(frame => frame.type === 'request' && frame.method !== 'initialize')).toBe(false);
+    // Opening the chat performs one bounded owner probe; lifecycle controls
+    // must neither repeat that probe nor load history or dispatch another turn.
+    expect(received.filter(frame => frame.type === 'request' && frame.method !== 'initialize')).toEqual([
+      expect.objectContaining({ method: 'thread-owner-discovery', params: { conversationId: 'opened' } }),
+    ]);
   } finally {
     ipc.stop(); for (const peer of peers) peer.destroy();
     await new Promise<void>(resolve => server.close(() => resolve())); rmSync(directory, { recursive: true, force: true });

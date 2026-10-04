@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 安卓 QA 组合候选：显示身份、逐客户端跟随、配置确认已整合，真实验收继续。
+  - Root 合入 PR148 steering 同文时钟围栏、PR147 membership / Windows pipe fixture、PR146 future-configured 读回围栏及准确术语；保留此前当前 owner admission、ordered snapshot、ACK/input lineage、canonical 用户时钟与 resize focus 修复。旧 tool-reader 测试补 IPC-frame source；真实 membership socket 测试明确允许进入会话时唯一只读 owner discovery，随后 lifecycle 不得再查 history 或 dispatch。初次组合测试的零请求假设失败已修正，未削弱生产 owner 查询。
+  - 持 heavy 逐文件串行：Mobile historyMergePolicy 77、Desktop IPC 32、Codex service 273 全绿；Mobile / Bridge-runtime 类型及 docs 9 指令对 / 5 检查器用例通过。未跑本地全套。新组合尚未加载到手机，旧缓存仍 26af / d874；Read-only 实际执行、fresh 同文 guide、普通阅读空白、Desktop GUI 和媒体等仍待实机验收。
+  - 596 静置补抓正文正常（6 容器），但与 595 手势结束相比，同 canonical guide top 430→1860；这与旧空白现场位置相同却有正文。Root 区间无手机手势，不把未录得的人类动作排除；位置差不是 blank 充分条件。SDK/engaged-window 与 ordinary anchor 独立 source fixture 继续，不宣称已定位。
+  - exact PR141 / 1c02 CI 37173096138 的 Mobile 三分片、types、tests/static、v1、secret scan、macOS/Windows Bridge 全绿；已读取失败 job，唯一 blocker 仍两 lockfile 的未批准 braces GHSA-vfj7-8cjw-p6xm。当前组合未合并、未发布；负责人审计决策和 Desktop GUI 验收仍保留 HUMAN TODO。
+
 - 2026-10-04 Codex 0.160 已确认权限与配置读回漂移围栏（本轮安卓真机发现，独立任务）。
   - A4H 发送前手机 Read-only 已确认，但唯一初始化 Native turn context 与发送后设置均为 Workspace；模型/推理、唯一输入/receipt、终态、usage 和零工具均成立，不能归因于证据助手或 UI 乐观更新。原现场与 baseline 冻结。
   - 已 loaded 的 Bridge-created 0.160 会话在权限 ACK 后及 receipt 前，通过同一 owned writer、无 override 的 warm resume 独立核验保存的未来配置权限；严格同 RPC/thread/cwd/idle/settings generation。漂移、缺字段/失败确认要求重新确认，0 receipt/0 input dispatch；被动权限通知不得静默扩大下一次发送。Legacy/imported/Desktop owner 路径保留，不创建第二 writer 或自动重发。
