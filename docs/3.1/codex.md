@@ -36,6 +36,8 @@ Session descriptors treat model metadata as an optional string. Native catalog o
 
 Persist owned-thread metadata and prompt fingerprints before acknowledgement. Native transcript storage stays Codex-owned. Reconnect reads native state and pending approvals; phone disconnection leaves work running. Bridge loss never silently reruns work. Stop only owned children. Honor native permission refusals; never add bypass flags. Explicit approvals apply once to one pending native request and retire only after dispatch/terminal resolution.
 
+Steering echoes have no ordinary-send key. Mobile retains the acknowledged local row when a stale history read contains an identical earlier guide with valid clocks more than 60 seconds apart; missing send metadata cannot give that earlier native item the later row's render key. A subsequent matching native guide can adopt the local identity, and an already known exact native/history identity still owns its canonical clock. Missing clocks and ordinary legacy send matching retain their existing behavior. This prevents a reproducible presentation-alias error; a completed history read does not establish which items the phone received while the turn was active.
+
 Codex Registry/Relay resources, room classes, pairing state, secrets and Preview deployment units are isolated from OpenClaw, Hermes and Pi. Existing clients and transports keep their contracts and 8 MiB frame limits.
 
 ## Research baseline

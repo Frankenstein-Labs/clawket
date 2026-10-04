@@ -55,6 +55,63 @@ describe('prependOlderCachedMessages', () => {
 });
 
 describe('preserveOptimisticAssistantMessage', () => {
+  describe('steering echo identity', () => {
+    const main: UiMessage = { id: 'native-main', historyMessageId: 'native-main', role: 'user', text: 'Wait', timestampMs: 1_000 };
+    const first: UiMessage = { id: 'usr_10000_steer_run_1', renderKey: 'usr_10000_steer_run_1', role: 'user', sentLocally: true, text: 'Keep waiting', timestampMs: 10_000 };
+    const firstEcho: UiMessage = { id: 'native-guide-1', historyMessageId: 'native-guide-1', role: 'user', text: first.text, timestampMs: first.timestampMs };
+    const reconcile = (previous: UiMessage[], next: UiMessage[]) => preserveMessagePresentation(previous,
+      preserveOptimisticAssistantMessage(previous, next));
+
+    it.each([62_000, 125_000])('does not give a %i ms older native guide a newer steering identity when the send key is missing', (difference) => {
+      const second: UiMessage = { ...first, id: `usr_${10_000 + difference}_steer_run_2`, renderKey: `usr_${10_000 + difference}_steer_run_2`, timestampMs: 10_000 + difference };
+      // A read immediately after the second ACK can still contain only the first native guide.
+      const merged = reconcile([main, first, second], [main, firstEcho]);
+      expect(merged).toEqual([main, firstEcho, second]);
+      expect(merged.find(message => message.id === firstEcho.id)?.renderKey).not.toBe(second.renderKey);
+    });
+
+    it('adopts the later exact native guide without carrying the wrong key through a completed or cold canonical snapshot', () => {
+      const second: UiMessage = { ...first, id: 'usr_135000_steer_run_2', renderKey: 'usr_135000_steer_run_2', timestampMs: 135_000 };
+      const secondEcho: UiMessage = { ...firstEcho, id: 'native-guide-2', historyMessageId: 'native-guide-2', timestampMs: 135_010 };
+      const stale = reconcile([main, first, second], [main, firstEcho]);
+      const completed = reconcile(stale, [main, firstEcho, secondEcho]);
+      expect(completed.filter(message => message.role === 'user').map(message => message.id)).toEqual([main.id, firstEcho.id, secondEcho.id]);
+      expect(completed.find(message => message.id === firstEcho.id)?.renderKey).toBeUndefined();
+      expect(completed.find(message => message.id === secondEcho.id)?.renderKey).toBe(second.renderKey);
+      expect(new Set(completed.map(message => message.renderKey ?? message.id)).size).toBe(completed.length);
+      const confirmed = reconcile(completed, [main, firstEcho, secondEcho]);
+      // A later exact history alias owns the canonical clock, while keys stay stable.
+      expect(confirmed).toEqual([main, firstEcho, { ...completed[2], timestampMs: secondEcho.timestampMs }]);
+      expect(reconcile(confirmed, [main, firstEcho, secondEcho])).toEqual(confirmed);
+      expect(preserveHydratedMessageKeys(completed, [main, firstEcho, secondEcho]))
+        .toEqual([main, firstEcho, { ...secondEcho, renderKey: second.renderKey, sentLocally: true }]);
+    });
+
+    it('keeps an already confirmed exact history identity even when its authoritative clock changes', () => {
+      const confirmed = { ...first, historyMessageId: firstEcho.id, timestampMs: 135_000 };
+      const merged = reconcile([main, confirmed], [main, firstEcho]);
+      expect(merged).toHaveLength(2);
+      expect(merged[1]).toMatchObject({ id: firstEcho.id, renderKey: first.renderKey, historyMessageId: firstEcho.id, timestampMs: firstEcho.timestampMs });
+      const exactId = { ...firstEcho, renderKey: first.renderKey, sentLocally: true as const };
+      expect(reconcile([main, exactId], [main, { ...firstEcho, timestampMs: 135_000 }])[1])
+        .toMatchObject({ id: firstEcho.id, renderKey: first.renderKey, timestampMs: 135_000 });
+    });
+
+    it('keeps legacy timestamp-free steering echoes and ordinary non-steering fallback behavior', () => {
+      const steering = { ...first, timestampMs: 135_000 };
+      const untimed = { ...firstEcho, timestampMs: undefined };
+      expect(reconcile([main, steering], [main, untimed])[1]).toMatchObject({ id: firstEcho.id, renderKey: first.renderKey });
+      const ordinary = { ...steering, id: 'usr_135000', renderKey: 'usr_135000' };
+      expect(reconcile([main, ordinary], [main, firstEcho])[1]).toMatchObject({ id: firstEcho.id, renderKey: ordinary.renderKey });
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 8_640_000_000_000_001])('does not treat an invalid native clock (%s) as contradictory steering evidence', (timestampMs) => {
+      const steering = { ...first, timestampMs: 135_000 };
+      expect(reconcile([main, steering], [main, { ...firstEcho, timestampMs }])[1])
+        .toMatchObject({ id: firstEcho.id, renderKey: first.renderKey });
+    });
+  });
+
   it('does not move the previous final reply past a newer user while recovering timestamp-free history', () => {
     const old: UiMessage = { id: 'final_old', role: 'assistant', text: 'Old answer', timestampMs: 1000, historyMessageId: 'old-native' };
     const user: UiMessage = { id: 'usr_2000', role: 'user', text: 'New question', timestampMs: 2000, idempotencyKey: 'send-2' };
