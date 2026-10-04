@@ -838,13 +838,13 @@ function ThreadScreenContent({
     if (!adapter || !focused || locked || sessionPreview || branchBusy.current || !branchScope.active) return;
     branchBusy.current = true;
     controller.composerRef.current?.blur();
-    void createReplyConversation(adapter, agentId, sessionKey, message).then(session => {
+    void createReplyConversation(adapter, agentId, sessionKey, message, rosterSession?.project?.id).then(session => {
       if (!branchScope.active || getConnectionRuntime().getSnapshot().activeAdapter !== adapter) return;
       navigation.push('Thread', { connectionId, agentId, sessionKey: session.key, from: 'panel' });
     }).catch(() => {
       if (branchScope.active) Alert.alert(t('Error', { ns: 'common' }), t('Unable to start a new chat'));
     }).finally(() => { branchBusy.current = false; });
-  }, [adapter, focused, locked, sessionPreview, branchScope, controller.composerRef, agentId, sessionKey, connectionId, navigation, t]);
+  }, [adapter, focused, locked, sessionPreview, branchScope, controller.composerRef, agentId, sessionKey, rosterSession?.project?.id, connectionId, navigation, t]);
 
   const messageActions = useMemo(() => ({
     onCopy: handleCopyMessage,

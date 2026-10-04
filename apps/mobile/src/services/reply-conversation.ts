@@ -13,15 +13,15 @@ export function replyConversationDraft(message: UiMessage): string | null {
   return text && text.length <= 24_000 ? text : null;
 }
 /** A selected reply seeds an editable new conversation. No prompt is sent or source session changed. */
-export function createReplyConversation(adapter: AgentAdapter, agentId: string, sourceKey: string, message: UiMessage): Promise<SessionDescriptor> {
+export function createReplyConversation(adapter: AgentAdapter, agentId: string, sourceKey: string, message: UiMessage, projectId?: string): Promise<SessionDescriptor> {
   const draft = replyConversationDraft(message);
   if (!draft || !adapter.capabilities.sessionCreate || !adapter.createSession) return Promise.reject(new Error('reply_conversation_unavailable'));
-  const key = JSON.stringify([agentId, sourceKey, message.id, draft]);
+  const key = JSON.stringify([agentId, sourceKey, message.id, draft, projectId]);
   const pending = attempts.get(adapter) ?? new Map<string, Attempt>(); attempts.set(adapter, pending);
   const attempt = pending.get(key) ?? {}; pending.set(key, attempt);
   if (attempt.flight) return attempt.flight;
   const flight = (async () => {
-    attempt.session ??= await ManualSessions.create(adapter, agentId, key);
+    attempt.session ??= await ManualSessions.create(adapter, agentId, key, projectId ? { projectId } : undefined);
     if (attempt.session.key === sourceKey) throw new Error('reply_conversation_invalid_target');
     const existing = await StorageService.getComposerDraft(agentId, attempt.session.key, adapter.connection.id);
     if (existing && existing !== draft) throw new Error('reply_conversation_draft_conflict');

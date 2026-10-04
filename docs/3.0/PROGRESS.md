@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 引用回复「新对话」保留源项目（本轮 Codex 全面 QA 的确定源码缺口，真机待验）。
+  - ThreadScreen 原有当前连接/Agent/会话描述符已报告 project.id，但引用创建没有传给 ManualSessions，设备多项目连接可能采用默认项目。现在仅把该 opaque ID 传入普通 createSession 并加入草稿重试的作用域；没有项目的 OpenClaw/Hermes/Codex/Pi/Claude Code 保持原路径。仍只保存选中回复为可编辑草稿，不使用 fromSession、不发送或修改源会话。
+  - 新增实际 ThreadScreen scoped-project 与未 mock ManualSessions 的服务回归；基线 3 个 screen 用例和 4 个 service 用例失败，5 个缺项目兼容用例通过。逐文件 in-band：项目服务 9、原服务 4、ThreadScreen 72，共 85 项通过；Mobile 类型、UI 样式 246 文件、check:docs 7 指令对/5 用例通过。非默认 QA 项目的零发送真机检查尚未执行；不将源码/单测当实机验收。没有设备、Native、生产或发布动作。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。
