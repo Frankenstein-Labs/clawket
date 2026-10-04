@@ -271,16 +271,19 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
     if (saved?.geometryPending) return true;
     const list = listRef.current;
     if (list && nativeHeight !== undefined) nativePosition.current = { scope: latest.current.scope, list, offset, height: nativeHeight };
-    if (reading && saved) capture(offset, nativeHeight);
+    // A first drag may precede placed rows. Its next native event can still
+    // elect the reader; waiting for a second drag leaves two scroll owners.
+    if (reading) capture(offset, nativeHeight);
     return false;
   }, [capture, isActive, listRef, retireWindow]);
-  const beginDrag = useCallback((pagePending: boolean, position?: NativePosition) => {
+  const beginDrag = useCallback((_pagePending: boolean, position?: NativePosition) => {
     retireWindow();
     if (isActive() && anchor.current) retirePrependedGeometry(anchor.current, latest.current.rows);
     if (corrections.current) corrections.current.offsets = corrections.current.offsets.filter(value => !value.seen);
-    if (managedScope.current === latest.current.scope || (pagePending && isActive())) capture(position?.offset, position?.height, true);
-    else release();
-  }, [capture, isActive, release, retireWindow]);
+    // Ordinary reading needs the same owner as paging. Only a valid captured
+    // row disables SDK compensation; bottom settlement still releases it.
+    capture(position?.offset, position?.height, true);
+  }, [capture, isActive, retireWindow]);
   const activeWindow = preparedWindow?.scope === scope && preparedWindow.list === listRef.current
     && preparedWindow === windowPlan.current ? preparedWindow : null;
   return { managed: managed === scope, capture, restore, readerScrolled, beginDrag, release, isActive, isCorrectionPending,
