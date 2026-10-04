@@ -2456,8 +2456,8 @@ describe('work dock', () => {
   const said: UiMessage = { id: 'said', role: 'assistant', text: 'Found it.' };
   const run: UiMessage = { id: 'x', role: 'tool', text: '', toolName: 'exec', toolArgs: JSON.stringify({ command: 'npm test' }), toolStatus: 'running' };
   const keys = (view: ReturnType<typeof render>) => view.getByTestId('thread-screen-timeline').props.data.map((item: any) => item.key);
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
+  beforeEach(() => { jest.useFakeTimers(); mockInterpolatedTokens.add('time'); });
+  afterEach(() => { jest.useRealTimers(); mockInterpolatedTokens.delete('time'); });
 
   it('rises a second into a tool turn, names the step and opens every step so far', () => {
     const props = createProps({ isRunning: true, messages: [run, said, read, prompt] });
@@ -2491,6 +2491,66 @@ describe('work dock', () => {
     view.rerender(<ThreadView {...props} isRunning={false} messages={[done, { ...run, toolStatus: 'success' }, said, read, prompt]} />);
     expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
     expect(view.getByTestId('thread-receipt-done')).toBeTruthy();
+  });
+
+  it('keeps the dock clock, step number and completed grace when only same-run guidance is inserted', () => {
+    const start = Date.parse('2026-10-04T00:00:00Z');
+    jest.setSystemTime(start + 95_000);
+    const main = { ...prompt, turnId: 'native-turn', idempotencyKey: 'main-key', timestampMs: start };
+    const first = { ...read, turnId: 'native-turn' };
+    const second = { ...run, turnId: 'native-turn', toolStartedAt: start + 60_000 };
+    const identity = { scope: {}, sessionKey: 'agent:atlas:main', runId: 'bridge-run', turnId: 'native-turn', inputMessageId: main.id, inputMessageKey: 'main-key', startedAt: start };
+    const props = createProps({ isRunning: true, messages: [second, said, first, main], runWorkIdentity: identity } as Partial<ThreadViewProps>);
+    const view = render(<ThreadView {...props} />);
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 2 · Elapsed 1:36')).toBeTruthy();
+    const guide: UiMessage = { id: 'guide-1', role: 'user', text: 'Keep going', turnId: 'native-turn', timestampMs: Date.now() };
+    view.rerender(<ThreadView {...props} messages={[guide, second, said, first, main]} />);
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 2 · Elapsed 1:36')).toBeTruthy();
+    expect(keys(view).some((key: string) => key.startsWith('tools:'))).toBe(false);
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 2 · Elapsed 1:37')).toBeTruthy();
+    view.rerender(<ThreadView {...props} messages={[{ ...guide, id: 'guide-2' }, guide, second, said, first, main]} />);
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 2 · Elapsed 1:37')).toBeTruthy();
+  });
+
+  it('keeps a proven run clock on a partial page without promoting its guide to the original input', () => {
+    const start = Date.parse('2026-10-04T00:00:00Z');
+    jest.setSystemTime(start + 95_000);
+    const guide: UiMessage = { id: 'guide', role: 'user', text: 'Continue', turnId: 'native-turn', timestampMs: Date.now() };
+    const current = { ...run, turnId: 'native-turn' };
+    const identity = { scope: {}, sessionKey: 'agent:atlas:main', runId: 'bridge-run', turnId: 'native-turn', inputMessageId: 'unloaded-main', startedAt: start };
+    const props = createProps({ isRunning: true, messages: [guide, current], runWorkIdentity: identity } as Partial<ThreadViewProps>);
+    const view = render(<ThreadView {...props} />);
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 1:36')).toBeTruthy();
+    view.rerender(<ThreadView {...props} messages={[guide, current, { ...prompt, id: 'unloaded-main', turnId: 'native-turn', timestampMs: start - 10_000 }]} />);
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 1:36')).toBeTruthy();
+    view.rerender(<ThreadView {...props} sessionKey='another-session' runWorkIdentity={{ ...identity, scope: {}, sessionKey: 'another-session', runId: 'other-run', turnId: 'other-turn', inputMessageId: 'new-main', startedAt: Date.now() }} messages={[{ ...current, turnId: 'other-turn' }, { ...prompt, id: 'new-main', timestampMs: Date.now() }]} />);
+    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+  });
+
+  it('restarts work presentation for a different execution and retires it at terminal completion', () => {
+    const start = Date.parse('2026-10-04T00:00:00Z');
+    jest.setSystemTime(start + 95_000);
+    const main = { ...prompt, turnId: 'turn-a', timestampMs: start };
+    const current = { ...run, turnId: 'turn-a' };
+    const scope = {};
+    const identity = { scope, sessionKey: 'agent:atlas:main', runId: 'run-a', turnId: 'turn-a', inputMessageId: main.id, startedAt: start };
+    const props = createProps({ isRunning: true, messages: [current, main], runWorkIdentity: identity });
+    const view = render(<ThreadView {...props} />);
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 1:36')).toBeTruthy();
+    const next = { ...prompt, id: 'next', turnId: 'turn-b', timestampMs: Date.now() };
+    const nextTool = { ...run, id: 'next-tool', turnId: 'turn-b' };
+    const nextIdentity = { ...identity, runId: 'run-b', turnId: 'turn-b', inputMessageId: next.id, startedAt: Date.now() };
+    view.rerender(<ThreadView {...props} messages={[nextTool, next, current, main]} runWorkIdentity={nextIdentity} />);
+    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 0:01')).toBeTruthy();
+    view.rerender(<ThreadView {...props} isRunning={false} runWorkIdentity={undefined} messages={[{ id: 'final', role: 'assistant', text: 'Done', turnId: 'turn-b' }, { ...nextTool, toolStatus: 'success' }, next, current, main]} />);
+    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    expect(view.getByTestId('thread-receipt-final')).toBeTruthy();
   });
 
   it('never rises for a turn that finished within the grace', () => {

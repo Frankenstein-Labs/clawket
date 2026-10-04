@@ -91,6 +91,7 @@ import {
   SessionRunState,
 } from "./sessionRunState";
 import { shouldAdoptPendingOptimisticRunId } from "./pendingOptimisticRun";
+import { validTurnIdentity, type RunWorkIdentity } from './turnIdentity';
 import { preserveApprovalRows, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, retireAliasedTools } from "./historyMergePolicy";
 import {
   FOREGROUND_REFRESH_AFTER_RECONNECT_TIMEOUT_MS,
@@ -3375,6 +3376,15 @@ export function useChatController({
   // are unchanged, otherwise an empty streaming row survives the final reply.
   const presentationRunId = currentRunIdRef.current;
   const presentationStartedAt = streamStartedAtRef.current;
+  const rememberedPresentationRun = history.sessionKey ? sessionRunStateRef.current.get(history.sessionKey) : undefined;
+  const runWorkIdentity: RunWorkIdentity | undefined = adapter?.connection.backendKind === 'codex'
+    && lastAdapterRef.current === adapter && sendScope.active && history.sessionKey
+    && sessionKeyRef.current === history.sessionKey && (!routeSessionKey || routeSessionKey === history.sessionKey) && rememberedPresentationRun?.runId === presentationRunId
+    && validTurnIdentity(rememberedPresentationRun.turnId) && validTurnIdentity(rememberedPresentationRun.inputMessageId)
+    ? { scope: sendScope, sessionKey: history.sessionKey, runId: rememberedPresentationRun.runId,
+      turnId: rememberedPresentationRun.turnId!, inputMessageId: rememberedPresentationRun.inputMessageId!,
+      inputMessageKey: rememberedPresentationRun.inputMessageKey, startedAt: rememberedPresentationRun.startedAt }
+    : undefined;
   const listData = useMemo((): UiMessage[] => {
     const sessionMessages = buildLiveRunListData({
       historyMessages: recoverableMessages,
@@ -3587,6 +3597,7 @@ export function useChatController({
     onSend,
     onSteer,
     activeRunId: currentRunIdRef.current,
+    runWorkIdentity,
     // The identity the live reply row will carry, so a placeholder shown before
     // the first row reaches the list never remounts when that row lands.
     pendingReplyRenderKey: currentRunIdRef.current

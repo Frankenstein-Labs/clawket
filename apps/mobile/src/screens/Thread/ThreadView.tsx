@@ -1,6 +1,7 @@
 import { ArtifactProvider, ArtifactAttachments } from '../../components/chat/ArtifactAttachments';
 import { AndroidChatKeyboardAvoider } from '../../components/chat/AndroidChatKeyboardAvoider';
 import { isIncomingParticipant, messageSenderLabel } from '../../chat/messageAttribution';
+import { originalRunUserIndex, validTurnIdentity, type RunWorkIdentity } from '../../chat/turnIdentity';
 import { localizeAgentSystemNotice } from '../../chat/agentSystemNotice';
 import { ParticipantIdentity } from '../../components/chat/ParticipantIdentity';
 import { useWorkspaceLayout } from '../../navigation/workspace-context';
@@ -367,6 +368,8 @@ export type ThreadViewProps = Readonly<{
   keyboardVisible?: boolean;
   readOnlyFooter?: React.ReactNode;
   isRunning: boolean;
+  /** Scoped native execution evidence: current-run guidance cannot restart work presentation. */
+  runWorkIdentity?: RunWorkIdentity;
   /** A local send is leaving the device; the composer already shows Stop (A+ motion: send turns into stop). */
   sendInFlight?: boolean;
   /** Identity of the live reply row the controller will add for the current run. */
@@ -508,6 +511,7 @@ export function ThreadView({
   keyboardVisible = false,
   readOnlyFooter,
   isRunning,
+  runWorkIdentity,
   sendInFlight = false,
   pendingReplyRenderKey,
   canSend,
@@ -705,17 +709,33 @@ export function ThreadView({
   // above the composer until the turn ends, so the conversation keeps only
   // what was said. A quick reply never raises it. An approval raises it at
   // once; a question takes its place above the composer instead.
-  const liveWork = useMemo(() => collectLiveTurnWork(messages), [messages]);
+  const activeWork = runWorkIdentity && runWorkIdentity.sessionKey === sessionKey && validTurnIdentity(runWorkIdentity.turnId)
+    && validTurnIdentity(runWorkIdentity.inputMessageId) ? runWorkIdentity : undefined;
+  const displayScope = JSON.stringify([historyScope ?? '', agentId, sessionKey]);
+  const connectionDown = state.kind === 'offline' || state.kind === 'reconnecting';
+  const originalInputIndex = activeWork
+    ? originalRunUserIndex(messages, activeWork.turnId, activeWork.inputMessageId, activeWork.inputMessageKey) : -1;
+  const originalInput = originalInputIndex >= 0 ? messages[originalInputIndex] : undefined;
+  const nativeWorkKey = activeWork ? JSON.stringify([activeWork.runId, activeWork.turnId, activeWork.inputMessageId]) : null;
+  const liveWork = useMemo(() => collectLiveTurnWork(messages, activeWork), [messages, activeWork]);
   const liveTurnKey = useMemo(() => {
+    if (nativeWorkKey) return nativeWorkKey;
     const prompt = messages.find(opensTurn);
     return prompt ? renderKeyOf(prompt) : null;
-  }, [messages]);
+  }, [messages, nativeWorkKey]);
   const approvalWaiting = capabilities.execApproval && Boolean(liveWork.pendingApproval);
   // Seen on this phone: history reloads can drop a step's own start time.
-  const stepsSeenRef = useRef<{ turn: string | null; at: number } | null>(null);
-  if (!isRunning) stepsSeenRef.current = null;
-  else if (liveWork.steps.length > 0 && stepsSeenRef.current?.turn !== liveTurnKey) {
-    stepsSeenRef.current = { turn: liveTurnKey, at: Date.now() };
+  const workScope = activeWork?.scope ?? displayScope;
+  const stepsSeenRef = useRef<{ turn: string | null; scope: object | string; displayScope: string; at: number } | null>(null);
+  if (stepsSeenRef.current?.displayScope !== displayScope || (activeWork && typeof stepsSeenRef.current?.scope === 'object' && stepsSeenRef.current.scope !== workScope) || (!isRunning && !connectionDown)) stepsSeenRef.current = null;
+  else if (isRunning && liveWork.steps.length > 0
+    && (stepsSeenRef.current?.turn !== liveTurnKey || stepsSeenRef.current?.scope !== workScope)) {
+    const prior = stepsSeenRef.current;
+    const upgradingOriginal = activeWork && originalInput && prior?.scope === displayScope && prior.turn === renderKeyOf(originalInput);
+    stepsSeenRef.current = { turn: liveTurnKey, scope: workScope, displayScope, at: upgradingOriginal ? prior.at : Date.now() };
+  }
+  if (isRunning && liveWork.steps.length > 0 && !stepsSeenRef.current) {
+    stepsSeenRef.current = { turn: liveTurnKey, scope: workScope, displayScope, at: Date.now() };
   }
   const dockRiseAt = approvalWaiting ? 0
     : stepsSeenRef.current?.turn === liveTurnKey && stepsSeenRef.current ? stepsSeenRef.current.at + WORK_DOCK_GRACE_MS : undefined;
@@ -729,21 +749,21 @@ export function ThreadView({
   }, [dockRiseAt]);
   const runDockVisible = isRunning && dockRiseAt !== undefined && Date.now() >= dockRiseAt;
   // A dropped connection clears the run until it is back; the dock stays to say so.
-  const connectionDown = state.kind === 'offline' || state.kind === 'reconnecting';
-  const dockLastUpRef = useRef(0);
-  if (runDockVisible) dockLastUpRef.current = Date.now();
+  const dockLastUpRef = useRef({ displayScope, at: 0 });
+  if (runDockVisible) dockLastUpRef.current = { displayScope, at: Date.now() };
   const [dockHeldOffline, setDockHeldOffline] = useState(false);
   useEffect(() => {
     if (!connectionDown) setDockHeldOffline(false);
-    else if (Date.now() - dockLastUpRef.current < DOCK_OFFLINE_HOLD_MS) setDockHeldOffline(true);
-  }, [connectionDown]);
-  const dockOffline = dockHeldOffline && connectionDown;
+    else if (dockLastUpRef.current.displayScope === displayScope && Date.now() - dockLastUpRef.current.at < DOCK_OFFLINE_HOLD_MS) setDockHeldOffline(true);
+  }, [connectionDown, displayScope]);
+  const dockOffline = dockHeldOffline && connectionDown && dockLastUpRef.current.displayScope === displayScope;
   const dockVisible = !locked && !sessionPreview && !questionPending && (runDockVisible || dockOffline);
   const dockShown = dockVisible && !showSlashSuggestions && !composerExpanded;
   const dockPhase = resolveWorkDockPhase({
     work: approvalWaiting ? liveWork : { ...liveWork, pendingApproval: undefined },
     messages,
     offline: dockOffline,
+    active: activeWork,
   });
   // Until the dock rises the reply's own live pill speaks for the turn; once
   // it is up, a second "Thinking" in the conversation would contradict it.
@@ -790,12 +810,19 @@ export function ThreadView({
   // echo keeps the prompt's row identity but takes the computer's clock, and
   // the pill counts with the phone's (device check 2026-10-01: 10 s jumped
   // to 20 s mid-run).
-  const newestUser = newestUserIndex >= 0 ? messages[newestUserIndex]! : undefined;
+  const newestUser = activeWork ? originalInput : newestUserIndex >= 0 ? messages[newestUserIndex]! : undefined;
   const newestUserKey = newestUser ? newestUser.renderKey ?? newestUser.id : null;
-  const runStartRef = useRef<{ key: string; startedAt: number | undefined } | null>(null);
-  if (newestUserKey === null) runStartRef.current = null;
-  else if (runStartRef.current?.key !== newestUserKey || runStartRef.current.startedAt === undefined) {
-    runStartRef.current = { key: newestUserKey, startedAt: newestUser!.timestampMs };
+  const clockKey = nativeWorkKey ?? newestUserKey;
+  const runStartRef = useRef<{ key: string; scope: object | string; displayScope: string; startedAt: number | undefined } | null>(null);
+  if (runStartRef.current?.displayScope !== displayScope) runStartRef.current = null;
+  if (!(connectionDown && !activeWork)) {
+    if (clockKey === null) runStartRef.current = null;
+    else if (runStartRef.current?.key !== clockKey || runStartRef.current.scope !== workScope || runStartRef.current.startedAt === undefined) {
+      const prior = runStartRef.current;
+      const upgradingOriginal = activeWork && newestUserKey && prior?.scope === displayScope && prior.key === newestUserKey;
+      runStartRef.current = { key: clockKey, scope: workScope, displayScope,
+        startedAt: upgradingOriginal ? prior.startedAt : activeWork?.startedAt ?? newestUser?.timestampMs };
+    }
   }
   const runStartedAt = runStartRef.current?.startedAt;
   const liveActivity = useMemo<ThreadLiveActivity>(
@@ -804,7 +831,7 @@ export function ThreadView({
   );
   // Tool steps leave the conversation: a finished turn leaves a receipt on its
   // last reply (or one pill), the running turn's steps live in the work dock.
-  const foldedTurns = useMemo(() => foldTurnSteps(timelineMessages, isRunning), [isRunning, timelineMessages]);
+  const foldedTurns = useMemo(() => foldTurnSteps(timelineMessages, isRunning, activeWork), [isRunning, timelineMessages, activeWork]);
   const rhythmRows = useMemo(() => withThreadRhythm(groupThreadRuns(placeTurnReceipts(buildThreadTimelineItems({
     messages: foldedTurns.messages,
     runs: runCards,
