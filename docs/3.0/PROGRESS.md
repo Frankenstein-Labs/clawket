@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 安卓 QA 菜单 Start 状态反馈（独立源码任务）。
+  - 真机首次 Start 点击后固定缓存未出现，现有菜单忽略采集器返回值；目前不能区分绑定拒绝和异步文件失败，原次操作保持 unreported，不重试、不补造 accepted ACK。
+  - 仅四门成立的 Android QA 显式 Start 显示固定 started/unavailable Toast；started 只指采集器接受 arm，不指缓存落盘。注册不反馈/采样/IO，过期菜单在 gate 关闭后静默；旧菜单仍读取当前绑定，单次 arm、未知部分成功阻塞和 Stop 路径保持。
+  - actual register+collector 4 项基线红，修后 registry16/cache17 逐文件串行绿，Mobile 类型、设计系统和 docs7 指令对/5 检查器用例通过；不操作手机、Native、Production，不改变产品或发布状态。
+
 - 2026-10-04 Codex Profile 同页刷新与迟到写入确认（完整连接体验测试中的独立修复）。
   - Skill 切换等待确认时仍可下拉刷新或点击已有失败横幅的重试；旧 ACK 会覆盖较新读取，或通过 `read.replace` 取消仍未完成的新读取，旧失败也会盖在刷新成功之上。此前焦点往返栅栏不覆盖同页显式刷新。
   - 顶部刷新、下拉刷新和重试共用同步代际退休入口，先退休旧 mutation 展示再开始新读取。保留写锁、正常确认和既有焦点/项目/连接栅栏；不取消已经发出的原生写入，不自动重放写入，也不改变其它后端。
