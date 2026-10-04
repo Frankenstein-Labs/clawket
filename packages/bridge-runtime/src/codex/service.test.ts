@@ -116,6 +116,157 @@ describe('Codex owned sessions', () => {
     expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
   });
 
+  describe('0.160 lazy first thread permissions', () => {
+    const refused = 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.';
+    const owned = () => (service as any).records[0];
+    const metadata = () => ({ thread: { id: threadId, cwd: project, status: { type: 'idle' } } });
+    const prepare = async () => {
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation(async (method, params) => {
+        if (method === 'thread/resume') throw new Error('Unmaterialized native thread');
+        if (method === 'thread/read') return metadata();
+        const result = await original(method, params);
+        return method === 'thread/start' ? { ...result, thread: { ...result.thread, status: { type: 'idle' } } } : result;
+      });
+      await request('models.list', { sessionKey: key });
+    };
+    const replaceRead = (read: () => any | Promise<any>) => {
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/read' ? read() : original(method, params));
+    };
+    const input = () => request('chat.send', { sessionKey: key, text: 'first input', idempotencyKey: 'first' });
+    const notSent = () => {
+      expect(owned().keys).toEqual({}); expect((service as any).runs.size).toBe(0);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(0);
+    };
+    it('selects fresh Read-only without resuming an unmaterialized thread and binds it to the first turn', async () => {
+      await prepare();
+      await expect(request('models.permissions', { sessionKey: key, mode: 'read-only' })).resolves.toMatchObject({ permissions: { mode: 'read-only', requiresConfirmation: false } });
+      await input();
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/resume')).toHaveLength(0);
+      expect(mock.request).toHaveBeenCalledWith('thread/read', { threadId, includeTurns: false });
+      const params = mock.request.mock.calls.find(([method]) => method === 'turn/start')![1];
+      expect(params).toMatchObject({ permissions: ':read-only', approvalPolicy: 'on-request', approvalsReviewer: 'user', clientUserMessageId: 'first' });
+      expect(params).not.toHaveProperty('sandboxPolicy');
+    });
+    it.each(['workspace', 'full-access'] as const)('binds the confirmed %s named profile to the first turn', async mode => {
+      await prepare(); await request('models.permissions', { sessionKey: key, mode }); await input();
+      expect(mock.request.mock.calls.find(([method]) => method === 'turn/start')![1]).toMatchObject({
+        permissions: mode === 'workspace' ? ':workspace' : ':danger-full-access', approvalPolicy: mode === 'workspace' ? 'on-request' : 'never', approvalsReviewer: 'user',
+      });
+    });
+    it('retains a native-confirmed custom named profile and supported granular review policy', async () => {
+      await prepare();
+      const policy = { granular: { mcp_elicitations: true, rules: false, sandbox_approval: true } };
+      await (service as any).desktop.handler.request('thread-follower-update-thread-settings', {
+        conversationId: threadId, threadSettings: { permissions: ':managed-team', approvalPolicy: policy, approvalsReviewer: 'auto_review' },
+      });
+      await input();
+      const params = mock.request.mock.calls.find(([method]) => method === 'turn/start')![1];
+      expect(params).toMatchObject({ permissions: ':managed-team', approvalPolicy: policy, approvalsReviewer: 'auto_review' });
+      expect(params).not.toHaveProperty('sandboxPolicy');
+    });
+    it.each(['foreign-id', 'foreign-cwd', 'active', 'notLoaded', 'missing-status', 'missing-thread'])('rejects unsafe fresh metadata before receipt: %s', async shape => {
+      await prepare(); replaceRead(() => {
+        const result: any = metadata();
+        if (shape === 'foreign-id') result.thread.id = randomUUID();
+        if (shape === 'foreign-cwd') result.thread.cwd = root;
+        if (shape === 'active' || shape === 'notLoaded') result.thread.status.type = shape;
+        if (shape === 'missing-status') delete result.thread.status;
+        if (shape === 'missing-thread') delete result.thread;
+        return result;
+      });
+      await expect(input()).rejects.toThrow(refused); notSent();
+    });
+    it.each(['replaced-rpc', 'replaced-record', 'changed-id', 'changed-cwd', 'changed-record-id', 'active-run', 'same-value-notification'])('retires a pending fresh read on context change: %s', async change => {
+      await prepare(); replaceRead(() => {
+        if (change === 'replaced-rpc') (service as any).rpc = { nativeVersion: '0.160.0', stop: async () => {} };
+        if (change === 'replaced-record') (service as any).records[0] = { ...owned() };
+        if (change === 'changed-id') owned().threadId = randomUUID();
+        if (change === 'changed-cwd') owned().cwd = root;
+        if (change === 'changed-record-id') { const previous = owned().id; owned().id = randomUUID();
+          (service as any).loaded.add(owned().id); (service as any).effectiveSettings.set(owned().id, (service as any).effectiveSettings.get(previous)); }
+        if (change === 'active-run') (service as any).runs.set(key, { id: 'other-run' });
+        if (change === 'same-value-notification') notify('thread/settings/updated', { threadSettings: { ...settings } });
+        return metadata();
+      });
+      await expect(input()).rejects.toThrow(refused);
+      expect(owned().keys).toEqual({}); expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(0);
+    });
+    it.each(['absent-profile', 'invalid-profile', 'future-sandbox', 'future-reviewer', 'future-policy', 'missing-granular-field', 'future-granular-field', 'invalid-granular-field'])('never dispatches an unknown permission projection: %s', async shape => {
+      await prepare();
+      const saved = (service as any).effectiveSettings.get(key);
+      (service as any).effectiveSettings.set(key, { ...saved,
+        ...(shape === 'absent-profile' ? { activePermissionProfile: null } : {}),
+        ...(shape === 'invalid-profile' ? { activePermissionProfile: { id: ' '.repeat(3) } } : {}),
+        ...(shape === 'future-sandbox' ? { sandboxPolicy: { type: 'futureSandbox' } } : {}),
+        ...(shape === 'future-reviewer' ? { approvalsReviewer: 'future-reviewer' } : {}),
+        ...(shape === 'future-policy' ? { approvalPolicy: 'future-policy' } : {}),
+        ...(shape === 'missing-granular-field' ? { approvalPolicy: { granular: { mcp_elicitations: true, rules: false } } } : {}),
+        ...(shape === 'future-granular-field' ? { approvalPolicy: { granular: { mcp_elicitations: true, rules: false, sandbox_approval: true, future: true } } } : {}),
+        ...(shape === 'invalid-granular-field' ? { approvalPolicy: { granular: { mcp_elicitations: true, rules: false, sandbox_approval: 'yes' } } } : {}),
+      });
+      await expect(input()).rejects.toThrow(refused); notSent();
+    });
+    it('uses the warm configured probe after the first actual dispatch and never retries it as fresh', async () => {
+      await prepare(); await input();
+      notify('turn/completed', { turn: { id: 'turn-1', status: 'completed', items: [] } });
+      await expect(request('chat.send', { sessionKey: key, text: 'next input', idempotencyKey: 'next' })).rejects.toThrow(refused);
+      expect(mock.request).toHaveBeenCalledWith('thread/resume', { threadId, excludeTurns: true });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect(Object.keys(owned().keys)).toEqual(['first']);
+    });
+    it('does not derive fresh eligibility from an old empty index when actual recreation fails', async () => {
+      await prepare(); await service.stop();
+      service = new CodexService({ project, directory: join(root, 'state') });
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      // Empty persisted threads are explicitly recreated by the existing path;
+      // only that successful creation, never the old ID, grants fresh eligibility.
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/start' ? Promise.reject(new Error('start unavailable')) : original(method, params));
+      await expect(input()).rejects.toThrow('start unavailable'); notSent();
+    });
+    it('grants fresh eligibility only after the existing cold-empty path actually starts a new native thread', async () => {
+      await prepare(); const oldNativeId = threadId; await service.stop();
+      service = new CodexService({ project, directory: join(root, 'state') }); mock.instances.at(-1).nativeVersion = '0.160.0';
+      threadId = randomUUID(); mock.request.mockClear();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' }); await input();
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(1);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/resume')).toHaveLength(0);
+      expect(mock.request.mock.calls.find(([method]) => method === 'turn/start')![1]).toMatchObject({ threadId, permissions: ':read-only' });
+      expect(threadId).not.toBe(oldNativeId);
+    });
+    it('never reuses fresh admission after an uncertain first dispatch', async () => {
+      await prepare();
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'turn/start' ? Promise.reject(new Error('Unknown acknowledgement')) : original(method, params));
+      const accepted = await input(); await Promise.resolve();
+      expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'first' })).toMatchObject({ status: 'recorded', runId: accepted.runId });
+      await expect(request('chat.send', { sessionKey: key, text: 'later input', idempotencyKey: 'later' })).rejects.toThrow('busy');
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(1);
+    });
+    it('rejects a complete settings ACK followed by native close before allocating a turn receipt', async () => {
+      await prepare();
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation(async (method, params) => {
+        const result = await original(method, params);
+        if (method === 'thread/settings/update') mock.instances.at(-1).emit('closed');
+        return result;
+      });
+      await expect((service as any).desktop.handler.request('thread-follower-start-turn', {
+        conversationId: threadId, turnStart: { request: { threadId, input: [{ type: 'text', text: 'first input' }],
+          permissions: ':read-only', approvalPolicy: 'on-request', approvalsReviewer: 'user', clientUserMessageId: 'first' } },
+      })).rejects.toThrow(refused);
+      notSent(); expect((service as any).loaded.size).toBe(0);
+    });
+    it('keeps the pre-0.160 first-turn path unchanged', async () => {
+      await start();
+      const params = mock.request.mock.calls.find(([method]) => method === 'turn/start')![1];
+      expect(params).not.toHaveProperty('permissions'); expect(params).not.toHaveProperty('approvalPolicy');
+    });
+  });
   describe('0.160 configured permission confirmation', () => {
     const restored = 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.';
     const permissionState = (mode: 'workspace' | 'read-only' | 'full-access') => ({
@@ -139,6 +290,15 @@ describe('Codex owned sessions', () => {
         return method === 'thread/start' || method === 'thread/resume'
           ? { ...value, thread: { ...value.thread, status: { type: 'idle' } } } : value;
       });
+      // This suite exercises already-materialized owned threads. An index entry
+      // is never evidence of this process having just created a native thread.
+      await service.stop();
+      const record = { ...JSON.parse(readFileSync(join(root, 'state', 'sessions.json'), 'utf8')).sessions[0], threadId, activity: 1 };
+      writeFileSync(join(root, 'state', 'sessions.json'), JSON.stringify({ project, sessions: [record] }));
+      service = new CodexService({ project, directory: join(root, 'state') });
+      updates = []; service.on('update', u => updates.push(u)); mock.instances.at(-1).nativeVersion = '0.160.0';
+      mock.resumeSpeed.mockResolvedValue({ kind: 'native', serviceTier: null,
+        permissions: { resume: { approvalPolicy: 'on-request', approvalsReviewer: 'user', permissions: ':workspace' }, expected: { ...permissionPatch('workspace', project), permissions: ':workspace' } } });
       await request('models.list', { sessionKey: key });
     };
     it('does not confirm a Read-only ACK when the independent configured profile remains Workspace', async () => {

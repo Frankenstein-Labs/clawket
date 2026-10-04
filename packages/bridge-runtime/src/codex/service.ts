@@ -12,7 +12,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync, lstatSync, realpath
 import { join, basename } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import type { SessionDescriptor, SessionUpdate, SessionHistory, PromptInput, AgentQuestion, ApprovalRequest } from '@clawket/agent-protocol';
-import { nativeSettings, nativePermissionSettings, matchesNativeSettings, permissionMode, permissionSelectionPatch, type NativeSettings } from './settings.js';
+import { nativeSettings, nativePermissionSettings, nativeTurnPermissions, matchesNativeSettings, permissionMode, permissionSelectionPatch, type NativeSettings } from './settings.js';
 import { fastServiceTier, isFastServiceTier, hasServiceTier } from './speed.js';
 import { CodexProfile } from './profile.js';
 import { CodexRpc } from './rpc.js';
@@ -64,6 +64,7 @@ export class CodexService extends EventEmitter {
   private archivedNative = new Map<string, any>();
   private nativePreviews = new Map<string, { version: string; preview?: string; lastActivityAt: number | null; checkedAt: number; failed?: boolean }>();
   private loaded = new Set<string>();
+  private freshThreads = new Map<Entry, { rpc: CodexRpc; recordId: string; threadId: string; cwd: string }>();
   private effectiveSettings = new Map<string, NativeSettings>();
   private settingsWaiters = new Map<string, { patch: Record<string, unknown>; resolve: (s: NativeSettings) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private desktopHistory = new Map<string, { thread: any; cursor: string | null; complete: boolean }>();
@@ -183,7 +184,7 @@ export class CodexService extends EventEmitter {
     });
     rpc.on('closed', () => {
       if (this.rpc !== rpc || this.stopped) return;
-      this.disconnected = true; this.loaded.clear(); this.effectiveSettings.clear(); this.desktopHistory.clear(); this.retireDesktopFollowers();
+      this.disconnected = true; this.loaded.clear(); this.freshThreads.clear(); this.effectiveSettings.clear(); this.desktopHistory.clear(); this.retireDesktopFollowers();
       this.nextRecoveryAt = Date.now() + 1000;
       for (const waiter of this.settingsWaiters.values()) { clearTimeout(waiter.timer); waiter.reject(new Error('Codex settings could not be confirmed; reconnect before sending.')); }
       this.settingsWaiters.clear();
@@ -236,26 +237,32 @@ export class CodexService extends EventEmitter {
     this.save();
     if (waiter && matchesNativeSettings(settings, waiter.patch)) { clearTimeout(waiter.timer); this.settingsWaiters.delete(r.id); waiter.resolve(settings); }
   }
-  private async confirmConfiguredPermissions(r: Entry, expected = this.effectiveSettings.get(r.id), requested?: Record<string, unknown>): Promise<void> {
+  private async confirmConfiguredPermissions(r: Entry, expected = this.effectiveSettings.get(r.id), requested?: Record<string, unknown>): Promise<Record<string, unknown> | undefined> {
     // Independently reread 0.160's saved future configuration on the existing
     // writer. This does not attest a captured turn's actual execution permissions.
     // Never probe a cold or imported thread.
     if (this.rpc.nativeVersion !== '0.160.0' || r.native || !this.loaded.has(r.id)) return;
-    const rpc = this.rpc, threadId = r.threadId, cwd = r.cwd ?? this.project;
+    const rpc = this.rpc, recordId = r.id, threadId = r.threadId, cwd = r.cwd ?? this.project, fresh = this.freshThreads.get(r);
     const current = () => this.rpc === rpc && !this.stopped && !this.disconnected && this.loaded.has(r.id)
-      && this.records.includes(r) && !r.native && r.threadId === threadId && !this.runs.has(r.id)
-      && this.effectiveSettings.get(r.id) === expected;
+      && this.records.includes(r) && r.id === recordId && !r.native && r.threadId === threadId
+      && (r.cwd ?? this.project) === cwd && !this.runs.has(r.id)
+      && this.effectiveSettings.get(r.id) === expected
+      && (!fresh || (this.freshThreads.get(r) === fresh && fresh.rpc === rpc && fresh.recordId === r.id
+        && fresh.threadId === threadId && fresh.cwd === cwd));
     let response: any;
     let failureCategory = 'context_unavailable';
     try {
       if (!threadId || !expected || !current()) throw new Error(UNCONFIRMED_PERMISSIONS);
-      // No overrides: this uses the already-owned thread, retains its listener and acquires no new writer.
+      // Native cannot resume a newly-started thread before its first persisted
+      // input. Metadata checks only this exact current-process creation; its
+      // permissions still require the complete confirmed start/settings snapshot.
       failureCategory = 'request_failed';
-      response = await rpc.request('thread/resume', { threadId, excludeTurns: true });
+      response = fresh ? await rpc.request('thread/read', { threadId, includeTurns: false })
+        : await rpc.request('thread/resume', { threadId, excludeTurns: true });
       failureCategory = 'context_changed';
       if (!current()) throw new Error(UNCONFIRMED_PERMISSIONS);
       failureCategory = 'response_invalid';
-      const configured = nativePermissionSettings(response);
+      const configured = nativePermissionSettings(fresh ? { ...expected, sandbox: expected.sandboxPolicy } : response);
       const valid = response?.thread?.id === threadId && response.thread.cwd === cwd
         && response.thread.status?.type === 'idle' && configured?.cwd === cwd;
       // A resume snapshot must not overwrite newer settings or fields it omits.
@@ -268,6 +275,10 @@ export class CodexService extends EventEmitter {
       const requestedPermissions = requested && Object.fromEntries(Object.entries(requested)
         .filter(([key]) => ['permissions', 'sandboxPolicy', 'approvalPolicy', 'approvalsReviewer', 'activePermissionProfile'].includes(key)));
       if (requestedPermissions && !matchesNativeSettings(configured!, requestedPermissions)) throw new Error(UNCONFIRMED_PERMISSIONS);
+      failureCategory = 'permission_mismatch';
+      const binding = nativeTurnPermissions(configured!);
+      if (!binding) throw new Error(UNCONFIRMED_PERMISSIONS);
+      return binding;
     } catch {
       const mode = (value: ReturnType<typeof nativePermissionSettings>) => {
         const mode = permissionMode(value); return mode === 'custom' || mode === null ? 'unknown' : mode;
@@ -942,6 +953,11 @@ export class CodexService extends EventEmitter {
     if (effective && requestedSpeed?.provider === effective.modelProvider && requestedSpeed.serviceTier !== effective.serviceTier) {
       await this.nativeSettings(r, { serviceTier: requestedSpeed.serviceTier });
     }
+    if (!resume && rpc.nativeVersion === '0.160.0' && this.rpc === rpc && !this.stopped && !this.disconnected
+      && !r.native && this.records.includes(r) && this.loaded.has(r.id) && r.threadId === result.thread.id
+      && (r.cwd ?? this.project) === result.thread.cwd && this.effectiveSettings.has(r.id)) {
+      this.freshThreads.set(r, { rpc, recordId: r.id, threadId: result.thread.id, cwd: result.thread.cwd });
+    }
     this.announceDesktopOwnership(r, rpc, result.thread.id);
   }
   private async refreshModels(): Promise<any[]> {
@@ -1093,7 +1109,7 @@ export class CodexService extends EventEmitter {
         return this.changeMetadata(r, async () => {
           if (archived) await this.assertArchivable(r);
           await this.rpc.request(archived ? 'thread/archive' : 'thread/unarchive', { threadId: r.threadId });
-          r.archived = archived; this.loaded.delete(r.id); this.effectiveSettings.delete(r.id);
+          r.archived = archived; this.loaded.delete(r.id); this.freshThreads.delete(r); this.effectiveSettings.delete(r.id);
           this.desktopHistory.delete(r.threadId!); this.retireDesktopFollowers(r.threadId); this.save();
           this.desktop?.broadcast(archived ? 'thread-archived' : 'thread-unarchived', { hostId: 'local', conversationId: r.threadId });
           this.update({ type: 'session_info_update', session: this.descriptor(r) }); return { ok: true };
@@ -1106,7 +1122,7 @@ export class CodexService extends EventEmitter {
           if (r.threadId) this.retireDesktopFollowers(r.threadId);
           if (frame.method === 'sessions.delete') { this.records = this.records.filter(row => row !== r); }
           else { r.threadId = undefined; r.model = undefined; r.provider = undefined; r.preview = undefined; r.activity = undefined; r.effort = undefined; r.serviceTier = undefined; r.speedPreference = undefined; }
-          this.loaded.delete(r.id); this.effectiveSettings.delete(r.id); delete r.permissionsUnconfirmed; this.save(); return { ok: true };
+          this.loaded.delete(r.id); this.freshThreads.delete(r); this.effectiveSettings.delete(r.id); delete r.permissionsUnconfirmed; this.save(); return { ok: true };
         });
       });
       case 'clawket.artifacts.open': return this.artifacts.resolve(p.sessionKey, p.artifactId, cursor => this.history(String(p.sessionKey), cursor));
@@ -1396,8 +1412,10 @@ export class CodexService extends EventEmitter {
       // A Desktop permission/model override and its turn dispatch form one
       // serialized operation. Another client cannot change settings between
       // native confirmation and the turn that requested those settings.
+      const requiresTurnPermissions = !desktopOwned && !r.native && this.rpc.nativeVersion === '0.160.0';
       if (desktopOverrides && Object.keys(desktopOverrides).length) await this.nativeSettings(r, desktopOverrides);
-      if (!desktopOwned) await this.confirmConfiguredPermissions(r);
+      const turnPermissions = desktopOwned ? undefined : await this.confirmConfiguredPermissions(r);
+      if (requiresTurnPermissions && !turnPermissions) throw new Error(UNCONFIRMED_PERMISSIONS);
       const model = this.catalog.find(m => m.model === r.model);
       if (images.length && model && !model.inputModalities?.includes('image')) throw new Error('This model does not support images');
       if (!desktopOwned && input.thinkingLevel && !model?.supportedReasoningEfforts?.some((e: any) => e.reasoningEffort === input.thinkingLevel)) throw new Error('This model does not support that reasoning level');
@@ -1411,7 +1429,9 @@ export class CodexService extends EventEmitter {
       r.preview = sessionPreview(input.text, !!input.attachments?.length); r.activity = Date.now(); if (!r.title) r.title = input.text.trim().slice(0, 80); r.effort = input.thinkingLevel ?? r.effort;
       try { this.save(); } catch (error) { delete r.keys[input.idempotencyKey]; Object.assign(r, previousMetadata); throw error; }
       this.runs.set(r.id, { id: runId, text: '', started: Date.now(), items: new Map() }); this.update({ type: 'run_started', sessionKey: r.id, runId });
-      const params = { threadId: r.threadId, input: [{ type: 'text', text: input.text }, ...images.map(a => ({ type: 'image', url: `data:${a.mimeType};base64,${a.content}` }))], ...(desktopOwned ? {} : { model: r.model, effort: r.effort, ...(r.serviceTier !== undefined ? { serviceTier: r.serviceTier } : {}) }), clientUserMessageId: input.idempotencyKey };
+      const params = { threadId: r.threadId, input: [{ type: 'text', text: input.text }, ...images.map(a => ({ type: 'image', url: `data:${a.mimeType};base64,${a.content}` }))], ...(desktopOwned ? {} : { model: r.model, effort: r.effort, ...(r.serviceTier !== undefined ? { serviceTier: r.serviceTier } : {}), ...turnPermissions }), clientUserMessageId: input.idempotencyKey };
+      // Retire before dispatch, including rejected/unknown acknowledgements; no fresh fallback or replay.
+      this.freshThreads.delete(r);
       const accepted = desktopOwned ? this.desktopTurn(r, params) : this.rpc.request('turn/start', params);
       if (this.starts.size >= 256) this.starts.delete(this.starts.keys().next().value!);
       this.starts.set(runId, accepted);
@@ -1440,6 +1460,7 @@ export class CodexService extends EventEmitter {
   }
   private notification(method: string, p: any, emittedAtMs?: unknown): void {
     const r = this.records.find(row => row.threadId === p.threadId); if (!r) return;
+    if (method === 'turn/started' && typeof p.turn?.id === 'string' && p.turn.id) this.freshThreads.delete(r);
     if (method === 'thread/settings/updated' && this.loaded.has(r.id)) {
       const settings = nativeSettings(p.threadSettings);
       if (settings) this.rememberSettings(r, settings);
@@ -1557,7 +1578,7 @@ export class CodexService extends EventEmitter {
   prepareForUpdate(): boolean { return this.updateAdmission.prepare(() => this.runs.size > 0 || this.starts.size > 0); }
 
   async stop(): Promise<void> {
-    if (this.stopped) return; this.stopped = true; this.artifacts.clear();
+    if (this.stopped) return; this.stopped = true; this.freshThreads.clear(); this.artifacts.clear();
     this.retireDesktopFollowers();
     for (const waiter of this.settingsWaiters.values()) { clearTimeout(waiter.timer); waiter.reject(new Error('Codex Bridge stopped')); }
     this.settingsWaiters.clear(); this.sessionActivity?.stop(); this.desktop?.stop();

@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 0.160 首轮 lazy 线程兼容与每次发送权限绑定（独立任务，手机复测待新 QA）。
+  - A4L 首次 Read-only 选择的固定诊断为 request_failed，尚无初始化输入；reference 专门回归确证未 materialize 的线程不能 resume，同一已加载线程的 metadata read 有兼容返回。该源码事实支持修复路径，不从未记录原生错误推定现场唯一原因。
+  - 仅当前 RPC 成功 thread/start 的精确 record/native ID/cwd/loaded 资格允许首轮 metadata 验证；完整 ACK 提供命名权限，再在 0.160 turn/start 显式绑定 permissions/policy/reviewer，不能同时发 sandboxPolicy。资格在实际 dispatch 前退休；旧 index/cold resume/import/Desktop 无推断 fallback，未知发送不重放、不创建第二 writer。已保存会话保留 warm 配置围栏；配置一致不是实际 execution attestation，Owner environment/真实 Read-only 仍待新手机 QA。
+  - 独立实际 service 回归基线 217 项中 6 红；修复及 context/closed/granular 边界共 224 项全绿。Runtime 类型和 docs 7 对/5 项通过，自身依赖与声明独立构建；源码 peer 通过，未操作 Native、手机、账户或 Production。
+
 - 2026-10-04 共享 Thread 空白现场的最小开发诊断（Codex 安卓 QA 范围，默认关闭）。
   - `__DEV__` Inspector 内存入口 `__CLAWKET_CHAT_GEOMETRY_QA__` 支持 start/read/stop；不依赖 logcat，不增 UI、不触发 React render、滚动或布局。对照既有 raw native 事件与 FlashList 公共坐标/可见范围，最多读取四个 layout。
   - 1 Hz、256 条、20 分钟、一个在途查询；会话/连接/焦点/list/native binding/后台退役及迟到回调栅栏。仅有限数字、布尔和固定类别，不输出正文、ID、key、路径或凭据。
