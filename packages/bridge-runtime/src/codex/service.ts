@@ -234,9 +234,10 @@ export class CodexService extends EventEmitter {
     this.save();
     if (waiter && matchesNativeSettings(settings, waiter.patch)) { clearTimeout(waiter.timer); this.settingsWaiters.delete(r.id); waiter.resolve(settings); }
   }
-  private async confirmExecutionPermissions(r: Entry, expected = this.effectiveSettings.get(r.id), requested?: Record<string, unknown>): Promise<void> {
-    // 0.160 settings notifications describe saved defaults; the existing writer's
-    // metadata resume reads its ready execution environment. Never probe a cold or imported thread.
+  private async confirmConfiguredPermissions(r: Entry, expected = this.effectiveSettings.get(r.id), requested?: Record<string, unknown>): Promise<void> {
+    // Independently reread 0.160's saved future configuration on the existing
+    // writer. This does not attest a captured turn's actual execution permissions.
+    // Never probe a cold or imported thread.
     if (this.rpc.nativeVersion !== '0.160.0' || r.native || !this.loaded.has(r.id)) return;
     const rpc = this.rpc, threadId = r.threadId, cwd = r.cwd ?? this.project;
     const current = () => this.rpc === rpc && !this.stopped && !this.disconnected && this.loaded.has(r.id)
@@ -247,13 +248,12 @@ export class CodexService extends EventEmitter {
       // No overrides: this uses the already-owned thread, retains its listener and acquires no new writer.
       const response = await rpc.request('thread/resume', { threadId, excludeTurns: true });
       if (!current()) throw new Error(UNCONFIRMED_PERMISSIONS);
-      const execution = nativeSettings(response, true);
+      const configured = nativeSettings(response, true);
       const valid = response?.thread?.id === threadId && response.thread.cwd === cwd
-        && response.thread.status?.type === 'idle' && execution?.cwd === cwd;
-      // The ready environment is verification evidence, not latestThreadSettings.
-      // Do not overwrite saved defaults or fields omitted by the resume response.
-      if (!valid || !matchesNativeSettings(execution!, permissionSettings(expected))
-        || (requested && !matchesNativeSettings(execution!, requested))) throw new Error(UNCONFIRMED_PERMISSIONS);
+        && response.thread.status?.type === 'idle' && configured?.cwd === cwd;
+      // A resume snapshot must not overwrite newer settings or fields it omits.
+      if (!valid || !matchesNativeSettings(configured!, permissionSettings(expected))
+        || (requested && !matchesNativeSettings(configured!, requested))) throw new Error(UNCONFIRMED_PERMISSIONS);
     } catch {
       if (this.rpc === rpc && this.records.includes(r) && r.threadId === threadId) { r.permissionsUnconfirmed = true; this.save(); }
       // This failed before input receipt/dispatch, including a timed-out metadata probe.
@@ -674,7 +674,7 @@ export class CodexService extends EventEmitter {
     const effective = this.effectiveSettings.get(r.id);
     const confirmPermissions = async () => {
       if (!permissionWrite) return;
-      await this.confirmExecutionPermissions(r, this.effectiveSettings.get(r.id), requestedPermissionSettings(effective, settings));
+      await this.confirmConfiguredPermissions(r, this.effectiveSettings.get(r.id), requestedPermissionSettings(effective, settings));
       if (this.rpc.nativeVersion === '0.160.0' && !r.native && this.loaded.has(r.id)
         && ['permissions', 'sandboxPolicy'].some(key => Object.hasOwn(settings, key))) { delete r.permissionsUnconfirmed; this.save(); }
     };
@@ -1358,7 +1358,7 @@ export class CodexService extends EventEmitter {
       // serialized operation. Another client cannot change settings between
       // native confirmation and the turn that requested those settings.
       if (desktopOverrides && Object.keys(desktopOverrides).length) await this.nativeSettings(r, desktopOverrides);
-      if (!desktopOwned) await this.confirmExecutionPermissions(r);
+      if (!desktopOwned) await this.confirmConfiguredPermissions(r);
       const model = this.catalog.find(m => m.model === r.model);
       if (images.length && model && !model.inputModalities?.includes('image')) throw new Error('This model does not support images');
       if (!desktopOwned && input.thinkingLevel && !model?.supportedReasoningEfforts?.some((e: any) => e.reasoningEffort === input.thinkingLevel)) throw new Error('This model does not support that reasoning level');
