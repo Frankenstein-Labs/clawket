@@ -4,6 +4,32 @@ import { PendingImage } from '../types/chat';
 
 const DEFAULT_MAX_IMAGES = 6;
 
+function imagePayloadMimeType(base64: string): string | undefined {
+  // Inspect at most 12 bytes without requiring a runtime base64 global.
+  // A provider may retain its original MIME after export.
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let header = '';
+  let buffer = 0;
+  let bits = 0;
+  for (let index = 0; index < Math.min(base64.length, 16); index += 1) {
+    const char = base64[index]!;
+    if (char === '=') break;
+    const value = alphabet.indexOf(char);
+    if (value < 0) return undefined;
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      header += String.fromCharCode((buffer >> bits) & 0xff);
+    }
+  }
+  if (header.startsWith('\xff\xd8\xff')) return 'image/jpeg';
+  if (header.startsWith('\x89PNG\r\n\x1a\n')) return 'image/png';
+  if (header.startsWith('GIF87a') || header.startsWith('GIF89a')) return 'image/gif';
+  if (header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP') return 'image/webp';
+  return undefined;
+}
+
 export function useChatImagePicker(maxImages = DEFAULT_MAX_IMAGES, scope = '') {
   const activeScope = useRef<string | null>(scope);
   activeScope.current = scope;
@@ -30,7 +56,7 @@ export function useChatImagePicker(maxImages = DEFAULT_MAX_IMAGES, scope = '') {
         .map((asset) => ({
           uri: asset.uri,
           base64: asset.base64!,
-          mimeType: asset.mimeType ?? 'image/jpeg',
+          mimeType: imagePayloadMimeType(asset.base64!) ?? asset.mimeType ?? 'image/jpeg',
           width: asset.width,
           height: asset.height,
         }));

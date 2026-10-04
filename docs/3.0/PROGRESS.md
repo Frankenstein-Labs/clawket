@@ -1,5 +1,8 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 相册导出载荷 MIME 窄修（独立 `codex/image-picker-payload-mime`）。
+  - Expo Android quality 0.8 的 base64 导出为 JPEG，但原 provider GIF/PNG MIME 可保留到发送准备与 wire；仅在成功相册结果进入 PendingImage 前用最多 12 字节确认 JPEG/PNG/GIF/WebP 签名，未知签名保留原声明/默认。URI、quality、原载荷、动画导出语义、六图上限、scope 与 camera/recent-photo 路径保持。
+  - 实际 hook→发送准备→Codex 序列化帧基线 7 红/11 绿，窄修后 hook 单文件 20、既有发送准备单文件 4 项串行通过；Mobile 类型与 docs 7 指令对/5 用例通过。没有操作手机/Native、构建、发布或改负责人候选；小 GIF 真机 gallery 输出与修后 MIME 仍待 HT-PICKER-MIME-1004，源码/模拟 wire 不替代真机验收。
 - 2026-10-04 引用回复「新对话」保留源项目（本轮 Codex 全面 QA 的确定源码缺口，真机待验）。
   - ThreadScreen 原有当前连接/Agent/会话描述符已报告 project.id，但引用创建没有传给 ManualSessions，设备多项目连接可能采用默认项目。现在仅把该 opaque ID 传入普通 createSession 并加入草稿重试的作用域；没有项目的 OpenClaw/Hermes/Codex/Pi/Claude Code 保持原路径。仍只保存选中回复为可编辑草稿，不使用 fromSession、不发送或修改源会话。
   - 新增实际 ThreadScreen scoped-project 与未 mock ManualSessions 的服务回归；基线 3 个 screen 用例和 4 个 service 用例失败，5 个缺项目兼容用例通过。逐文件 in-band：项目服务 9、原服务 4、ThreadScreen 72，共 85 项通过；Mobile 类型、UI 样式 246 文件、check:docs 7 指令对/5 用例通过。非默认 QA 项目的零发送真机检查尚未执行；不将源码/单测当实机验收。没有设备、Native、生产或发布动作。
@@ -1636,6 +1639,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-PICKER-MIME-1004 | 相册导出 MIME 真机验收 | 在负责人合入本修复的 QA App，从系统相册选择小 GIF 与 PNG；仅自建 QA 会话发送一次，未知不重发。 | 观察实际 base64 签名和发送 MIME 一致、视觉首帧正确、取消/scope/六图上限保持；不宣称恢复 GIF 动画或制造容量超限。 | hook/发送 wire 回归已通过；真机 gallery 输出待负责人验收。本轮没有设备或发布动作。 |
 | HT-STEER-PENDING-1004 | Current 指引等待确认的真机验收 | 在包含修复的开发 App 上，让 Current ACK 延迟；重新输入不同或相同草稿，打开 Current/Next，再显式选择 Next 或 Stop。 | 等待期间 Current 禁用且显示发送中，选择入口/Next/Stop 可用；旧 ACK 不清新草稿，失败不重放，切换会话后旧 ACK 不修改新会话。 | 本地 257 项窄回归、类型、UI、文档和 19 语言检查通过；负责人真机验收待完成，本任务不发布。 |
 
 | HT-CODEX-ACTIONS-AUDIT-1004 | Codex 会话操作拒绝修复的审计合并阻挡 | 负责人决定既有 braces GHSA-vfj7-8cjw-p6xm 的修复或经批准窄范围例外；代理不绕过门禁。 | required audit 全绿后才可合并；当前仅本机自动回归通过，手机验收继续由主 QA 任务执行。 | 待审计决定；未合并、未发布 |
