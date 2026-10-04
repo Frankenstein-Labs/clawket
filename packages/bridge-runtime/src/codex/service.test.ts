@@ -30,6 +30,7 @@ vi.mock('./desktop-ipc.js', async importOriginal => {
 });
 import { CodexService } from './service.js';
 import { codexMessages } from './history.js';
+import { desktopTurns } from './desktop-state.js';
 import { DesktopIpcError } from './desktop-ipc.js';
 import { permissionPatch } from './settings.js';
 // Use Node's standalone loader rather than Vitest's cross-workspace transform.
@@ -1640,6 +1641,142 @@ describe('Desktop follower membership for owned conversations', () => {
       desktop.emit('follow', oldThread, true, 'desktop-b'); await settlePublications();
       expect(broadcast).not.toHaveBeenCalled();
       expect((service as any).desktopFollowers.size).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('Desktop history publication generations', () => {
+  async function setup(active = true) {
+    if (active) await start(); else await request('models.list', { sessionKey: key });
+    const nativeTurns = [{ id: 'turn-1', status: active ? 'inProgress' : 'completed', items: [
+      { type: 'userMessage', id: 'original-input', content: [{ type: 'text', text: 'hello' }] },
+    ] }] as any[];
+    const original = mock.request.getMockImplementation()!;
+    let nextTurn = 'turn-1';
+    const itemReads: Array<{ captured: any; release: () => void }> = [];
+    let pause = 0;
+    let entered: (() => void) | undefined;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'turn/start') return Promise.resolve({ turn: { id: nextTurn } });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: nativeTurns.map(turn => ({ ...turn, items: [...turn.items] })).reverse() });
+      if (method === 'thread/items/list') {
+        const captured = { data: nativeTurns.find(turn => turn.id === params.turnId).items.map((item: any) => ({ turnId: params.turnId, item })).reverse() };
+        if (pause > 0) {
+          pause -= 1;
+          return new Promise(resolve => { itemReads.push({ captured, release: () => resolve(captured) }); entered?.(); });
+        }
+        return Promise.resolve(captured);
+      }
+      return original(method, params);
+    });
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    desktop.emit('follow', threadId, true, 'desktop-reader');
+    await Promise.all([...(service as any).publishing.values()].map((slot: any) => slot.promise));
+    broadcast.mockClear(); mock.request.mockClear();
+    return {
+      nativeTurns, desktop, broadcast, itemReads,
+      nextTurn: (id: string) => { nextTurn = id; },
+      pause: () => { pause += 1; return new Promise<void>(resolve => { entered = resolve; }); },
+      full: () => desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'desktop-reader') as Promise<any>,
+    };
+  }
+  function states(broadcast: any) {
+    return broadcast.mock.calls.filter(([method]: any[]) => method === 'thread-stream-state-changed')
+      .map(([, params]: any[]) => params.change.conversationState);
+  }
+  function historyReads() { return mock.request.mock.calls.filter(([method, params]) => method === 'thread/turns/list' && params.itemsView === 'notLoaded'); }
+  it('cannot recache or broadcast an active turn after its terminal notification consumes the scheduled publication', async () => {
+    const f = await setup(); vi.useFakeTimers();
+    try {
+      const entered = f.pause(), pending = f.full(); await entered;
+      f.nativeTurns[0].status = 'completed';
+      notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[0].release();
+      await expect(pending).resolves.toMatchObject({ revision: expect.any(Number) });
+      expect(states(f.broadcast).map((state: any) => desktopTurns(state).map(turn => turn.status))).toEqual([['completed']]);
+      expect((service as any).desktopHistory.get(threadId)).toMatchObject({ complete: true, thread: { turns: [{ status: 'completed' }] } });
+      expect(historyReads()).toHaveLength(2);
+      await f.full(); expect(historyReads()).toHaveLength(2);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not keep the completed predecessor active when the next explicit turn starts during the read', async () => {
+    const f = await setup(); vi.useFakeTimers();
+    try {
+      const entered = f.pause(), pending = f.full(); await entered;
+      f.nativeTurns[0].status = 'completed'; notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      f.nextTurn('turn-2');
+      await request('chat.send', { sessionKey: key, text: 'next explicit input', idempotencyKey: 'send-2' });
+      f.nativeTurns.push({ id: 'turn-2', status: 'inProgress', items: [{ type: 'userMessage', id: 'next-input', content: [{ type: 'text', text: 'next explicit input' }] }] });
+      notify('turn/started', { turn: { id: 'turn-2' } });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[0].release(); await pending;
+      expect(desktopTurns(states(f.broadcast).at(-1)).map(turn => [turn.id, turn.status])).toEqual([['turn-1', 'completed'], ['turn-2', 'inProgress']]);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect(mock.request).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+    } finally { vi.useRealTimers(); }
+  });
+  it('publishes settings confirmed during history preparation instead of the earlier captured settings', async () => {
+    const f = await setup(false); vi.useFakeTimers();
+    try {
+      const entered = f.pause(), pending = f.full(); await entered;
+      settings = { ...settings, effort: 'high', collaborationMode: { ...settings.collaborationMode,
+        settings: { ...settings.collaborationMode.settings, reasoning_effort: 'high' } } };
+      notify('thread/settings/updated', { threadSettings: settings });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[0].release(); await pending;
+      expect(states(f.broadcast)).toEqual([expect.objectContaining({ latestThreadSettings: expect.objectContaining({ effort: 'high' }) })]);
+      expect(historyReads()).toHaveLength(1);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume', 'thread/settings/update'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('bounds re-preparation and preserves a new scheduled publication after both reads become obsolete', async () => {
+    const f = await setup(); vi.useFakeTimers();
+    try {
+      const firstEntered = f.pause(), pending = f.full(); void pending.catch(() => {}); await firstEntered;
+      notify('item/completed', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'reply-a', text: 'first stage' } });
+      await vi.advanceTimersByTimeAsync(500);
+      const secondEntered = f.pause(); f.itemReads[0].release();
+      await vi.advanceTimersByTimeAsync(0); expect(f.itemReads).toHaveLength(2); await secondEntered;
+      notify('item/completed', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'reply-b', text: 'second stage' } });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[1].release();
+      await expect(pending).rejects.toThrow('Conversation changed while its history was loading');
+      expect(historyReads()).toHaveLength(2); expect(f.broadcast).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.all([...(service as any).publishing.values()].map((slot: any) => slot.promise));
+      expect(f.broadcast).toHaveBeenCalledTimes(1);
+      expect((service as any).desktopHistory.get(threadId).complete).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['rpc', 'record-id', 'cwd'])('rejects a history result from a changed %s context before caching or publishing', async changed => {
+    const f = await setup(false), entered = f.pause(), pending = f.full(); void pending.catch(() => {}); await entered;
+    const r = (service as any).records[0];
+    if (changed === 'rpc') (service as any).rpc = (service as any).createRpc();
+    if (changed === 'record-id') r.id = randomUUID();
+    if (changed === 'cwd') r.cwd = join(root, 'other-project');
+    f.itemReads[0].release();
+    await expect(pending).rejects.toThrow('Conversation ownership changed');
+    expect(f.broadcast).not.toHaveBeenCalled();
+    expect((service as any).desktopHistory.get(threadId)?.complete).not.toBe(true);
+    expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume'].includes(method))).toBe(false);
+  });
+  it('does not restart history preparation for text deltas and overlays the latest active item', async () => {
+    const f = await setup(), entered = f.pause(), pending = f.full(); await entered;
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'reply', delta: 'one' });
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'reply', delta: ' two' });
+    f.itemReads[0].release(); await pending;
+    expect(historyReads()).toHaveLength(1);
+    expect(desktopTurns(states(f.broadcast).at(-1))[0].items).toContainEqual(expect.objectContaining({ id: 'reply', text: 'one two' }));
+  });
+  it('retires a completed cache for a late native item without reviving its run', async () => {
+    const f = await setup(false); await f.full(); f.broadcast.mockClear(); mock.request.mockClear(); vi.useFakeTimers();
+    try {
+      const late = { type: 'commandExecution', id: 'late-tool', command: 'qa-command', cwd: project, status: 'completed', exitCode: 0 };
+      f.nativeTurns[0].items.push(late);
+      notify('item/completed', { turnId: 'turn-1', item: late });
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.all([...(service as any).publishing.values()].map((slot: any) => slot.promise));
+      expect(desktopTurns(states(f.broadcast).at(-1))[0]).toMatchObject({ status: 'completed', items: expect.arrayContaining([late]) });
+      expect((service as any).runs.size).toBe(0);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume'].includes(method))).toBe(false);
     } finally { vi.useRealTimers(); }
   });
 });

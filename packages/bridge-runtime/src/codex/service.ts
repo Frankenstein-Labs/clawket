@@ -56,6 +56,7 @@ export class CodexService extends EventEmitter {
   private effectiveSettings = new Map<string, NativeSettings>();
   private settingsWaiters = new Map<string, { patch: Record<string, unknown>; resolve: (s: NativeSettings) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private desktopHistory = new Map<string, { thread: any; cursor: string | null; complete: boolean }>();
+  private desktopHistoryVersions = new WeakMap<Entry, object>();
   private historyMetadata = new Map<string, { turns: Map<string, any>; cursor?: string; complete: boolean }>();
   private recovery?: Promise<void>;
   private nextRecoveryAt = 0;
@@ -162,13 +163,13 @@ export class CodexService extends EventEmitter {
     rpc.on('diagnostic', diagnostic => { if (this.rpc === rpc) this.emit('diagnostic', diagnostic); });
     rpc.on('gap', () => {
       if (this.rpc !== rpc || this.stopped) return;
-      this.desktopHistory.clear();
+      this.invalidateDesktopHistory();
       for (const r of this.records) if (this.runs.has(r.id)) this.update({ type: 'error', sessionKey: r.id,
         code: 'frame_too_large', message: 'A large Codex response could not be loaded. Your task was not stopped; refresh its history.' });
     });
     rpc.on('closed', () => {
       if (this.rpc !== rpc || this.stopped) return;
-      this.disconnected = true; this.loaded.clear(); this.effectiveSettings.clear(); this.desktopHistory.clear(); this.retireDesktopFollowers();
+      this.disconnected = true; this.loaded.clear(); this.effectiveSettings.clear(); this.invalidateDesktopHistory(); this.retireDesktopFollowers();
       this.nextRecoveryAt = Date.now() + 1000;
       for (const waiter of this.settingsWaiters.values()) { clearTimeout(waiter.timer); waiter.reject(new Error('Codex settings could not be confirmed; reconnect before sending.')); }
       this.settingsWaiters.clear();
@@ -350,6 +351,14 @@ export class CodexService extends EventEmitter {
     const id = r.threadId;
     this.publishTimers.set(id, setTimeout(() => { this.publishTimers.delete(id); void this.publishDesktop(id).catch(() => {}); }, 500));
   }
+  private invalidateDesktopHistory(r?: Entry): void {
+    if (r) {
+      if (r.threadId) this.desktopHistory.delete(r.threadId);
+      this.desktopHistoryVersions.set(r, {});
+    } else {
+      this.desktopHistory.clear(); this.desktopHistoryVersions = new WeakMap();
+    }
+  }
   private publishing = new Map<string, { followers?: Set<string>; promise: Promise<number> }>();
   private publishDesktop(threadId: string, complete = false): Promise<number> {
     const followers = this.desktopFollowers.get(threadId);
@@ -365,39 +374,63 @@ export class CodexService extends EventEmitter {
     const work = (async () => {
       const r = this.records.find(row => row.threadId === threadId);
       if (!r || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop) throw new Error('Conversation is not owned here');
-      const settings = this.effectiveSettings.get(r.id);
-      if (!settings) throw new Error('Native effective settings unavailable; refresh the conversation');
-      let history = this.desktopHistory.get(threadId);
-      if (!history || (complete && !history.complete)) {
-        history = await loadDesktopHistory(this.rpc, threadId, r.cwd ?? this.project, complete);
+      const rpc = this.rpc, recordId = r.id, cwd = r.cwd ?? this.project;
+      const ensureOwnership = () => {
         ensureMembership();
-        if (this.stopped || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop) throw new Error('Conversation ownership changed');
-        this.desktopHistory.set(threadId, history);
-      }
-      const thread = { ...history.thread, turns: [...history.thread.turns] };
-      const active = this.runs.get(r.id);
-      if (active?.turnId) {
-        const index = thread.turns.findIndex((turn: any) => turn.id === active.turnId);
-        const old = index < 0 ? undefined : thread.turns[index];
-        const items = new Map((old?.items ?? []).map((item: any) => [item.id, item]));
-        let liveBytes = 0;
-        for (const [id, item] of [...active.items].slice(-128)) {
-          const size = Buffer.byteLength(JSON.stringify(item));
-          if (size <= 256000 && liveBytes + size <= 1024 * 1024) { items.set(id, item); liveBytes += size; }
+        if (this.stopped || this.disconnected || this.rpc !== rpc || !this.records.includes(r)
+          || r.id !== recordId || r.threadId !== threadId || (r.cwd ?? this.project) !== cwd
+          || !this.loaded.has(recordId) || this.runs.get(recordId)?.desktop) throw new Error('Conversation ownership changed');
+      };
+      // Native item/lifecycle changes retire a pending read, including when the
+      // 500ms publication joined that same promise. Re-prepare at most once.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        ensureOwnership();
+        const version = this.desktopHistoryVersions.get(r) ?? {};
+        this.desktopHistoryVersions.set(r, version);
+        const changed = () => {
+          if (this.desktopHistoryVersions.get(r) === version) return false;
+          if (attempt === 0) return true;
+          this.scheduleDesktop(r);
+          throw new Error('Conversation changed while its history was loading; refresh the conversation');
+        };
+        let history = this.desktopHistory.get(threadId);
+        if (!history || (complete && !history.complete)) {
+          try { history = await loadDesktopHistory(rpc, threadId, cwd, complete); }
+          catch (error) { ensureOwnership(); if (changed()) continue; throw error; }
+          ensureOwnership();
+          if (changed()) continue;
+          this.desktopHistory.set(threadId, history);
         }
-        const turn = { ...old, id: active.turnId, status: 'inProgress', startedAt: active.started / 1000, itemsView: 'summary', items: [...items.values()] };
-        if (index < 0) thread.turns.push(turn); else thread.turns[index] = turn;
+        // Settings and active items are projected after the final await, never
+        // from a pre-read snapshot that a native notification already replaced.
+        const settings = this.effectiveSettings.get(recordId);
+        if (!settings) throw new Error('Native effective settings unavailable; refresh the conversation');
+        const thread = { ...history.thread, turns: [...history.thread.turns] };
+        const active = this.runs.get(recordId);
+        if (active?.turnId) {
+          const index = thread.turns.findIndex((turn: any) => turn.id === active.turnId);
+          const old = index < 0 ? undefined : thread.turns[index];
+          const items = new Map((old?.items ?? []).map((item: any) => [item.id, item]));
+          let liveBytes = 0;
+          for (const [id, item] of [...active.items].slice(-128)) {
+            const size = Buffer.byteLength(JSON.stringify(item));
+            if (size <= 256000 && liveBytes + size <= 1024 * 1024) { items.set(id, item); liveBytes += size; }
+          }
+          const turn = { ...old, id: active.turnId, status: 'inProgress', startedAt: active.started / 1000, itemsView: 'summary', items: [...items.values()] };
+          if (index < 0) thread.turns.push(turn); else thread.turns[index] = turn;
+        }
+        const pendingIds = new Set([...this.approvals.values()].filter(c => c.entry === r).map(c => `${r.id}:${typeof c.wireId}:${c.wireId}`));
+        for (const [id, group] of this.questions) if (group.entry === r) pendingIds.add(id);
+        const requests = [...pendingIds].flatMap(id => this.rawRequests.has(id) ? [this.rawRequests.get(id)] : []);
+        for (const id of this.rawRequests.keys()) if (id.startsWith(r.id + ':') && !pendingIds.has(id)) this.rawRequests.delete(id);
+        const state = desktopState(thread, requests, settings, history.cursor);
+        const revision = (this.publishedRevision.get(threadId) ?? 0) + 1;
+        ensureOwnership();
+        if (changed()) continue;
+        this.desktop!.broadcast('thread-stream-state-changed', { hostId: 'local', conversationId: threadId, change: { type: 'snapshot', revision, conversationState: state } });
+        this.publishedRevision.set(threadId, revision); return revision;
       }
-      const pendingIds = new Set([...this.approvals.values()].filter(c => c.entry === r).map(c => `${r.id}:${typeof c.wireId}:${c.wireId}`));
-      for (const [id, group] of this.questions) if (group.entry === r) pendingIds.add(id);
-      const requests = [...pendingIds].flatMap(id => this.rawRequests.has(id) ? [this.rawRequests.get(id)] : []);
-      for (const id of this.rawRequests.keys()) if (id.startsWith(r.id + ':') && !pendingIds.has(id)) this.rawRequests.delete(id);
-      const state = desktopState(thread, requests, settings, history.cursor);
-      const revision = (this.publishedRevision.get(threadId) ?? 0) + 1;
-      ensureMembership();
-      if (this.stopped || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop) throw new Error('Conversation ownership changed');
-      this.desktop!.broadcast('thread-stream-state-changed', { hostId: 'local', conversationId: threadId, change: { type: 'snapshot', revision, conversationState: state } });
-      this.publishedRevision.set(threadId, revision); return revision;
+      throw new Error('Conversation changed while its history was loading; refresh the conversation');
     })().finally(() => this.publishing.delete(threadId));
     this.publishing.set(threadId, { followers, promise: work }); return work;
   }
@@ -447,7 +480,7 @@ export class CodexService extends EventEmitter {
       throw error;
     }
     for (const { record } of changed) {
-      if (record.threadId) this.desktopHistory.delete(record.threadId);
+      this.invalidateDesktopHistory(record);
       this.update({ type: 'session_info_update', session: this.descriptor(record) });
     }
   }
@@ -896,7 +929,7 @@ export class CodexService extends EventEmitter {
         const title = p.title.trim();
         return this.changeMetadata(r, async () => {
           if (r.threadId && (r.activity || this.loaded.has(r.id))) await this.rpc.request('thread/name/set', { threadId: r.threadId, name: title });
-          r.title = title; this.save(); if (r.threadId) this.desktopHistory.delete(r.threadId); this.scheduleDesktop(r);
+          r.title = title; this.save(); this.invalidateDesktopHistory(r); this.scheduleDesktop(r);
           this.update({ type: 'session_info_update', session: this.descriptor(r) }); return { ok: true };
         });
       });
@@ -932,7 +965,7 @@ export class CodexService extends EventEmitter {
           if (archived) await this.assertArchivable(r);
           await this.rpc.request(archived ? 'thread/archive' : 'thread/unarchive', { threadId: r.threadId });
           r.archived = archived; this.loaded.delete(r.id); this.effectiveSettings.delete(r.id);
-          this.desktopHistory.delete(r.threadId!); this.retireDesktopFollowers(r.threadId); this.save();
+          this.invalidateDesktopHistory(r); this.retireDesktopFollowers(r.threadId); this.save();
           this.desktop?.broadcast(archived ? 'thread-archived' : 'thread-unarchived', { hostId: 'local', conversationId: r.threadId });
           this.update({ type: 'session_info_update', session: this.descriptor(r) }); return { ok: true };
         });
@@ -941,6 +974,7 @@ export class CodexService extends EventEmitter {
         const r = this.record(p.sessionKey); if (r.native) throw new Error('Native conversation metadata is read-only'); if (this.runs.has(r.id)) throw new Error('Stop the task and wait for it to finish first');
         return this.changeMetadata(r, async () => {
           if (r.threadId && (r.activity || this.loaded.has(r.id))) { await this.assertArchivable(r); await this.rpc.request('thread/archive', { threadId: r.threadId }); }
+          this.invalidateDesktopHistory(r);
           if (r.threadId) this.retireDesktopFollowers(r.threadId);
           if (frame.method === 'sessions.delete') { this.records = this.records.filter(row => row !== r); }
           else { r.threadId = undefined; r.model = undefined; r.provider = undefined; r.preview = undefined; r.activity = undefined; r.effort = undefined; r.serviceTier = undefined; r.speedPreference = undefined; }
@@ -1228,6 +1262,7 @@ export class CodexService extends EventEmitter {
       Object.defineProperty(r.keys, input.idempotencyKey, { value: { hash, runId }, enumerable: true, configurable: true });
       r.preview = sessionPreview(input.text, !!input.attachments?.length); r.activity = Date.now(); if (!r.title) r.title = input.text.trim().slice(0, 80); r.effort = input.thinkingLevel ?? r.effort;
       try { this.save(); } catch (error) { delete r.keys[input.idempotencyKey]; Object.assign(r, previousMetadata); throw error; }
+      this.invalidateDesktopHistory(r);
       this.runs.set(r.id, { id: runId, text: '', started: Date.now(), items: new Map() }); this.update({ type: 'run_started', sessionKey: r.id, runId });
       const params = { threadId: r.threadId, input: [{ type: 'text', text: input.text }, ...images.map(a => ({ type: 'image', url: `data:${a.mimeType};base64,${a.content}` }))], ...(desktopOwned ? {} : { model: r.model, effort: r.effort, ...(r.serviceTier !== undefined ? { serviceTier: r.serviceTier } : {}) }), clientUserMessageId: input.idempotencyKey };
       const accepted = desktopOwned ? this.desktopTurn(r, params) : this.rpc.request('turn/start', params);
@@ -1274,9 +1309,18 @@ export class CodexService extends EventEmitter {
       }
       this.scheduleDesktop(r); return;
     }
-    const run = this.runs.get(r.id); if (!run || run.desktop) return;
+    const run = this.runs.get(r.id);
+    if (this.loaded.has(r.id) && !run?.desktop && (method === 'item/started' || method === 'item/completed')
+      && typeof p.item?.id === 'string') {
+      // A persisted item may arrive after the turn's terminal notification.
+      this.invalidateDesktopHistory(r); this.scheduleDesktop(r);
+    }
+    if (!run || run.desktop) return;
     this.scheduleDesktop(r);
-    if (method === 'turn/started') { if (!run.turnId) run.turnId = p.turn?.id; return; }
+    if (method === 'turn/started') {
+      if (!run.turnId || run.turnId === p.turn?.id) this.invalidateDesktopHistory(r);
+      if (!run.turnId) run.turnId = p.turn?.id; return;
+    }
     if (p.turnId && run.turnId && p.turnId !== run.turnId) return;
     const base = { sessionKey: r.id, runId: run.id };
     if (method === 'item/agentMessage/delta' && typeof p.delta === 'string') {
@@ -1332,7 +1376,7 @@ export class CodexService extends EventEmitter {
   private finish(r: Entry, stopReason: 'end_turn' | 'cancelled' | 'error', nativeTurn?: any): void {
     const run = this.runs.get(r.id); if (!run) return;
     this.runs.delete(r.id);
-    if (r.threadId) this.desktopHistory.delete(r.threadId);
+    this.invalidateDesktopHistory(r);
     for (const [id, c] of this.approvals) if (c.entry === r) { this.approvals.delete(id); this.update({ type: 'approval_resolved', approvalId: id, decision: 'expired' }); }
     for (const [id, group] of this.questions) if (group.entry === r) { this.questions.delete(id); for (const q of group.pending.keys()) this.update({ type: 'question_resolved', sessionKey: r.id, questionId: q }); }
     const reply = sessionPreview(run.final);
@@ -1348,6 +1392,7 @@ export class CodexService extends EventEmitter {
 
   async stop(): Promise<void> {
     if (this.stopped) return; this.stopped = true; this.artifacts.clear();
+    this.invalidateDesktopHistory();
     this.retireDesktopFollowers();
     for (const waiter of this.settingsWaiters.values()) { clearTimeout(waiter.timer); waiter.reject(new Error('Codex Bridge stopped')); }
     this.settingsWaiters.clear(); this.sessionActivity?.stop(); this.desktop?.stop();

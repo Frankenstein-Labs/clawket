@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex Desktop 完整历史读取的内容代际保护（用户手机连接综合验收中的源码确定性竞态）。
+  - 同一订阅集合内，历史分页读取已取到运行中 turn 后，Native 结束可清除 run/cache 并触发定时广播；旧读取稍后仍能把运行中完整缓存写回，定时广播又会合并进旧 promise。本任务在独立 fresh-main 工作树以 PR147 会员规则为 prerequisite，增加当前 RPC/record/id/cwd 与内容代际双门，最多重取一次，继续变化则拒绝并保留定时发布；最后 await 后使用新确认设置与当前 active overlay，不重发输入或建立 writer。
+  - 新增实际 Service 消费者的终态、下一 turn、迟到设置、双失效预算、上下文退休、text-delta 兼容和终态后迟到工具缓存回归。旧实现九场景七红、两兼容绿；修复后独占串行 Service 单文件 177/177、Bridge Runtime 类型检查通过，依赖为本工作树独立安装。该确定性缺口尚不能归因于用户 Desktop reopen/Retry 现场；未操作 Desktop GUI、Native/QA 会话、Production，也未部署或发布。
+
 - 2026-10-04 Codex Desktop 逐客户端跟随退役（负责人授权全面 Codex QA 修复，并补充远程续聊后 Desktop 重开报错）。
   - 只读实际安装包核对：本地 IPC 跟随有 source client，生命周期广播 version 0；此前 Bridge 只按 thread 保存一个 boolean，两个客户端跟随后任一 unfollow 会停掉另一个客户端的后续状态广播。改为每 thread 最多 128 个独立客户端，精确退役；连接丢失、Native owner 退出及 thread archive/reset/delete 清旧订阅和调度。
   - 已有订阅对新客户端和 version-1 local following-status 请求定向续订；不加载完整历史、不调用 Native dispatch。实际 owner 断开只使其 snapshot stale，不生成 no-owner／终态或自动重发。显式完整历史请求保留 IPC-frame source，完整 settings/turn 状态契约和旧 socket 栅栏保持。
