@@ -278,7 +278,16 @@ export function useHistoryScrollAnchor(scope: string, listRef: RefObject<List | 
   }, [capture, isActive, listRef, retireWindow]);
   const beginDrag = useCallback((_pagePending: boolean, position?: NativePosition) => {
     retireWindow();
-    if (isActive() && anchor.current) retirePrependedGeometry(anchor.current, latest.current.rows);
+    const saved = isActive() ? anchor.current : null;
+    if (saved) {
+      retirePrependedGeometry(saved, latest.current.rows);
+      // A settled prepend can retain its old total height. A fresh finger
+      // owns that height even if row placement must wait for its next event.
+      // Pending old-child displacement and in-flight commands stay fenced.
+      if (!saved.geometryPending && position && Number.isFinite(position.height)) {
+        saved.retiredGeometry = saved.retiredGeometry.filter(value => Math.abs(value.height - position.height) >= 0.5);
+      }
+    }
     if (corrections.current) corrections.current.offsets = corrections.current.offsets.filter(value => !value.seen);
     // Ordinary reading needs the same owner as paging. Only a valid captured
     // row disables SDK compensation; bottom settlement still releases it.
