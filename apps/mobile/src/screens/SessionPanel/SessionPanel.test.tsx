@@ -59,7 +59,31 @@ const darkColors = {
 };
 
 let mockTheme = { scheme: 'light' as 'light' | 'dark', colors: lightColors };
+let mockNativeRowEvents = false;
 const mockedAnalyticsEvents = analyticsEvents as jest.Mocked<typeof analyticsEvents>;
+
+// Native services are hosts; the installed RN Pressability state machine is real.
+jest.mock('react-native/src/private/featureflags/ReactNativeFeatureFlags', () => ({
+  shouldPressibilityUseW3CPointerEventsForHover: () => false,
+}));
+jest.mock('react-native/Libraries/Components/Sound/SoundManager', () => ({
+  playTouchSound: jest.fn(),
+}));
+jest.mock('react-native/Libraries/ReactNative/UIManager', () => ({
+  measure: (_id: number, callback: (...args: number[]) => void) => callback(0, 0, 320, 72, 0, 0),
+}));
+jest.mock('react-native/Libraries/StyleSheet/Rect', () => ({
+  normalizeRect: (value: unknown) => value,
+}));
+jest.mock('react-native/Libraries/Utilities/Platform', () => ({ OS: 'android' }));
+jest.mock('react-native/Libraries/Pressability/HoverState', () => ({ isHoverEnabled: () => false }));
+jest.mock('react-native/Libraries/Pressability/PressabilityPerformanceEventEmitter', () => ({
+  emitEvent: jest.fn(),
+}));
+// Keep TouchableOpacity/GenericTouchable real, substituting only its native button host.
+jest.mock('react-native-gesture-handler/lib/commonjs/components/GestureButtons', () => ({
+  BaseButton: ({ children, ...props }: Record<string, unknown>) => require('react').createElement('NativeRowButton', props, children),
+}));
 
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
@@ -74,11 +98,28 @@ jest.mock('react-native', () => {
       children,
     ),
   );
+  const pressableHost = host('Pressable');
+  const responderPressable = ({ children, style, ...props }: Record<string, unknown>) => {
+    const Pressability = require('react-native/Libraries/Pressability/Pressability').default;
+    const responder = ReactRuntime.useRef(null);
+    if (!responder.current) responder.current = new Pressability(props);
+    responder.current.configure(props);
+    ReactRuntime.useEffect(() => () => responder.current.reset(), []);
+    return ReactRuntime.createElement('Pressable', {
+      ...props,
+      ...responder.current.getEventHandlers(),
+      style: typeof style === 'function' ? style({ pressed: false }) : style,
+    }, children);
+  };
   return {
+    ...require('../../../__mocks__/native-animated'),
+    Easing: { quad: (value: number) => value * value, inOut: (curve: unknown) => curve },
     Platform: { OS: 'android', select: (options: Record<string, unknown>) => options.android ?? options.default },
     Keyboard: { dismiss: jest.fn() },
     AppState: { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) },
-    Pressable: host('Pressable'),
+    Pressable: ReactRuntime.forwardRef((props: Record<string, unknown>, ref: unknown) => ReactRuntime.createElement(
+      mockNativeRowEvents ? responderPressable : pressableHost, { ...props, ref },
+    )),
     ScrollView: host('ScrollView'),
     useWindowDimensions: () => ({ width: 393, height: 852, fontScale: 1 }),
     StyleSheet: {
@@ -1069,4 +1110,142 @@ it('shows approval/input/ambiguous waiting distinctly from running', () => {
     expect(view.getByTestId(`session-panel-row-${waiting.id}`).props.accessibilityLabel).toContain(text);
     view.unmount();
   }
+});
+
+describe('Android session-row touch events', () => {
+  let touchableHost: ReturnType<typeof jest.replaceProperty>;
+  const nativeState = { BEGAN: 2, CANCELLED: 3, ACTIVE: 4, END: 5 };
+  const touchEvent = () => ({
+    currentTarget: 1,
+    persist: jest.fn(),
+    nativeEvent: { pageX: 28, pageY: 28, locationX: 28, locationY: 28 },
+  });
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    mockNativeRowEvents = true;
+    const NativeTouchable = require('react-native-gesture-handler/lib/commonjs/components/touchables/TouchableOpacity').default;
+    touchableHost = jest.replaceProperty(require('@gorhom/bottom-sheet'), 'TouchableOpacity',
+      (options: Record<string, unknown>) => React.createElement(NativeTouchable, options),
+    );
+  });
+
+  afterEach(() => {
+    touchableHost?.restore();
+    mockNativeRowEvents = false;
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  function state(row: ReturnType<ReturnType<typeof render>['getByTestId']>, value: number) {
+    fireEvent(row, 'handlerStateChange', {
+      nativeEvent: {
+        state: value,
+        oldState: value === nativeState.BEGAN ? 0 : value === nativeState.ACTIVE ? nativeState.BEGAN : nativeState.ACTIVE,
+        pointerInside: true,
+      },
+    });
+  }
+  function down(row: ReturnType<ReturnType<typeof render>['getByTestId']>, withBegan = false) {
+    if (row.props.onHandlerStateChange) {
+      // NativeView may activate directly; the legacy Android JS consumer expects a separate BEGAN.
+      if (withBegan) state(row, nativeState.BEGAN);
+      state(row, nativeState.ACTIVE);
+    } else {
+      fireEvent(row, 'responderGrant', touchEvent());
+    }
+  }
+  function up(row: ReturnType<ReturnType<typeof render>['getByTestId']>) {
+    if (row.props.onHandlerStateChange) state(row, nativeState.END);
+    else fireEvent(row, 'responderRelease', touchEvent());
+  }
+  function setup(platform: SessionPanelViewProps['platform'] = 'codex', patch: Partial<SessionPanelRow> = {}) {
+    const original = { ...rowById('agent:main:main'), ...patch };
+    const options = props({ rows: [original], platform });
+    const view = render(<SessionPanelView {...options} />);
+    return { original, options, view, row: view.getByTestId('session-panel-row-' + original.id) };
+  }
+
+  it.each(['codex', 'openclaw', 'hermes'] as const)('opens actions after a held touch without selecting (%s)', (platform) => {
+    const { options, view, row } = setup(platform);
+    down(row);
+    act(() => jest.advanceTimersByTime(599));
+    expect(view.queryByTestId('session-panel-actions')).toBeNull();
+    act(() => jest.advanceTimersByTime(1));
+    up(row);
+    expect(view.getByTestId('session-panel-action-rename')).toBeTruthy();
+    expect(options.onSelectSession).not.toHaveBeenCalled();
+    expect(options.onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps the normal BEGAN sequence as a positive timer control', () => {
+    const { options, view, row } = setup();
+    down(row, true);
+    act(() => jest.advanceTimersByTime(600));
+    up(row);
+    expect(view.getByTestId('session-panel-action-export')).toBeTruthy();
+    expect(options.onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('selects exactly once on an ordinary short touch', async () => {
+    const { original, options, view, row } = setup();
+    down(row);
+    act(() => jest.advanceTimersByTime(100));
+    await act(async () => up(row));
+    expect(options.onSelectSession).toHaveBeenCalledTimes(1);
+    expect(options.onSelectSession).toHaveBeenCalledWith(original);
+    expect(options.onClose).toHaveBeenCalledTimes(1);
+    expect(view.queryByTestId('session-panel-actions')).toBeNull();
+  });
+
+  it('lets a vertical scroll cancel the row before its long-press deadline', () => {
+    const { options, view, row } = setup();
+    down(row, true);
+    act(() => jest.advanceTimersByTime(100));
+    if (row.props.onHandlerStateChange) state(row, nativeState.CANCELLED);
+    else {
+      expect(row.props.onResponderTerminationRequest()).toBe(true);
+      fireEvent(row, 'responderTerminate', touchEvent());
+    }
+    act(() => jest.advanceTimersByTime(1_400));
+    expect(view.queryByTestId('session-panel-actions')).toBeNull();
+    expect(options.onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps capability gates for a running row with no available actions', async () => {
+    const { options, view, row } = setup('codex', {
+      hasActiveRun: true,
+      allowedActions: { pin: false, rename: false, reset: false, delete: false },
+      sessionId: undefined,
+    });
+    down(row);
+    act(() => jest.advanceTimersByTime(1_400));
+    await act(async () => up(row));
+    expect(view.queryByTestId('session-panel-actions')).toBeNull();
+    expect(options.onSelectSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the accessible long-press action without selecting the row', () => {
+    const { options, view, row } = setup();
+    const target = row.findAll(node => typeof node.props.onAccessibilityAction === 'function')[0] ?? row;
+    expect(target.props.accessibilityActions).toEqual([{ name: 'longpress', label: 'Session actions' }]);
+    fireEvent(target, 'accessibilityAction', { nativeEvent: { actionName: 'longpress' } });
+    expect(view.getByTestId('session-panel-action-rename')).toBeTruthy();
+    expect(options.onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('opens the selected search result without dismissing the panel on release', () => {
+    const { options, view, original } = setup('codex', {
+      title: 'Disposable QA selected', searchableText: 'disposable qa selected',
+    });
+    fireEvent.changeText(view.getByTestId('session-panel-search'), 'Disposable QA');
+    const row = view.getByTestId('session-panel-row-' + original.id);
+    down(row);
+    act(() => jest.advanceTimersByTime(600));
+    up(row);
+    expect(view.getByTestId('session-panel-action-export')).toBeTruthy();
+    expect(view.getByTestId('session-panel-search').props.value).toBe('Disposable QA');
+    expect(options.onSelectSession).not.toHaveBeenCalled();
+    expect(options.onClose).not.toHaveBeenCalled();
+  });
 });

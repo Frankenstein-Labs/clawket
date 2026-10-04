@@ -11,10 +11,12 @@ const config = {
     }],
     // ESM-only dependencies used by host tests need CommonJS lowering.
     'node_modules/@react-navigation/routers/.*\\.js$': 'babel-jest',
+    // Session-row gesture regressions run RN's installed responder state machine.
+    'node_modules[/\\\\]react-native[/\\\\]Libraries[/\\\\]Pressability[/\\\\]Pressability\\.js$': 'babel-jest',
     'node_modules[/\\\\]remend[/\\\\]dist[/\\\\]index\\.js$': 'babel-jest',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(tweetnacl|js-sha256|remend|@react-navigation/routers)/)',
+    'node_modules/(?!(tweetnacl|js-sha256|remend|@react-navigation/routers)/|react-native/Libraries/Pressability/Pressability\\.js$)',
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   setupFiles: ['./jest.setup.ts'],

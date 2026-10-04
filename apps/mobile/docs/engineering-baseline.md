@@ -34,6 +34,8 @@ npm run check:docs
 
 The repository required gate is intentionally broader than the focused commands and also covers relay and bridge workspaces. It runs only self-contained checks suitable for a clean CI host. The broader `npm test` command additionally includes bridge tests that require the external read-only Hermes checkout; run `npm run test:hermes-integration --workspace @clawket/bridge-runtime` directly when diagnosing that boundary.
 
+Session-row touch regressions exercise installed RNGH `TouchableOpacity` / `GenericTouchable` and RN `Pressability` with native hosts substituted. The exact Pressability Flow entry has a bounded Babel transform, checked for Windows and POSIX paths. Android's legacy RNGH consumer needs a separate `BEGAN` to start its hold timer; a direct `ACTIVE` then `END` can select instead. The responder tests cover timer, release and cancellation behavior, but do not prove a captured phone's native event sequence, gesture arbitration or pressed rendering.
+
 ## Native synchronization
 
 After changing Expo, React Native, an Expo module, or another native dependency:

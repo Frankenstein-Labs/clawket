@@ -25,7 +25,7 @@ import {
   SquarePen,
 } from 'lucide-react-native';
 import { ChevronRight } from '../../components/ui/DirectionalIcon';
-import { BottomSheetFlatList, TouchableOpacity as SheetTouchableOpacity } from '@gorhom/bottom-sheet';
+import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { useTranslation } from 'react-i18next';
 import type { AgentAdapter, AgentDescriptor, ProjectDescriptor, Capabilities } from '@clawket/agent-protocol';
 
@@ -280,8 +280,8 @@ const SessionRow = memo(function SessionRow({
       : null;
 
   return (
-    <SheetTouchableOpacity
-      activeOpacity={0.72}
+    <Pressable
+      delayLongPress={600}
       testID={`session-panel-row-${row.id}`}
       accessibilityRole="button"
       accessibilityLabel={[title, working ? t('Working') : null, attention === 'input' || attention === 'approval' || waiting ? preview : null].filter(Boolean).join(', ')}
@@ -294,7 +294,11 @@ const SessionRow = memo(function SessionRow({
       onAccessibilityAction={(event) => {
         if (event.nativeEvent.actionName === 'longpress') openActions();
       }}
-      style={[styles.sessionRow, selected ? { backgroundColor: theme.colors.accentSoft } : null]}
+      style={({ pressed }) => [
+        styles.sessionRow,
+        selected ? { backgroundColor: theme.colors.accentSoft } : null,
+        pressed ? { opacity: 0.72 } : null,
+      ]}
     >
       <SessionTile row={row} agent={agent} working={working} />
       <View style={styles.copy}>
@@ -340,7 +344,7 @@ const SessionRow = memo(function SessionRow({
           </View>
         ) : null}
       </View>
-    </SheetTouchableOpacity>
+    </Pressable>
   );
 });
 
