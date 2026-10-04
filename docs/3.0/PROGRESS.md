@@ -1,5 +1,12 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 Codex b2 真机普通阅读、R4Q partial 与隔离 Profile 开始；图片 MIME/引用项目修复整合，全面验收继续。
+  - b2 完整手机缓存22,534,963字节/SHA0fb6996b…的全传输属29347；开发reload白屏后仅一次保数据QA冷开，新10636前后size/SHA相同，不能冒称第二次全传输。同高修复已实际加载；Root亲看9帧/18次历史drag由37–40读至1–4未见大空白，不是精确pixel anchor或闲置空白已修证明。
+  - 032/033串行naturalEOF全解120/21编码帧，独立12contact及原帧审查，Root另看3sheet与关键原帧；032正文存在、033始终菜单遮挡，稀疏VFR不等连续绘制覆盖。034–040待传输/容器/视觉审查。R4Q正常Create/init及oneCurrent成立，second draft在freshgate见工具完成后未发，0secondCurrent/0TaskStop，2 starts/receipts/completes、1guide/0abort，自然终态保留，partial不冒称全链通过。
+  - R4Q actual started及延迟menuStop后完整取得202,454字节/SHA7f505175…；生产encoder严格valid256条，唯一54.4px差的raw已52.4秒旧。读取距末写39分28秒，capturing是历史值，不证明当下liveness/paint/空白原因。
+  - B旧未用邀请码到期后独立刷新同既有Preview房间一次、手机oneDone配对并移除两exact临时QR。正常empty创建1mapped/0Bridge receipt/0Send；实际资料页8模型/7skills/1AGENTS，quota—不可用。后续短暂offline在任何Reconnect tap前自行恢复，原Bridge代际/配置稳定，原因未定；隔离六页写入与恢复继续，C/E/真实HOME/Production未改。
+  - Root整合quote be0→c918与MIME1f302→c59，保现有composer规则及双方进度。实际picker20/prep4/project-reply9/legacy4/ThreadScreen74共111逐文件串行、Mobile类型通过；docs先捕获B fixture遗漏CLAUDE，补精确相对link后10指令对/5用例通过。新手机media/quote仍待。b2 exact CI及两standalone功能绿、唯一未批准braces仍阻merge；PR141/158/159未merge/release，Desktop原Retry仍owner-only GUI。
+
 - 2026-10-04 相册导出载荷 MIME 窄修（独立 `codex/image-picker-payload-mime`）。
   - Expo Android quality 0.8 的 base64 导出为 JPEG，但原 provider GIF/PNG MIME 可保留到发送准备与 wire；仅在成功相册结果进入 PendingImage 前用最多 12 字节确认 JPEG/PNG/GIF/WebP 签名，未知签名保留原声明/默认。URI、quality、原载荷、动画导出语义、六图上限、scope 与 camera/recent-photo 路径保持。
   - 实际 hook→发送准备→Codex 序列化帧基线 7 红/11 绿，窄修后 hook 单文件 20、既有发送准备单文件 4 项串行通过；Mobile 类型与 docs 7 指令对/5 用例通过。没有操作手机/Native、构建、发布或改负责人候选；小 GIF 真机 gallery 输出与修后 MIME 仍待 HT-PICKER-MIME-1004，源码/模拟 wire 不替代真机验收。
