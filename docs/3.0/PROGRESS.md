@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 QA 几何记录单文件缓存提取（负责人授权独立任务，默认关闭，本机窄验证完成）。
+  - 在现有开发内存 collector 上增加 Android QA 专用 Dev Menu Start/Stop，需 `__DEV__`、Android、精确 QA 包名和静态环境 opt-in 四门；注册不采样。仅已接受 Start 消耗进程级一次资格，拒绝可显式重试、未知结果封闭；Fast Refresh/新 Thread 不复活旧采集。
+  - 只读已有 ring，不新增 raw/SDK 查询、React render、布局或滚动；固定缓存 tmp/final、10 秒/122 次/20 分钟/单在途写，最多 256 条/256 KiB 严格标量重验。不能宣称 sandbox chmod/fsync、持久完成、原闲置空白根因或真机已采集。
+  - fresh origin/main 独立 worktree，显式依赖原 geometry collector；独立安装、heavy 串行执行实际 partial Start 基线红→绿，cache 17/绑定 11/原 collector 11/原 hook 8 共 47 回归通过；Mobile typecheck、docs 7 对/5 用例、UI 250 文件通过。补齐 installed Expo 公开 cacheDirectory/moveAsync 的两条类型声明。负责人组合树、设备/Native/QA 服务未改；真机捕捉需要新明确 QA opt-in 与实际加载字节、PID、Start intent/文件时效证据，远端 CI 和现场验收独立进行。
 - 2026-10-04 Codex Desktop 完整历史读取的内容代际保护（用户手机连接综合验收中的源码确定性竞态）。
   - 同一订阅集合内，历史分页读取已取到运行中 turn 后，Native 结束可清除 run/cache 并触发定时广播；旧读取稍后仍能把运行中完整缓存写回，定时广播又会合并进旧 promise。本任务在独立 fresh-main 工作树以 PR147 会员规则为 prerequisite，增加当前 RPC/record/id/cwd 与内容代际双门，最多重取一次，继续变化则拒绝并保留定时发布；最后 await 后使用新确认设置与当前 active overlay，不重发输入或建立 writer。
   - 新增实际 Service 消费者的终态、下一 turn、迟到设置、双失效预算、上下文退休、text-delta 兼容和终态后迟到工具缓存回归。旧实现九场景七红、两兼容绿；修复后独占串行 Service 单文件 177/177、Bridge Runtime 类型检查通过，依赖为本工作树独立安装。该确定性缺口尚不能归因于用户 Desktop reopen/Retry 现场；未操作 Desktop GUI、Native/QA 会话、Production，也未部署或发布。
