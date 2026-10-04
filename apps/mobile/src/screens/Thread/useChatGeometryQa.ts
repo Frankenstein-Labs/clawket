@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { AppState } from 'react-native';
 import type { FlashListRef } from '@shopify/flash-list';
 import { createChatGeometryQa, type ChatGeometryQaApi } from './chatGeometryQa';
+import { registerChatGeometryQaCache } from './registerChatGeometryQaCache';
 import type { UiThreadFollow } from './useUiThreadFollow';
 
 const QUERY_GATE = Symbol.for('clawket.chatGeometryQa.queryGate');
@@ -18,6 +19,7 @@ if (collector) {
   // A fixed, private gate survives Fast Refresh without retaining old rings.
   host.__CLAWKET_CHAT_GEOMETRY_QA__ = Object.freeze({ ...collector.api, [QUERY_GATE]: collector.queryGate });
 }
+registerChatGeometryQaCache(collector?.api ?? null);
 
 type ReadingState = Readonly<{
   offset: number;
