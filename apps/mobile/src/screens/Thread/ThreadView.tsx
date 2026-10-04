@@ -727,7 +727,11 @@ export function ThreadView({
     const prompt = messages.find(opensTurn);
     return prompt ? renderKeyOf(prompt) : null;
   }, [messages, nativeWorkKey]);
-  const approvalWaiting = capabilities.execApproval && Boolean(liveWork.pendingApproval);
+  // Current conversation requests remain actionable when a partial page
+  // cannot prove their execution membership. They do not become tool work.
+  const attentionApproval = messages.find((message) => message.approval?.kind !== 'pair'
+    && isActionableApproval(message, capabilities, Date.now()));
+  const approvalWaiting = Boolean(attentionApproval);
   // Seen on this phone: history reloads can drop a step's own start time.
   const workScope = activeWork?.scope ?? displayScope;
   const stepsSeenRef = useRef<{ turn: string | null; scope: object | string; displayScope: string; at: number } | null>(null);
@@ -764,7 +768,7 @@ export function ThreadView({
   const dockVisible = !locked && !sessionPreview && !questionPending && (runDockVisible || dockOffline);
   const dockShown = dockVisible && !showSlashSuggestions && !composerExpanded;
   const dockPhase = resolveWorkDockPhase({
-    work: approvalWaiting ? liveWork : { ...liveWork, pendingApproval: undefined },
+    work: { ...liveWork, pendingApproval: attentionApproval },
     messages,
     offline: dockOffline,
     active: activeWork,
@@ -1268,11 +1272,11 @@ export function ThreadView({
   useEffect(() => {
     if (!dockShown || dockPhase.kind === 'approval' || dockPhase.kind === 'offline') setWorkPanelOpen(false);
   }, [dockPhase.kind, dockShown]);
-  const liveWorkRef = useRef(liveWork);
-  liveWorkRef.current = liveWork;
+  const attentionApprovalRef = useRef(attentionApproval);
+  attentionApprovalRef.current = attentionApproval;
   // "Review" takes the user to the approval card, wherever they were reading.
   const attendApproval = useCallback(() => {
-    const approval = liveWorkRef.current.pendingApproval;
+    const approval = attentionApprovalRef.current;
     if (!approval) return;
     const rows = timelineItemsRef.current;
     const index = rows.findIndex((row) => row.key === `message:${renderKeyOf(approval)}`);
@@ -2468,9 +2472,13 @@ function approvalCategoryIcon(
 
 /** An approval the person can still answer is on screen (supported kind, not yet expired). */
 function hasPendingApproval(messages: ReadonlyArray<UiMessage>, capabilities: Capabilities, nowMs: number): boolean {
-  return messages.some(({ approval }) => approval?.status === 'pending'
+  return messages.some((message) => isActionableApproval(message, capabilities, nowMs));
+}
+
+function isActionableApproval({ approval }: UiMessage, capabilities: Capabilities, nowMs: number): boolean {
+  return approval?.status === 'pending'
     && (approval.kind === 'pair' ? capabilities.pairRequests : capabilities.execApproval)
-    && (approval.kind === 'pair' || approval.expiresAtMs === null || approval.expiresAtMs > nowMs));
+    && (approval.kind === 'pair' || approval.expiresAtMs === null || approval.expiresAtMs > nowMs);
 }
 
 function approvalOutcome(
