@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 0.160 首轮 lazy 线程兼容与每次发送权限绑定（独立任务，手机复测待新 QA）。
+  - A4L 首次 Read-only 选择的固定诊断为 request_failed，尚无初始化输入；reference 专门回归确证未 materialize 的线程不能 resume，同一已加载线程的 metadata read 有兼容返回。该源码事实支持修复路径，不从未记录原生错误推定现场唯一原因。
+  - 仅当前 RPC 成功 thread/start 的精确 record/native ID/cwd/loaded 资格允许首轮 metadata 验证；完整 ACK 提供命名权限，再在 0.160 turn/start 显式绑定 permissions/policy/reviewer，不能同时发 sandboxPolicy。资格在实际 dispatch 前退休；旧 index/cold resume/import/Desktop 无推断 fallback，未知发送不重放、不创建第二 writer。已保存会话保留 warm 配置围栏；配置一致不是实际 execution attestation，Owner environment/真实 Read-only 仍待新手机 QA。
+  - 独立实际 service 回归基线 217 项中 6 红；修复及 context/closed/granular 边界共 224 项全绿。Runtime 类型和 docs 7 对/5 项通过，自身依赖与声明独立构建；源码 peer 通过，未操作 Native、手机、账户或 Production。
+
 - 2026-10-04 Codex 0.160 已确认权限与配置读回漂移围栏（本轮安卓真机发现，独立任务）。
   - 后续 A4K 首次权限选择和 R4M 首次发送均被配置围栏拒绝；原现场关闭且未重试。源码确证完整 settings parser 错将 schema 可省略的 effort/tier/collaboration 字段用于权限核验，新增 4 条合法省略回归基线全红。权限独立投影保留 cwd/policy/reviewer/sandbox/profile、代际/idle/cache/receipt 围栏和混合写完整 ACK，并增加 metadata-only 固定失败类别/字段类型诊断；现场具体返回尚未捕获，不能认定 606/614 由这些省略字段导致，实际 Read-only 验收仍待新 QA。
   - 独立 service 单文件 193 项、Runtime/CLI 类型（自身依赖声明构建）与 docs 7 对/5 项通过；新增 16 项包含可选字段、混合写、损坏权限字段和逐字段日志隐私。源码 peer 通过；仅发布代码 PR，未重启现场或更改 Native/global/Production。

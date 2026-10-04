@@ -35,6 +35,25 @@ export function nativePermissionSettings(value: any): NativePermissionSettings |
     sandboxPolicy: value.sandbox as NativePermissionSettings['sandboxPolicy'], activePermissionProfile: profile };
 }
 
+/** Exactly supported 0.160 turn overrides; never mix a named profile with sandboxPolicy. */
+export function nativeTurnPermissions(settings: NativePermissionSettings): Record<string, unknown> | undefined {
+  const id = (settings.activePermissionProfile as { id?: unknown } | null)?.id;
+  if (typeof id !== 'string' || !id.trim() || id.length > 200
+    || !['user', 'auto_review', 'guardian_subagent'].includes(settings.approvalsReviewer)
+    || !['readOnly', 'workspaceWrite', 'dangerFullAccess', 'externalSandbox'].includes(settings.sandboxPolicy.type)
+    || !matchesNativeSettings(settings, { permissions: id })) return;
+  const policy = settings.approvalPolicy;
+  if (typeof policy === 'string') {
+    if (!['untrusted', 'on-request', 'never'].includes(policy)) return;
+  } else {
+    const granular = policy.granular;
+    if (Object.keys(policy).length !== 1 || !granular || typeof granular !== 'object' || Array.isArray(granular)
+      || !['mcp_elicitations', 'rules', 'sandbox_approval'].every(key => typeof (granular as Record<string, unknown>)[key] === 'boolean')
+      || Object.entries(granular).some(([key, value]) => !['mcp_elicitations', 'rules', 'sandbox_approval', 'request_permissions', 'skill_approval'].includes(key) || typeof value !== 'boolean')) return;
+  }
+  return { permissions: id, approvalPolicy: typeof policy === 'string' ? policy : { granular: { ...(policy.granular as object) } }, approvalsReviewer: settings.approvalsReviewer };
+}
+
 export function nativeSettings(value: any, resumed = false, legacyDefault = false): NativeSettings | undefined {
   const sandboxPolicy = resumed ? value?.sandbox : value?.sandboxPolicy;
   const effort = resumed ? value?.reasoningEffort : value?.effort;
