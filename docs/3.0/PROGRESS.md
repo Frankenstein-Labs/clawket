@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 组合 527e 实际加载与首轮配置请求失败现场；全面验收继续。
+  - Root 串行组合 CodexService 297、ThreadView 201、history anchor 20、真实 installed FlashList contract 2 全绿；Mobile/Runtime/CLI 类型、docs 9 指令对/5 用例与本地开发 CLI 通过。实际旧 C/E 认证 idle（C 17/E 1057，全部 0 active）、同代检查后各只一次 parent SIGTERM，旧 parent/精确 Native child/端口消失；新 CLI 2712826b… 与手机完整缓存 512bc17b…（22,503,924 字节）校验。Development reverse 丢失导致停在启动页；恢复同两开发端口后加载新缓存。仅 QA 冷启且保留数据，Production/Native Desktop/商店包未更改。
+  - fresh A4L 新建 empty 会话，GPT6.1Sol/Low/Standard 正常；首次 Read-only 626 仍拒绝。真实 metadata diagnostic 是 request_failed，所有 response/thread 字段 absent，未进入解析；固定创建窗唯一 record 为 0 receipts/permissionsUnconfirmed，固定 first/cwd Native 只读查询 0 行。0 初始化/审批主输入、0决定/Retry/fixture read mode；关闭现场不重放，Readonly execution/Allow Once 尚未验收。
+  - 官方 reference 有 thread_resume_rejects_unmaterialized_thread 回归：首次用户输入前 resume 可失败，而 loaded metadata-only read 支持未落盘线程。此源事实与现场类别相符，但 request_failed 包括其它拒绝/超时，尚不唯一认定现场原因。新建资格/独立 idle 读与真实 turn 权限绑定继续修复；不得仅跳过 probe 放行此前 A4H 的权限执行漂移。
+  - exact 527e CI 37180005465 三 Mobile 分片、static/tests、v1、secret、macOS/Windows 全绿；Root 精读 audit 111370475089，唯一未批准公告仍两锁文件 braces GHSA-vfj7-8cjw-p6xm。PR141 与相关独立 PR 未合并、未发布；owner-only 审计和 Desktop GUI 检查不绕过。普通阅读空白新候选仍需实际 raw/SDK 位置证据，不以滚动恢复或合成时序宣布已修。
+
 - 2026-10-04 Codex 组合候选 d843 已实际加载，权限确认仍阻断新会话首发；全面真机验收继续。
   - 新开发 CLI SHA `8fe4ba52…` 与 actual 手机缓存 bundle `0d2ea853…`（22,503,721 字节）经进程代际、配置和完整字节校验；C/E 仅在认证目录显式 idle 后更新，Production、商店包和账号配置保持。首次加载的短暂白屏随后出现正文；该 QA PID 的过滤日志为空，不能声称未发生错误。
   - fresh A4K 新会话首次选择 Read-only 即返回 permissionsUnconfirmed，0 输入、0 baseline、0 审批决定；fresh R4M 保持默认 Workspace，唯一 pure-init Send 也被同一配置校验阻断。手机显示尚未发送；对应唯一创建窗 record 为 0 receipts，固定 first/cwd 的只读 Native 查询 0 行。两轮关闭、不重试，不发送 approval main、Current、Stop 或其他后续输入；尚未验证真实 Read-only 执行、Allow Once 崩溃回归或新 alias 的真机效果。
