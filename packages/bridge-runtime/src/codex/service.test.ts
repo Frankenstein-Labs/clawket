@@ -1508,3 +1508,138 @@ it('reports package version and protects active work before fencing update admis
   await expect(subject.request({ type: 'req', id: 'after', method: 'sessions.list' })).rejects.toThrow('restarting');
   await expect((subject as any).desktopRequest('thread-owner-discovery', { conversationId: threadId })).rejects.toThrow('restarting');
 });
+
+
+describe('Desktop follower membership for owned conversations', () => {
+  async function settlePublications() {
+    await Promise.all([...(service as any).publishing.values()].map((entry: any) => entry.promise ?? entry));
+  }
+  async function owned() {
+    await request('models.list', { sessionKey: key });
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    return { desktop, broadcast };
+  }
+  async function changeNativeSettings() {
+    settings = { ...settings, effort: 'high', collaborationMode: { ...settings.collaborationMode,
+      settings: { ...settings.collaborationMode.settings, reasoning_effort: 'high' } } };
+    notify('thread/settings/updated', { threadSettings: settings });
+    await vi.advanceTimersByTimeAsync(500); await settlePublications();
+  }
+  it.each(['unfollow', 'disconnect'])('continues native snapshots for the other subscribed client after one client %s', async action => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications();
+      desktop.emit('follow', threadId, true, 'desktop-b'); await settlePublications();
+      broadcast.mockClear(); mock.request.mockClear();
+      if (action === 'unfollow') desktop.emit('follow', threadId, false, 'desktop-a');
+      else desktop.emit('client-offline', 'desktop-a');
+      await changeNativeSettings();
+      expect(broadcast).toHaveBeenCalledTimes(1);
+      expect(broadcast.mock.calls[0]).toEqual(['thread-stream-state-changed', expect.objectContaining({ conversationId: threadId,
+        change: expect.objectContaining({ conversationState: expect.objectContaining({ latestThreadSettings: expect.objectContaining({ effort: 'high' }) }) }) })]);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume', 'thread/settings/update'].includes(method))).toBe(false);
+      broadcast.mockClear(); desktop.emit('follow', threadId, false, 'desktop-b'); await changeNativeSettings();
+      expect(broadcast).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it('retires the final disconnected client without ending the native task or dispatching another turn', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications(); broadcast.mockClear(); mock.request.mockClear();
+      desktop.emit('client-offline', 'desktop-a'); await changeNativeSettings();
+      expect(broadcast).not.toHaveBeenCalled();
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'turn/interrupt', 'thread/resume'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('retains the explicit complete-history requester independently from another follower', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications();
+      await desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'desktop-b');
+      desktop.emit('follow', threadId, false, 'desktop-a'); broadcast.mockClear(); mock.request.mockClear();
+      await changeNativeSettings(); expect(broadcast).toHaveBeenCalledTimes(1);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume', 'thread/settings/update'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not retire existing followers for malformed or unknown source identities', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications(); broadcast.mockClear();
+      desktop.emit('follow', threadId, false); desktop.emit('follow', threadId, false, '');
+      desktop.emit('follow', threadId, false, 'unknown-client');
+      await changeNativeSettings(); expect(broadcast).toHaveBeenCalledTimes(1);
+      await expect(desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId, clientId: 'desktop-a' })).rejects.toThrow('Invalid Desktop follower');
+    } finally { vi.useRealTimers(); }
+  });
+  it('retires all old memberships after the broker connection is lost', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications(); broadcast.mockClear();
+      desktop.emit('offline'); await changeNativeSettings(); expect(broadcast).not.toHaveBeenCalled();
+      desktop.emit('follow', threadId, true, 'desktop-b'); await settlePublications(); broadcast.mockClear();
+      await changeNativeSettings(); expect(broadcast).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+  it('discards an in-flight history snapshot after its final follower leaves', async () => {
+    const { desktop, broadcast } = await owned();
+    const original = mock.request.getMockImplementation()!;
+    let resume!: () => void;
+    mock.request.mockImplementation((method, params) => method === 'thread/turns/list'
+      ? new Promise(resolve => { resume = () => resolve(original(method, params)); }) : original(method, params));
+    desktop.emit('follow', threadId, true, 'desktop-a');
+    const slot = [...(service as any).publishing.values()][0] as any;
+    const pending = slot.promise ?? slot;
+    await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+    desktop.emit('follow', threadId, false, 'desktop-a'); resume();
+    await expect(pending).rejects.toThrow('Desktop subscription changed');
+    expect(broadcast).not.toHaveBeenCalled();
+    expect((service as any).desktopHistory.has(threadId)).toBe(false);
+    expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+  });
+  it('prepares a renewed client snapshot after retiring an in-flight old broker subscription', async () => {
+    const { desktop, broadcast } = await owned();
+    const original = mock.request.getMockImplementation()!;
+    let resume!: () => void, first = true;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/turns/list' && first) {
+        first = false; return new Promise(resolve => { resume = () => resolve(original(method, params)); });
+      }
+      return original(method, params);
+    });
+    desktop.emit('follow', threadId, true, 'desktop-a');
+    const slot = [...(service as any).publishing.values()][0] as any;
+    const old = slot.promise ?? slot;
+    await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+    desktop.emit('offline');
+    const next = desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'desktop-b');
+    void next.catch(() => {});
+    await Promise.resolve(); await Promise.resolve();
+    resume(); await expect(old).rejects.toThrow('Desktop subscription changed');
+    await expect(next).resolves.toMatchObject({ revision: 1 });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(mock.request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(2);
+    expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+  });
+  it('bounds each owned conversation to 128 subscribers and admits a new one only after retirement', async () => {
+    const { desktop } = await owned();
+    for (let i = 0; i < 128; i++) desktop.emit('follow', threadId, true, `desktop-${i}`);
+    await settlePublications();
+    await expect(desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'overflow')).rejects.toThrow('Too many Desktop followers');
+    desktop.emit('client-offline', 'desktop-0');
+    await expect(desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'replacement')).resolves.toMatchObject({ revision: expect.any(Number) });
+  });
+  it('retires native-thread memberships on reset and does not revive them for its next native identity', async () => {
+    const { desktop, broadcast } = await owned();
+    desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications();
+    const oldThread = threadId;
+    await request('sessions.reset', { sessionKey: key });
+    threadId = randomUUID(); await request('models.list', { sessionKey: key });
+    vi.useFakeTimers();
+    try {
+      broadcast.mockClear(); await changeNativeSettings(); expect(broadcast).not.toHaveBeenCalled();
+      desktop.emit('follow', oldThread, true, 'desktop-b'); await settlePublications();
+      expect(broadcast).not.toHaveBeenCalled();
+      expect((service as any).desktopFollowers.size).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
