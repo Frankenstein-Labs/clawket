@@ -537,7 +537,7 @@ Pending input and approval attention outrank working animation in the roster/thr
 
 Project chat skill pickers pass the concrete session context and fence both fetches and dismissal handoffs across session changes. Sessions-first model catalog pages have no global selection action when no main conversation exists; model changes belong to a concrete chat. Failed writes remain visible after a picker closes, and catalog views preserve native recommendation order.
 
-Media-only Add sheets use content height; retain bounded detents when showing photo strips or additional actions. Attachment removal targets must fit within their parent hit-test bounds, not only declare a 44-point style outside the parent.
+Media-only Add sheets use content height; retain bounded detents when showing photo strips or additional actions. Attachment removal targets must fit within their parent hit-test bounds, not only declare a 44-point style outside the parent. Reserve trailing room so the 44-point remove target, including hitSlop, leaves the thumbnail center available for preview; do not shrink the accessible target.
 
 Model search keeps SectionList virtualization but disables native clipped-subview removal: replacing provider sections during keyboard/sheet resizing must not detach Fabric children twice. Verify repeated filtering/clearing on Android after list lifecycle changes.
 
