@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 真机 R4H 控制链继续验收（仍未完成）。
+  - 手机实际缓存验证 d96be1e bundle（22,502,297 字节，SHA aca01e8636379348bd188f67a848624da8b7094321a90edeca1d11cde2d59e6d）；C/E Preview owners 已按 authenticated explicit-idle 校验更新到 bba5a2e5 development CLI，配置字节不变。先前 IPv6 Metro / reverse 缺失是开发加载问题，现 IPv4 / reverse 修复后载入候选，非 Codex 连接失败。
+  - fresh 初始化与唯一主任务后，两次同文 Current 由独立原生项绑定同一 original turn；实际第二条命令持续 pending，第 2 步与整轮计时未重置。三条 Next 保持 Native absent；空草稿 Stop 一次后原 turn aborted，三条可见 held。随后 Edit 恢复完整原稿，移除第三条，再 explicit idle Send 编辑稿，先编辑稿后第二条各自完成；4 starts/receipts、3 completes、1 abort，无旧稿/被移除输入。此次先 Stop 再编辑，不能冒称运行中编辑后 second-held Send now；该组合仍待 fresh 复测。冻结 v8 对官方 same-call cancellation 非 Script 字串保持 unverified，不改旧 baseline/验收器，也不把它当额外命令或 OS child 已终止。
+  - 录屏 018 约 30 分钟已保存，完整传输/逐窗检查继续。现场确认 expanded Send 的 Current/Next 被重新抢焦点的键盘遮住，手动 Hide 即见；窄 focus 修复已集成，组合与真机验证待完成。另捕获两 guide canonical bubble 时间退回 main start，Native 原条目时间明确存在，Bridge user clock 修复在独立任务中。所有 raw evidence 私有；商店 App、Production、发包/发布与未批准 audit 例外未动。
+
 - 2026-10-04 展开输入框发送后的 Current/Next 选择器被键盘遮住：真机选择器已有遮罩，手动隐藏键盘后立即可见；源码确认 Send 后收起触发两次无条件恢复焦点，覆盖发送前 blur。独立 fresh main 分支让发送及显式 blur 同步退休待执行布局焦点，仅手动编辑或显式 focus 可重新声明，打开选择器同时 dismiss 键盘。保留普通 compact Send、同一原生输入/草稿、两平台手动展开收起和各后端协议。实际 Composer 基线 3 红/3 绿、Screen 入口基线 1 红均命中缺陷；修复后 Composer 6、Screen 整文件 70 与 Mobile 类型检查串行通过，UI 样式 246 文件、设计系统及指令文档 7 对/5 用例通过。真机键盘遮挡修复仍待主任务加载候选复验；无设备、Native、QA RPC、Production 或发布操作。
 
 - 2026-10-04 主任务工作栏/partial审批组合验证318项通过：Thread197、turn-work21、work-dock-model7、controller93，Mobile类型/check:docs 9指令对5用例通过，保131显式unknown/139逐项clock/8b29final资格/ACK顺序及revision门。只对全显式idle的隔离C/E旧owner发SIGINT并确认退出，再启开发CLI bba5a2；配置字节及Production进程保持，认证目录再次全idle。手机仍旧2033；组合源准备装载，真实审批与fresh运行控制继续，不冒称手机已验收。
