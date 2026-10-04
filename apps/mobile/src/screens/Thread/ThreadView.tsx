@@ -10,6 +10,8 @@ import { messageTextRaise } from '../../chat/textCentering';
 import { SessionPreviewNotice, SessionPreviewFooter } from './components/SessionPreviewNotice';
 import { useUiThreadFollow, type UiThreadFollow } from './useUiThreadFollow';
 import { useChatGeometryQa } from './useChatGeometryQa';
+import { ChatGeometryQaCell } from './ChatGeometryQaCell';
+import type { ViewportQaObserver } from './chatViewportQa';
 import { useOlderHistoryPaging } from './useOlderHistoryPaging';
 import { useHistoryScrollAnchor } from './useHistoryScrollAnchor';
 import { useTranslation } from 'react-i18next';
@@ -843,8 +845,17 @@ export function ThreadView({
   const distanceFromBottomRef = useRef(0);
   const scrollMetricsRef = useRef({ height: 0, viewport: 0, offset: 0 });
   const timelineRef = useRef<FlashListRef<ThreadTimelineRow>>(null);
+  const qaObserverRef = useRef<{ scope: string; observe: ViewportQaObserver } | null>(null);
+  const qaScope = historyScope ?? sessionKey ?? '';
+  const observeViewport = useCallback<ViewportQaObserver>((value, command) => {
+    const current = qaObserverRef.current;
+    return current?.scope === qaScope ? current.observe(value, command) : null;
+  }, [qaScope]);
   const historyAnchor = useHistoryScrollAnchor(historyScope ?? sessionKey ?? '', timelineRef, timelineItems,
-    Platform.OS === 'web' ? 500 : 250);
+    Platform.OS === 'web' ? 500 : 250, observeViewport);
+  // Observation-only distance changes must not create a new control callback.
+  const qaDrawDistanceRef = useRef(historyAnchor.drawDistance);
+  qaDrawDistanceRef.current = historyAnchor.drawDistance;
   const { restore: restoreHistoryAnchor, readerScrolled: updateHistoryAnchor,
     beginDrag: beginHistoryDrag, capture: captureHistoryAnchor, release: releaseHistoryAnchor,
     isActive: historyAnchorActive, isCorrectionPending: historyCorrectionPending } = historyAnchor;
@@ -910,9 +921,10 @@ export function ThreadView({
   const snapNatively = useCallback(() => {
     const list = timelineRef.current;
     const native = list?.getNativeScrollRef?.();
+    observeViewport({ kind: 'end_command' });
     if (native) native.scrollToEnd({ animated: false });
     else list?.scrollToEnd({ animated: false });
-  }, []);
+  }, [observeViewport]);
   const uiFollow = useUiThreadFollow({
     onSettled: (generation) => {
       if (generation === followGlideGenerationRef.current) clearFollowGlide();
@@ -923,7 +935,7 @@ export function ThreadView({
       if (followNewMessagesRef.current && !readerScrollingRef.current) snapNatively();
     },
   });
-  useChatGeometryQa({
+  const qaGeometry = useChatGeometryQa({
     active: qaGeometryActive,
     scope: historyScope ?? sessionKey ?? '',
     list: timelineRef,
@@ -935,6 +947,7 @@ export function ThreadView({
       historyPaging: historyPagingBusyRef.current,
     }),
   });
+  qaObserverRef.current = { scope: qaScope, observe: qaGeometry.observe };
   // Follow corrections go straight to the native scroll view: FlashList's own
   // scrollToEnd waits a macrotask, leaving grown content clipped under the
   // composer for a frame or two before it jumps into view.
@@ -951,6 +964,7 @@ export function ThreadView({
         uiThreadFollow ? FOLLOW_GLIDE_FALLBACK_MS : FOLLOW_GLIDE_SETTLE_MS,
       );
       if (uiThreadFollow) {
+        observeViewport({ kind: 'follow_glide' });
         uiThreadFollow.glide(followGlideGenerationRef.current, scrollMetricsRef.current.offset);
         return;
       }
@@ -959,14 +973,16 @@ export function ThreadView({
       // The glide scrolls on the UI thread; ending it there lands this jump
       // after its last step instead of under it.
       if (uiThreadFollow) {
+        observeViewport({ kind: 'follow_snap' });
         uiThreadFollow.snap();
         return;
       }
     }
     const native = list?.getNativeScrollRef?.();
+    observeViewport({ kind: 'end_command' });
     if (native) native.scrollToEnd({ animated });
     else list?.scrollToEnd({ animated });
-  }, [clearFollowGlide, endFollowGlide]);
+  }, [clearFollowGlide, endFollowGlide, observeViewport]);
   const snapToEnd = useCallback(() => followToEnd(false), [followToEnd]);
   const scheduleBottomFollow = useCallback((viewportChanged: boolean) => {
     // FlashList owns initial placement. Size reports from native views
@@ -992,6 +1008,8 @@ export function ThreadView({
   const handleCommittedLayout = useCallback(() => {
     const list = timelineRef.current;
     if (!list) return;
+    observeViewport({ kind: 'layout_begin', windowEpoch: historyAnchor.windowCommitEpoch,
+      drawDistance: qaDrawDistanceRef.current });
     // Preserve a surviving content row before considering end-follow corrections.
     if (!followNewMessagesRef.current) {
       const { height, viewport } = scrollMetricsRef.current;
@@ -1007,6 +1025,8 @@ export function ThreadView({
     } catch {
       return;
     }
+    observeViewport({ kind: 'layout_commit', layoutHeight: content, layoutViewportHeight: viewport,
+      windowEpoch: historyAnchor.windowCommitEpoch, drawDistance: qaDrawDistanceRef.current });
     const previous = committedLayoutRef.current.list === list ? committedLayoutRef.current : null;
     if (previous?.content === content && previous.viewport === viewport) return;
     const { tailKey, rows } = committedRowsRef.current;
@@ -1031,7 +1051,8 @@ export function ThreadView({
     const withinBudget = Math.abs(growth) <= viewport * FOLLOW_GLIDE_MAX_VIEWPORT_RATIO;
     const grew = growth > 0 && viewport === previous.viewport && (appended || uiFollowRef.current !== null);
     followToEnd(withinBudget && (followGlideRef.current || grew));
-  }, [cancelBottomFollow, followToEnd, historyAnchor.windowCommitEpoch, releaseComposerHold, restoreHistoryAnchor, timelineLoaded]);
+  }, [cancelBottomFollow, followToEnd, historyAnchor.windowCommitEpoch,
+    observeViewport, releaseComposerHold, restoreHistoryAnchor, timelineLoaded]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollButtonProgress = useSharedValue(0);
   useEffect(() => {
@@ -1060,8 +1081,9 @@ export function ThreadView({
     endFollowGlide();
     returningToBottomRef.current = animated;
     followNewMessagesRef.current = !animated;
+    observeViewport({ kind: 'end_command' });
     timelineRef.current?.scrollToEnd({ animated });
-  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide, reduceMotion, releaseHistoryAnchor, timelineLoaded]);
+  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide, observeViewport, reduceMotion, releaseHistoryAnchor, timelineLoaded]);
   const refreshScrollButton = useCallback(() => {
     const { height, viewport, offset } = scrollMetricsRef.current;
     if (viewport <= 0) return;
@@ -1079,6 +1101,7 @@ export function ThreadView({
       offset: nativeEvent.contentOffset.y,
     };
     scrollMetricsRef.current = metrics;
+    observeViewport({ kind: 'reader_scroll', offset: metrics.offset, contentHeight: metrics.height, viewportHeight: metrics.viewport });
     // A queued compensation/clamp event supplies native sizing but cannot turn
     // the reader's old-height maximum into an intent to follow the bottom.
     if (!updateHistoryAnchor(metrics.offset, readerScrollingRef.current, metrics.height)) refreshScrollButton();
@@ -1091,7 +1114,7 @@ export function ThreadView({
       && !returningToBottomRef.current && !followGlideRef.current) {
       snapToEnd();
     }
-  }, [historyAnchorActive, refreshScrollButton, snapToEnd, updateHistoryAnchor]);
+  }, [historyAnchorActive, observeViewport, refreshScrollButton, snapToEnd, updateHistoryAnchor]);
   const settleReaderScroll = useCallback(() => {
     cancelReaderSettle();
     if (!readerScrollingRef.current) return;
@@ -1125,9 +1148,11 @@ export function ThreadView({
     const list = timelineRef.current;
     loadedTimelineRef.current = list;
     uiFollowRef.current = Platform.OS === 'android' && uiFollow.bind(list?.getNativeScrollRef?.()) ? uiFollow : null;
-  }, [uiFollow]);
+    observeViewport({ kind: 'list_load' });
+  }, [observeViewport, uiFollow]);
   const handleScrollBeginDrag = useCallback((event?: NativeSyntheticEvent<NativeScrollEvent>) => {
     const native = event?.nativeEvent;
+    observeViewport({ kind: 'drag_begin', offset: native?.contentOffset.y, contentHeight: native?.contentSize.height });
     beginHistoryDrag(historyPagingBusyRef.current, native ? { offset: native.contentOffset.y, height: native.contentSize.height } : undefined);
     historyDragRef.current?.();
     // The reader's finger takes over any glide in flight.
@@ -1137,8 +1162,9 @@ export function ThreadView({
     returningToBottomRef.current = false;
     readerScrollingRef.current = true;
     followNewMessagesRef.current = false;
-  }, [beginHistoryDrag, cancelBottomFollow, cancelReaderSettle, endFollowGlide]);
+  }, [beginHistoryDrag, cancelBottomFollow, cancelReaderSettle, endFollowGlide, observeViewport]);
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
+    observeViewport({ kind: 'content_size', contentHeight: height });
     const changed = scrollMetricsRef.current.height !== height;
     scrollMetricsRef.current.height = height;
     if (followNewMessagesRef.current) {
@@ -1155,9 +1181,10 @@ export function ThreadView({
       });
       refreshScrollButton();
     }
-  }, [historyCorrectionPending, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
+  }, [historyCorrectionPending, observeViewport, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   const handleTimelineLayout = useCallback((event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
+    observeViewport({ kind: 'viewport_layout', viewportHeight: height });
     const changed = scrollMetricsRef.current.viewport !== height;
     scrollMetricsRef.current.viewport = height;
     if (followNewMessagesRef.current) {
@@ -1171,7 +1198,7 @@ export function ThreadView({
       });
       refreshScrollButton();
     }
-  }, [historyCorrectionPending, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
+  }, [historyCorrectionPending, observeViewport, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   useLayoutEffect(() => {
     cancelReaderSettle();
     cancelBottomFollow();
@@ -1270,8 +1297,9 @@ export function ThreadView({
     }
     cancelBottomFollow();
     followNewMessagesRef.current = false;
+    observeViewport({ kind: 'index_command', anchorIndex: index });
     void timelineRef.current?.scrollToIndex({ index, animated: !reduceMotion, viewPosition: 0.9 });
-  }, [cancelBottomFollow, reduceMotion, scrollToBottom]);
+  }, [cancelBottomFollow, observeViewport, reduceMotion, scrollToBottom]);
   // The row renderer reads only stable values, so a streamed chunk that changes
   // one row does not hand every visible cell a new renderer.
   const hasMessageActions = Boolean(messageActions);
@@ -1381,6 +1409,11 @@ export function ThreadView({
       isRunEntrancePending,
     ],
   );
+  const renderObservedMessage = useCallback((info: ListRenderItemInfo<ThreadTimelineRow>) => {
+    const content = renderMessage(info);
+    return qaGeometry.enabled && info.target === 'Cell'
+      ? <ChatGeometryQaCell index={info.index} observe={qaGeometry.cell}>{content}</ChatGeometryQaCell> : content;
+  }, [qaGeometry.cell, qaGeometry.enabled, renderMessage]);
   const timelineContentStyle = useMemo(() => [
     styles.timelineContent,
     { paddingTop: timelineTopClearance, paddingBottom: timelineClearance },
@@ -1584,7 +1617,7 @@ export function ThreadView({
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                 keyExtractor={getTimelineRowKey}
-                renderItem={renderMessage}
+                renderItem={qaGeometry.enabled ? renderObservedMessage : renderMessage}
                 contentContainerStyle={timelineContentStyle}
                 onStartReached={!canPageHistory || historyPaging.failed ? undefined : historyPaging.automatic}
                 refreshControl={historyRefreshControl}

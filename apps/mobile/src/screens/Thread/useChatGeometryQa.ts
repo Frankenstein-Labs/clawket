@@ -1,8 +1,10 @@
-import { useLayoutEffect, useRef, type RefObject } from 'react';
-import { AppState } from 'react-native';
+import { useLayoutEffect, useMemo, useRef, type RefObject } from 'react';
+import { AppState, Platform } from 'react-native';
+import * as Application from 'expo-application';
 import type { FlashListRef } from '@shopify/flash-list';
-import { createChatGeometryQa, type ChatGeometryQaApi } from './chatGeometryQa';
-import { registerChatGeometryQaCache } from './registerChatGeometryQaCache';
+import { createChatGeometryQa, type ChatGeometryQaApi, type ChatGeometryQaSource } from './chatGeometryQa';
+import { registerChatGeometryQaCache, qaGeometryCacheEnabled } from './registerChatGeometryQaCache';
+import type { ViewportQaObserver } from './chatViewportQa';
 import type { UiThreadFollow } from './useUiThreadFollow';
 
 const QUERY_GATE = Symbol.for('clawket.chatGeometryQa.queryGate');
@@ -38,18 +40,60 @@ export function useChatGeometryQa<T>(options: Readonly<{
   rows: ReadonlyArray<T>;
   raw: UiThreadFollow['qaGeometry'];
   reading: () => ReadingState;
-}>): void {
+}>) {
+  const viewportEnabled = qaGeometryCacheEnabled(typeof __DEV__ !== 'undefined' && __DEV__, Platform.OS,
+    Application.applicationId, process.env.EXPO_PUBLIC_CHAT_GEOMETRY_QA_CACHE);
   const latest = useRef(options);
   latest.current = options;
+  const binding = useRef<(() => ChatGeometryQaSource | null) | null>(null);
+  const mounted = useRef(new Map<number, number>());
+  const mountState = useRef({ observed: false, truncated: false });
+  const observer = useMemo(() => {
+    const scope = options.scope;
+    const allowed = () => viewportEnabled && latest.current.active && latest.current.scope === scope
+      && binding.current !== null && collector?.isRecording(binding.current) === true;
+    const observe: ViewportQaObserver = (value, command) => {
+      try {
+        if (!allowed()) return null;
+        const indices = [...mounted.current.keys()];
+        const reading = latest.current.reading();
+        return collector!.observe(binding.current!, { offset: reading.offset, contentHeight: reading.height,
+          viewportHeight: reading.viewport, rowCount: latest.current.rows.length,
+          mountedStart: indices.length ? Math.min(...indices) : null,
+          mountedEnd: indices.length ? Math.max(...indices) : null,
+          mountedCount: mountState.current.observed ? [...mounted.current.values()].reduce((sum, count) => sum + count, 0) : null,
+          mountedTruncated: mountState.current.truncated, ...value }, command);
+      } catch { return null; }
+    };
+    // Keep the QA Fragment shape stable across focus changes. Recording itself
+    // still requires the current active binding and an accepted Start.
+    return { enabled: viewportEnabled, observe,
+      cell: (index: number, present: boolean) => {
+        // Existing cells at Start may never commit again. This is an incomplete
+        // React lifecycle range, not the SDK engaged range or native paint.
+        if (!allowed() || !Number.isInteger(index) || index < 0 || index > 100_000_000) return;
+        mountState.current.observed = true;
+        const count = mounted.current.get(index) ?? 0;
+        if (present) {
+          if (count === 256) mountState.current.truncated = true;
+          else if (mounted.current.size < 256 || count > 0) mounted.current.set(index, count + 1);
+          else mountState.current.truncated = true;
+        } else if (count > 1) mounted.current.set(index, count - 1);
+        else mounted.current.delete(index);
+        observe({ kind: present ? 'cell_mount' : 'cell_unmount', anchorIndex: index });
+      },
+    };
+  }, [options.scope, viewportEnabled]);
   useLayoutEffect(() => {
     if (!collector || !options.active) return undefined;
     const expectedScope = options.scope;
-    const detach = collector.attach(() => {
+    const open = () => {
       const list = latest.current.list.current;
       if (!list || AppState.currentState !== 'active' || !latest.current.active
         || latest.current.scope !== expectedScope) return null;
       const raw = latest.current.raw;
       const bindingRevision = raw.bindingRevision();
+      mounted.current.clear(); mountState.current = { observed: false, truncated: false };
       let lastRows = latest.current.rows;
       let dataRevision = 0;
       return {
@@ -89,10 +133,13 @@ export function useChatGeometryQa<T>(options: Readonly<{
           } catch { return { ...base, available: false }; }
         },
       };
-    });
+    };
+    binding.current = open;
+    const detach = collector.attach(open);
     const subscription = AppState.addEventListener('change', state => {
       if (state !== 'active') collector.background();
     });
-    return () => { detach(); subscription.remove(); };
+    return () => { detach(); if (binding.current === open) binding.current = null; subscription.remove(); };
   }, [options.active, options.scope]);
+  return observer;
 }

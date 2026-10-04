@@ -4,6 +4,10 @@ jest.mock('expo-file-system', () => ({
   Directory: jest.fn(), File: jest.fn(),
 }));
 jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn().mockResolvedValue(false), shareAsync: jest.fn() }));
+jest.mock('./useChatGeometryQa', () => {
+  Object.defineProperty(globalThis, '__DEV__', { configurable: true, writable: true, value: true });
+  return jest.requireActual('./useChatGeometryQa');
+});
 jest.mock('../../components/ui/Sheet', () => ({ Sheet: ({ visible, children, ...props }: any) => visible ? React.createElement(require('react-native').View, props, children) : null }));
 import React from 'react';
 import { act, fireEvent, render, within } from '@testing-library/react-native';
@@ -128,6 +132,7 @@ jest.mock('react-native', () => {
   return {
     ...require('../../../__mocks__/native-animated'),
     DynamicColorIOS: (variants: unknown) => ({ dynamic: variants }),
+    AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
     Keyboard: { dismiss: jest.fn() },
     I18nManager: { isRTL: false },
     KeyboardAvoidingView: host('NativeKeyboardAvoidingView'),
@@ -193,11 +198,12 @@ jest.mock('react-native-enriched-markdown', () => {
 
 // The UI-thread follow is unit-tested beside its hook; here it records what the timeline asks of it.
 const mockUiFollow = { bind: jest.fn(() => true), glide: jest.fn(), snap: jest.fn(), stop: jest.fn() };
+const mockQaGeometry = { enable: jest.fn(), sample: jest.fn((receive: (value: unknown) => void) => receive({})), bindingRevision: () => 0 };
 let mockUiFollowCallbacks: { onSettled: (generation: number) => void; onUnavailable: () => void } | null = null;
 jest.mock('./useUiThreadFollow', () => ({
   useUiThreadFollow: (callbacks: NonNullable<typeof mockUiFollowCallbacks>) => {
     mockUiFollowCallbacks = callbacks;
-    return mockUiFollow;
+    return { ...mockUiFollow, qaGeometry: mockQaGeometry };
   },
 }));
 
@@ -256,6 +262,7 @@ jest.mock('@shopify/flash-list', () => {
             (mockHistoryGeometry.positions[index + 1] ?? mockListLayout.content) - mockHistoryGeometry.positions[index]!) },
         getFirstItemOffset: () => mockHistoryGeometry?.header ?? 0,
         getAbsoluteLastScrollOffset: () => mockHistoryGeometry?.offset ?? 0,
+        computeVisibleIndices: () => ({ startIndex: mockHistoryGeometry?.first ?? 0, endIndex: mockHistoryGeometry?.first ?? 0 }),
         scrollToOffset: mockScrollToOffset,
       }), []);
       if (mockHistoryWindowTracker && mockHistoryGeometry) {
@@ -499,6 +506,46 @@ function createProps(overrides: Partial<ThreadViewProps> = {}): ThreadViewProps 
     ...overrides,
   };
 }
+
+it('records real Thread layout/size/scroll and recycled React cells only after explicit QA Start', () => {
+  const { AppState, Platform } = require('react-native');
+  const application = require('expo-application');
+  const previousId = application.applicationId, previousState = AppState.currentState;
+  const platform = Platform.OS, optIn = process.env.EXPO_PUBLIC_CHAT_GEOMETRY_QA_CACHE;
+  const api = (globalThis as any).__CLAWKET_CHAT_GEOMETRY_QA__;
+  Platform.OS = 'android'; process.env.EXPO_PUBLIC_CHAT_GEOMETRY_QA_CACHE = '1';
+  Object.defineProperty(application, 'applicationId', { configurable: true, value: 'com.p697.clawket.qa' });
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  try {
+    const props = createProps({ qaGeometryActive: true });
+    const view = render(<ThreadView {...props} />);
+    const list = view.getByTestId('thread-screen-timeline');
+    expect(api.read().viewport.events).toEqual([]);
+    act(() => { expect(api.start()).toBe('started'); });
+    fireEvent(list, 'layout', { nativeEvent: { layout: { width: 393, height: 400 } } });
+    fireEvent(list, 'contentSizeChange', 393, 800);
+    fireEvent(list, 'commitLayoutEffect');
+    fireEvent(list, 'scrollBeginDrag', { nativeEvent: { contentOffset: { y: 40 }, contentSize: { height: 800 }, layoutMeasurement: { height: 400 } } });
+    fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 41 }, contentSize: { height: 800 }, layoutMeasurement: { height: 400 } } });
+    const before = api.read().viewport.sequence;
+    view.rerender(<ThreadView {...props} messages={[{ id: 'new-private-reply', role: 'assistant', text: 'new-private-text' }, ...props.messages]} />);
+    const snapshot = api.read();
+    expect(snapshot.viewport.events.map((event: any) => event.kind)).toEqual(expect.arrayContaining([
+      'viewport_layout', 'content_size', 'layout_begin', 'layout_commit', 'drag_begin', 'reader_scroll', 'cell_mount',
+    ]));
+    expect(snapshot.viewport.sequence).toBeGreaterThan(before);
+    expect(snapshot.viewport.initialIncomplete).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toContain('new-private');
+    view.unmount();
+    expect(api.read().status).toBe('stopped');
+  } finally {
+    api.stop(); Platform.OS = platform;
+    Object.defineProperty(application, 'applicationId', { configurable: true, value: previousId });
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: previousState });
+    if (optIn === undefined) delete process.env.EXPO_PUBLIC_CHAT_GEOMETRY_QA_CACHE;
+    else process.env.EXPO_PUBLIC_CHAT_GEOMETRY_QA_CACHE = optIn;
+  }
+});
 
 /**
  * One withTiming call per row entrance: a reply rises over `duration.normal`

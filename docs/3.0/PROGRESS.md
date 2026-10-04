@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 分页/小滚动现场的 opt-in viewport 阶段记录器（独立源码任务）。
+  - 在既有默认关闭的 QA 几何 collector/cache 上记录现有布局、内容尺寸、滚动请求与 ACK 分类，固定数字/布尔/枚举，不含消息、ID、key、路径或凭据。四门和 accepted Start 后才收集；最新 32 事件、普通 scroll 100ms 门、单调 sequence 与淘汰/节流/拒绝计数明确显示有限覆盖。
+  - React Fragment 只记录 Start 后不完整 cell 生命周期索引，不增加 Native wrapper、查询、强制 render 或滚动。命令关联只在当前 capture 的 JS correction ledger 内有效；旧 capture 的迟到 ACK 不借新序号。V2 严格标量编码并保留 exact V1 只读兼容；旧冻结提取 helper 不改，新提取需同时 pin/link 两个 pure 模块。
+  - 独立安装并持 heavy 逐单文件 in-band 验证：viewport ring/严格编码 4、真实 hook/迟到 ACK 与 cell 生命周期 15、Thread 200 共 219 项通过；新 Thread 夹具明确使用开发模式的实际 hook，原普通 mock 控制保持。Mobile 类型、UI 253 文件、文档 7 指令对/5 检查器用例通过，完整门禁由独立 PR CI 执行；未操作实机、Native、Metro，不宣称采集或空白修复通过。050 编码帧短暂 QA09–11→QA24–27、586 空白后手指恢复与注入 SDK 阶段合同均保留各自证据边界；native text-input 崩溃补丁另案，不视为本问题修复。
+
 
 - 2026-10-04 Codex 安卓 QA 菜单 Start 状态反馈（独立源码任务）。
   - 真机首次 Start 点击后固定缓存未出现，现有菜单忽略采集器返回值；目前不能区分绑定拒绝和异步文件失败，原次操作保持 unreported，不重试、不补造 accepted ACK。

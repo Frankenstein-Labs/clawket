@@ -1,3 +1,4 @@
+import { createViewportQaRecorder, type ViewportQaInput, type ViewportQaSnapshot, type ViewportQaObservation } from './chatViewportQa';
 /** Local, opt-in QA evidence. Never contains transcript or transport identities. */
 const INTERVAL_MS = 1_000;
 const LIFETIME_MS = 20 * 60_000;
@@ -41,18 +42,14 @@ export type ChatGeometryQaSource = Readonly<{
   readRaw: (receive: (value: unknown) => void) => void;
   readSdk: () => unknown;
 }>;
+type GeometrySnapshot = {
+  version: 1; status: 'idle' | 'capturing' | 'stopped'; reason: StopReason | null;
+  inFlight: boolean; elapsedMs: number; dropped: number; samples: Sample[];
+};
 export type ChatGeometryQaApi = Readonly<{
   start: () => 'started' | 'already_active' | 'unavailable';
   stop: () => void;
-  read: () => {
-    version: 1;
-    status: 'idle' | 'capturing' | 'stopped';
-    reason: StopReason | null;
-    inFlight: boolean;
-    elapsedMs: number;
-    dropped: number;
-    samples: Sample[];
-  };
+  read: () => GeometrySnapshot | (Omit<GeometrySnapshot, 'version'> & { version: 2; viewport: ViewportQaSnapshot });
 }>;
 
 function object(value: unknown): Record<string, unknown> {
@@ -115,6 +112,8 @@ export function createChatGeometryQa(enabled: boolean, now: () => number = () =>
   let reason: StopReason | null = null;
   let dropped = 0;
   let samples: Sample[] = [];
+  const viewport = createViewportQaRecorder();
+  let viewportCapture = {};
   const elapsed = () => Math.min(LIFETIME_MS, Math.max(0, (status === 'capturing' ? now() : endedAt) - startedAt));
   const stop = (why: StopReason) => {
     if (status !== 'capturing') return;
@@ -180,6 +179,8 @@ export function createChatGeometryQa(enabled: boolean, now: () => number = () =>
       reason = null;
       dropped = 0;
       samples = [];
+      viewport.reset();
+      viewportCapture = {};
       generation += 1;
       try { next.enableRaw(true); } catch { stop('unavailable'); return 'unavailable'; }
       deadlineTimer = setTimeout(() => stop('expired'), LIFETIME_MS);
@@ -190,14 +191,24 @@ export function createChatGeometryQa(enabled: boolean, now: () => number = () =>
     read: () => {
       if (source) current(source);
       return {
-        version: 1 as const, status, reason, inFlight: queryGate.busy, elapsedMs: status === 'idle' ? 0 : elapsed(), dropped,
+        version: 2 as const, status, reason, inFlight: queryGate.busy, elapsedMs: status === 'idle' ? 0 : elapsed(), dropped,
         samples: samples.map(record => ({ ...record, layouts: record.layouts.map(layout => ({ ...layout })) })),
+        viewport: viewport.read(),
       };
     },
   });
   return {
     api,
     queryGate,
+    isRecording: (binding: () => ChatGeometryQaSource | null) => open === binding && source !== null && current(source),
+    observe: (binding: () => ChatGeometryQaSource | null, value: ViewportQaInput, command?: ViewportQaObservation | null) => {
+      if (open !== binding || !source || !current(source)) return null;
+      try {
+        const sequence = viewport.observe(command === undefined ? value : { ...value,
+          commandSequence: command?.capture === viewportCapture ? command.sequence : null }, elapsed());
+        return sequence === null ? null : { capture: viewportCapture, sequence };
+      } catch { return null; }
+    },
     attach: (next: () => ChatGeometryQaSource | null) => {
       if (!enabled) return () => undefined;
       if (open !== next) stop('replaced');
