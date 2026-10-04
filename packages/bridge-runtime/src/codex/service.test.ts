@@ -94,16 +94,17 @@ beforeEach(async () => {
 });
 afterEach(async () => { await service.stop(); rmSync(root, { recursive: true, force: true }); });
 describe('Codex owned sessions', () => {
-  describe('0.160 execution permissions', () => {
+  describe('0.160 configured permission confirmation', () => {
     const restored = 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.';
     const permissionState = (mode: 'workspace' | 'read-only' | 'full-access') => ({
       ...permissionPatch(mode, project), activePermissionProfile: {
         id: mode === 'full-access' ? ':danger-full-access' : mode === 'read-only' ? ':read-only' : ':workspace', extends: null,
       },
     });
-    const executionView = (state: object) => ({ ...response(project), ...state, thread: { id: threadId, cwd: project, status: { type: 'idle' } },
+    // These resume responses model saved future configuration, not running-turn execution.
+    const configuredView = (state: object) => ({ ...response(project), ...state, thread: { id: threadId, cwd: project, status: { type: 'idle' } },
       sandbox: (state as any).sandboxPolicy ?? settings.sandboxPolicy });
-    const overrideExecution = (read: () => any | Promise<any>) => {
+    const overrideConfigured = (read: () => any | Promise<any>) => {
       const original = mock.request.getMockImplementation()!;
       mock.request.mockImplementation((method, params) => method === 'thread/resume' && params.excludeTurns === true && !params.cwd
         ? read() : original(method, params));
@@ -118,9 +119,9 @@ describe('Codex owned sessions', () => {
       });
       await request('models.list', { sessionKey: key });
     };
-    it('does not confirm a Read-only ACK while the owned execution environment remains Workspace', async () => {
+    it('does not confirm a Read-only ACK when the independent configured profile remains Workspace', async () => {
       await prepare();
-      overrideExecution(() => executionView(permissionState('workspace')));
+      overrideConfigured(() => configuredView(permissionState('workspace')));
       await expect(request('models.permissions', { sessionKey: key, mode: 'read-only' })).rejects.toThrow(restored);
       expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
       expect((await request('models.list', { sessionKey: key })).permissions).toMatchObject({ mode: 'read-only', requiresConfirmation: true });
@@ -130,7 +131,7 @@ describe('Codex owned sessions', () => {
       await prepare();
       expect((await request('models.permissions', { sessionKey: key, mode: 'read-only' })).permissions)
         .toMatchObject({ mode: 'read-only', requiresConfirmation: false });
-      overrideExecution(() => executionView(permissionState('workspace')));
+      overrideConfigured(() => configuredView(permissionState('workspace')));
       await expect(request('chat.send', { sessionKey: key, text: 'first input', idempotencyKey: 'first-read-only' })).rejects.toThrow(restored);
       expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'first-read-only' })).toEqual({ status: 'unknown' });
       expect((service as any).records[0].keys).toEqual({});
@@ -143,16 +144,16 @@ describe('Codex owned sessions', () => {
       await request('chat.send', { sessionKey: key, text: 'explicit new input', idempotencyKey: 'explicit-workspace' });
       expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
     });
-    it('keeps actually confirmed Read-only usable on the same already-owned writer', async () => {
+    it('allows a matching future Read-only configuration on the same already-owned writer', async () => {
       await prepare();
       await request('models.permissions', { sessionKey: key, mode: 'read-only' });
       settings = { ...settings, summary: 'concise', personality: 'pragmatic' };
       notify('thread/settings/updated', { threadSettings: settings });
       const saved = (service as any).effectiveSettings.get(key);
-      overrideExecution(() => {
-        const execution = executionView(permissionState('read-only'));
-        delete execution.summary; delete execution.personality;
-        return execution;
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('read-only'));
+        delete configured.summary; delete configured.personality;
+        return configured;
       });
       mock.request.mockClear();
       await request('chat.send', { sessionKey: key, text: 'read-only input', idempotencyKey: 'safe-read-only' });
@@ -196,11 +197,11 @@ describe('Codex owned sessions', () => {
       expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
       expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
     });
-    it.each(['profile', 'thread', 'cwd', 'sandbox', 'reviewer', 'invalid-profile', 'active', 'status'])('fails closed on an unproven execution readback: %s', async field => {
+    it.each(['profile', 'thread', 'cwd', 'sandbox', 'reviewer', 'invalid-profile', 'active', 'status'])('fails closed on an unproven configured readback: %s', async field => {
       await prepare();
       await request('models.permissions', { sessionKey: key, mode: 'read-only' });
-      overrideExecution(() => {
-        const value = executionView(permissionState('read-only'));
+      overrideConfigured(() => {
+        const value = configuredView(permissionState('read-only'));
         if (field === 'profile') delete value.activePermissionProfile;
         if (field === 'thread') value.thread = { ...value.thread, id: randomUUID() };
         if (field === 'cwd') value.cwd = join(root, 'outside');
@@ -218,21 +219,21 @@ describe('Codex owned sessions', () => {
     it('never treats a failed metadata confirmation as uncertain prompt dispatch', async () => {
       await prepare();
       await request('models.permissions', { sessionKey: key, mode: 'read-only' });
-      overrideExecution(() => Promise.reject(Object.assign(new Error('private metadata timeout'), { outcome: 'uncertain' })));
+      overrideConfigured(() => Promise.reject(Object.assign(new Error('private metadata timeout'), { outcome: 'uncertain' })));
       await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'metadata-timeout' })).rejects.toThrow(restored);
       expect((service as any).records[0].keys).toEqual({});
       expect((service as any).runs.size).toBe(0);
       expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
     });
-    it('rejects a late execution snapshot after the original owned AppServer has closed', async () => {
+    it('rejects a late configured snapshot after the original owned AppServer has closed', async () => {
       await prepare();
       await request('models.permissions', { sessionKey: key, mode: 'read-only' });
       let resolve!: (value: any) => void;
-      overrideExecution(() => new Promise(done => { resolve = done; }));
+      overrideConfigured(() => new Promise(done => { resolve = done; }));
       const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'retired-owner' });
       await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
       mock.instances.at(-1).emit('closed');
-      resolve(executionView(permissionState('read-only')));
+      resolve(configuredView(permissionState('read-only')));
       await expect(pending).rejects.toThrow(restored);
       expect((service as any).loaded.size).toBe(0);
       expect((service as any).records[0].keys).toEqual({});
@@ -242,12 +243,12 @@ describe('Codex owned sessions', () => {
       await prepare();
       await request('models.permissions', { sessionKey: key, mode: 'read-only' });
       let resolve!: (value: any) => void;
-      overrideExecution(() => new Promise(done => { resolve = done; }));
+      overrideConfigured(() => new Promise(done => { resolve = done; }));
       const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'late-snapshot' });
       await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
       settings = { ...settings, ...permissionState('workspace') };
       notify('thread/settings/updated', { threadSettings: settings });
-      resolve(executionView(permissionState('read-only')));
+      resolve(configuredView(permissionState('read-only')));
       await expect(pending).rejects.toThrow(restored);
       expect((service as any).effectiveSettings.get(key).activePermissionProfile.id).toBe(':workspace');
       expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
@@ -257,13 +258,13 @@ describe('Codex owned sessions', () => {
       await prepare();
       await request('models.permissions', { sessionKey: key, mode: 'read-only' });
       let resolve!: (value: any) => void;
-      overrideExecution(() => new Promise(done => { resolve = done; }));
+      overrideConfigured(() => new Promise(done => { resolve = done; }));
       const originalRpc = (service as any).rpc;
       const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'replaced-owner' });
       await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
       (service as any).rpc = { nativeVersion: '0.160.0' };
       try {
-        resolve(executionView(permissionState('read-only')));
+        resolve(configuredView(permissionState('read-only')));
         await expect(pending).rejects.toThrow(restored);
         expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
         expect((service as any).records[0].keys).toEqual({});
