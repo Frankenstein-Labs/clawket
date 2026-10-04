@@ -1,5 +1,8 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex Desktop 完整历史读取的内容代际保护（用户手机连接综合验收中的源码确定性竞态）。
+  - 同一订阅集合内，历史分页读取已取到运行中 turn 后，Native 结束可清除 run/cache 并触发定时广播；旧读取稍后仍能把运行中完整缓存写回，定时广播又会合并进旧 promise。本任务在独立 fresh-main 工作树以 PR147 会员规则为 prerequisite，增加当前 RPC/record/id/cwd 与内容代际双门，最多重取一次，继续变化则拒绝并保留定时发布；最后 await 后使用新确认设置与当前 active overlay，不重发输入或建立 writer。
+  - 新增实际 Service 消费者的终态、下一 turn、迟到设置、双失效预算、上下文退休、text-delta 兼容和终态后迟到工具缓存回归。旧实现九场景七红、两兼容绿；修复后独占串行 Service 单文件 177/177、Bridge Runtime 类型检查通过，依赖为本工作树独立安装。该确定性缺口尚不能归因于用户 Desktop reopen/Retry 现场；未操作 Desktop GUI、Native/QA 会话、Production，也未部署或发布。
 - 2026-10-04 Codex 组合 3e4209 真正 Read-only 与原始授权闭环留证；全面真机验收继续。
   - 串行窄验证：CodexService 328、Mobile collector 11/observer 8/UI follow 13/Thread 201，共 561；Mobile/Runtime/CLI 类型、docs 9 指令对/5 检查器及本地开发 CLI 通过。只有认证全显式 idle 后才各一次停止隔离旧 C/E parent，并确认精确 child/端口退出；新 C/E 本地目录 C17/E1057 均正常。actual CLI SHA237c916e…、手机完整缓存22,522,652字节/SHAc2183364… 经进程代际/配置/前后完整字节校验；Production/商店/Native Desktop 未更改。默认关闭几何诊断已加载，但 public Inspector list 为0 page，未开启采样/未得到 raw/SDK 坐标，不能以源码或滚动恢复认定空白根因。
   - fresh A4M 初始化与唯一主输入都在原生实际确认命名 Read-only、on-request/user、有效只读、6.1Sol/low/default；2 starts/completes/唯一 receipts、usage成立且0 abort/error。真正原 turn ordinal2 的 pending审批 schema/命令/目录/原 item 严格匹配后，手机只 Allow 一次；同一次只读 IPC capture 记录原 command completed/exit0，QA 小文件恰26字节/一行。手机原 PID 保持、online并显示原生最终回复，留观截图与030/031录屏保存；本轮未观察到此前允许后退出，不等于崩溃修复已完整验收。
