@@ -104,6 +104,13 @@ async function runCodexCommand(args: string[], progress: Progress): Promise<void
     scope: 'codex_bridge', event: 'native_rpc_diagnostic', ts: new Date().toISOString(),
     reason: diagnostic.reason, pendingCount: diagnostic.pendingCount, frameBytes: diagnostic.frameBytes,
   })));
+  service.on('permissionDiagnostic', diagnostic => console.log(JSON.stringify({
+    scope: 'codex_bridge', event: 'permission_configuration_diagnostic', ts: new Date().toISOString(),
+    failureCategory: diagnostic.failureCategory,
+    expectedPermissionMode: diagnostic.expectedPermissionMode, observedPermissionMode: diagnostic.observedPermissionMode,
+    sameThreadId: diagnostic.sameThreadId, sameProjectCwd: diagnostic.sameProjectCwd, idleThreadReported: diagnostic.idleThreadReported,
+    responseFieldTypes: diagnostic.responseFieldTypes, threadFieldTypes: diagnostic.threadFieldTypes,
+  })));
   let server: CodexServer | undefined, relay: CodexRelay | undefined;
   let releaseOwner: (() => Promise<void>) | undefined;
   try {

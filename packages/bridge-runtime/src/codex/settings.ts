@@ -18,6 +18,23 @@ export interface NativeSettings {
   personality: string | null;
 }
 
+export type NativePermissionSettings = Pick<NativeSettings, 'cwd' | 'approvalPolicy' | 'approvalsReviewer' | 'sandboxPolicy' | 'activePermissionProfile'>;
+
+/** Resume may omit unrelated model settings. Missing provenance never confirms a named profile. */
+export function nativePermissionSettings(value: any): NativePermissionSettings | undefined {
+  const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (!object(value) || typeof value.cwd !== 'string' || !value.cwd
+    || !(typeof value.approvalPolicy === 'string' ? value.approvalPolicy.length > 0 : object(value.approvalPolicy))
+    || typeof value.approvalsReviewer !== 'string' || !value.approvalsReviewer
+    || !object(value.sandbox) || typeof value.sandbox.type !== 'string' || !value.sandbox.type) return;
+  if (value.sandbox.type === 'workspaceWrite' && Object.hasOwn(value.sandbox, 'writableRoots')
+    && (!Array.isArray(value.sandbox.writableRoots) || value.sandbox.writableRoots.some(root => typeof root !== 'string'))) return;
+  const profile = value.activePermissionProfile ?? null;
+  if (profile !== null && (!object(profile) || typeof profile.id !== 'string' || !profile.id || profile.id.length > 200)) return;
+  return { cwd: value.cwd, approvalPolicy: value.approvalPolicy as NativePermissionSettings['approvalPolicy'], approvalsReviewer: value.approvalsReviewer,
+    sandboxPolicy: value.sandbox as NativePermissionSettings['sandboxPolicy'], activePermissionProfile: profile };
+}
+
 export function nativeSettings(value: any, resumed = false, legacyDefault = false): NativeSettings | undefined {
   const sandboxPolicy = resumed ? value?.sandbox : value?.sandboxPolicy;
   const effort = resumed ? value?.reasoningEffort : value?.effort;
@@ -39,7 +56,7 @@ export function nativeSettings(value: any, resumed = false, legacyDefault = fals
     multiAgentMode: value.multiAgentMode ?? null, summary: value.summary ?? null, personality: value.personality ?? null };
 }
 
-export function permissionMode(settings?: NativeSettings): 'workspace' | 'read-only' | 'full-access' | 'custom' | null {
+export function permissionMode(settings?: NativePermissionSettings): 'workspace' | 'read-only' | 'full-access' | 'custom' | null {
   if (!settings) return null;
   for (const mode of ['workspace', 'read-only', 'full-access'] as const) if (matchesNativeSettings(settings, permissionPatch(mode, settings.cwd))) return mode;
   return 'custom';
@@ -58,7 +75,7 @@ export function permissionSelectionPatch(mode: unknown, cwd: string): Record<str
 }
 
 /** Native normalizes cwd out of writableRoots and represents cleared speed as default. */
-export function matchesNativeSettings(settings: NativeSettings, patch: Record<string, unknown>, allowNativePreset = true): boolean {
+export function matchesNativeSettings(settings: NativePermissionSettings & Partial<NativeSettings>, patch: Record<string, unknown>, allowNativePreset = true): boolean {
   return Object.entries(patch).every(([key, value]) => {
     if (value === undefined) return true;
     const actual = settings[key as keyof NativeSettings];
@@ -75,7 +92,7 @@ export function matchesNativeSettings(settings: NativeSettings, patch: Record<st
       // Null delegates only this field; mode, model, effort and any extra fields
       // must still match. Explicit instructions are never treated as a wildcard.
       if (requested?.settings?.developer_instructions === null && ['default', 'plan'].includes(requested.mode)
-        && (effective.settings.developer_instructions === null
+        && effective && (effective.settings?.developer_instructions === null
           || (typeof effective.settings.developer_instructions === 'string' && effective.settings.developer_instructions.length > 0))) {
         return isDeepStrictEqual({ ...effective, settings: { ...effective.settings, developer_instructions: null } }, requested);
       }
