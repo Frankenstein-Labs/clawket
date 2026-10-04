@@ -3618,6 +3618,95 @@ describe('messenger timeline layout', () => {
     jest.useRealTimers();
   });
 
+  it.each([false, true])('elects an ordinary reader in the first gesture without paging, even if begin layout is unavailable: %s', missingBeginLayout => {
+    jest.useFakeTimers();
+    const stamp = new Date('2026-10-04T03:10:00Z').getTime();
+    const messages: UiMessage[] = Array.from({ length: 20 }, (_, index) => ({
+      id: `reading:${index}`, role: 'assistant', text: `Reader body ${index}`, timestampMs: stamp + (20 - index) * 1000,
+    }));
+    const props = createProps({ capabilities: CAPABILITY_MATRIX.codex, messages, onLoadMoreHistory: undefined });
+    const view = render(<ThreadView {...props} />);
+    try {
+      const timeline = () => view.getByTestId('thread-screen-timeline');
+      const count = timeline().props.data.length;
+      mockHistoryGeometry = { first: 0, offset: 0, header: 0, positions: Array.from({ length: count }, (_, index) => index * 200) };
+      mockListLayout.content = count * 200;
+      mockListLayout.viewport = 600;
+      act(() => timeline().props.onLoad({ elapsedTimeInMs: 1 }));
+      const event = (offset: number) => ({ nativeEvent: { contentSize: { height: count * 200 },
+        layoutMeasurement: { height: 600 }, contentOffset: { y: offset } } });
+      // A bottom-origin first drag can precede usable JS layouts. The next
+      // native event is still the same gesture, not a second beginDrag.
+      if (missingBeginLayout) mockHistoryGeometry.positions = [];
+      act(() => timeline().props.onScrollBeginDrag(event(count * 200 - 600)));
+      mockHistoryGeometry.positions = Array.from({ length: count }, (_, index) => index * 200);
+      mockHistoryGeometry.offset = 1800;
+      act(() => timeline().props.onScroll(event(1800)));
+      expect(timeline().props.maintainVisibleContentPosition).toEqual({ disabled: true });
+      const surviving = timeline().props.data[9].key;
+      const before = mockHistoryGeometry.positions[9]! - mockHistoryGeometry.offset;
+      mockScrollToOffset.mockClear();
+      // Canonical text layout above the reader converges without another page
+      // or another gesture. SDK viewability remains stale at index zero.
+      mockHistoryGeometry.positions = mockHistoryGeometry.positions.map((y, index) => y + (index >= 9 ? 400 : 0));
+      mockListLayout.content += 400;
+      act(() => timeline().props.onCommitLayoutEffect());
+      const index = timeline().props.data.findIndex((row: { key: string }) => row.key === surviving);
+      expect(mockHistoryGeometry.positions[index]! - mockHistoryGeometry.offset).toBe(before);
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 2200, animated: false });
+      expect(props.onLoadMoreHistory).toBeUndefined();
+    } finally { view.unmount(); mockHistoryGeometry = null; }
+  });
+
+  it.each([false, true])('returns a bottom-origin gesture to tail follow at its actual end, including growth during the gesture: %s', growsDuringGesture => {
+    jest.useFakeTimers();
+    const { Platform } = require('react-native');
+    const previousPlatform = Platform.OS;
+    Platform.OS = 'android';
+    const stamp = new Date('2026-10-04T03:10:00Z').getTime();
+    const messages: UiMessage[] = Array.from({ length: 8 }, (_, index) => ({
+      id: `bottom:${index}`, role: 'assistant', text: `Body ${index}`, timestampMs: stamp + (8 - index) * 1000,
+    }));
+    const props = createProps({ messages, onLoadMoreHistory: undefined });
+    const view = render(<ThreadView {...props} />);
+    try {
+      const timeline = () => view.getByTestId('thread-screen-timeline');
+      const count = timeline().props.data.length;
+      mockListLayout.content = count * 200;
+      mockListLayout.viewport = 600;
+      let bottom = mockListLayout.content - 600;
+      mockHistoryGeometry = { first: 0, offset: bottom, header: 0, positions: Array.from({ length: count }, (_, index) => index * 200) };
+      act(() => { timeline().props.onLoad({ elapsedTimeInMs: 1 }); timeline().props.onCommitLayoutEffect(); });
+      const event = () => ({ nativeEvent: { contentSize: { height: mockListLayout.content },
+        layoutMeasurement: { height: 600 }, contentOffset: { y: bottom } } });
+      act(() => timeline().props.onScrollBeginDrag(event()));
+      if (growsDuringGesture) {
+        mockScrollToEnd.mockClear();
+        for (const method of Object.values(mockUiFollow)) method.mockClear();
+        mockListLayout.content += 200;
+        act(() => { timeline().props.onContentSizeChange(393, mockListLayout.content); timeline().props.onCommitLayoutEffect(); });
+        expect(mockUiFollow.glide).not.toHaveBeenCalled();
+        expect(mockScrollToEnd).not.toHaveBeenCalled(); // A live finger still owns scrolling.
+        bottom = mockListLayout.content - 600;
+        mockHistoryGeometry.offset = bottom;
+      }
+      act(() => timeline().props.onScrollEndDrag(event()));
+      act(() => jest.advanceTimersByTime(160));
+      for (const method of Object.values(mockUiFollow)) method.mockClear();
+      const next: UiMessage = { id: 'bottom:new', role: 'assistant', text: 'New tail', timestampMs: stamp + 9000 };
+      mockHistoryGeometry.positions.push(count * 200);
+      mockListLayout.content += 200;
+      view.rerender(<ThreadView {...props} messages={[next, ...messages]} />);
+      act(() => timeline().props.onCommitLayoutEffect());
+      expect(mockUiFollow.glide.mock.calls.length + mockUiFollow.snap.mock.calls.length).toBeGreaterThan(0);
+      mockScrollToOffset.mockClear();
+      view.rerender(<ThreadView {...props} sessionKey="agent:atlas:other-reader" messages={messages} />);
+      expect(timeline().props.maintainVisibleContentPosition).toBeUndefined();
+      act(() => timeline().props.onCommitLayoutEffect());
+      expect(mockScrollToOffset).not.toHaveBeenCalled();
+    } finally { view.unmount(); mockHistoryGeometry = null; Platform.OS = previousPlatform; }
+  });
+
   it('keeps one list from the empty conversation through its first message, which enters like any sent message', () => {
     const { withTiming } = require('react-native-reanimated') as { withTiming: jest.Mock };
     const props = createProps({ state: { kind: 'empty' }, messages: [], input: '' });

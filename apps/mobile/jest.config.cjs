@@ -17,7 +17,7 @@ const config = {
     'node_modules[/\\\\]@shopify[/\\\\]flash-list[/\\\\]dist[/\\\\](recyclerview/helpers/(EngagedIndicesTracker|ConsecutiveNumbers)|native/config/PlatformHelper)\\.js$': 'babel-jest',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(tweetnacl|js-sha256|remend|@react-navigation/routers)/|@shopify/flash-list/dist/(recyclerview/helpers/(EngagedIndicesTracker|ConsecutiveNumbers)|native/config/PlatformHelper)\\.js$)',
+    'node_modules/(?!(tweetnacl|js-sha256|remend|@react-navigation/routers)/|@shopify/flash-list/src/|@shopify/flash-list/dist/(recyclerview/helpers/(EngagedIndicesTracker|ConsecutiveNumbers)|native/config/PlatformHelper)\\.js$)',
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   setupFiles: ['./jest.setup.ts'],

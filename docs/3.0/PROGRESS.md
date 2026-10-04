@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 普通阅读首个手势建立滚动锚点（独立任务，依赖已审查 PR #128，真机空白仍待因果确认）。
+  - 实际 Thread 两条回归确认：未分页的首次拖动没有建立应用锚点；起始布局不可用时，同一手势的后续有效原生事件也不能补捕捉。现首个 drag 尝试有效内容锚点，reading 事件允许首次捕捉；保留补偿 ACK、旧尺寸、pending 几何、新手势与 scope 的既有门。只有捕捉成功才关闭该 list 的 SDK MVCP，不全局关闭。底部手势未移动或期间 tail 增长仍由手指控制，实际结束回到底部后继续跟随；换会话退休旧锚点。
+  - 单文件串行：实际 Thread 基线 2 红→整文件 193 绿（新 4 项）；useHistoryScrollAnchor 20 项绿。真实已安装 FlashList RecyclerView/controller/manager/layout/tracker 另 2 项绿：注入 Native 与 JS 不一致的 clamp 后，SDK 100 ms ignore gate 丢弃反馈，定时结束不会自己纠正，下一真实 scroll 才恢复窗口；禁用 SDK 补偿时反馈可到达消费者。仅 Native host/measurement/scroll 反馈为夹具，不复制 SDK 算法。RN 正常在 mount 后应用 MVCP，注入旧 maximum 不证明真实手机发生该时序；586–588 空白和 596 同位置正常的现场尚无原生 offset/engaged-window 数据，不宣称本修改解决其根因、绘制或原生崩溃。
+  - Mobile 类型、247 UI 文件检查、设计系统文档（11 组件/10 token families/5 用例）与 check:docs（7 指令对/5 用例）通过。无手机、Native、RPC、构建、安装、发布或运行服务操作。实际真机复验仍由主测试；既有 owner-only 依赖审计门禁不绕过。
+
 - 2026-10-04 Codex 安卓 QA 组合候选：显示身份、逐客户端跟随、配置确认已整合，真实验收继续。
   - Root 合入 PR148 steering 同文时钟围栏、PR147 membership / Windows pipe fixture、PR146 future-configured 读回围栏及准确术语；保留此前当前 owner admission、ordered snapshot、ACK/input lineage、canonical 用户时钟与 resize focus 修复。旧 tool-reader 测试补 IPC-frame source；真实 membership socket 测试明确允许进入会话时唯一只读 owner discovery，随后 lifecycle 不得再查 history 或 dispatch。初次组合测试的零请求假设失败已修正，未削弱生产 owner 查询。
   - 持 heavy 逐文件串行：Mobile historyMergePolicy 77、Desktop IPC 32、Codex service 273 全绿；Mobile / Bridge-runtime 类型及 docs 9 指令对 / 5 检查器用例通过。未跑本地全套。新组合尚未加载到手机，旧缓存仍 26af / d874；Read-only 实际执行、fresh 同文 guide、普通阅读空白、Desktop GUI 和媒体等仍待实机验收。
