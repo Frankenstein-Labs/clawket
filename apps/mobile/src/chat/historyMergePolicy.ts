@@ -385,6 +385,19 @@ function findTailUserFallbackMatch(
     if (/^usr_\d+_steer_/.test(optimisticUser.id) && candidate.idempotencyKey) continue;
     if (candidate.idempotencyKey && optimisticUser.idempotencyKey && candidate.idempotencyKey !== optimisticUser.idempotencyKey) continue;
     if (!canMatchMessageAuthors(candidate, optimisticUser)) continue;
+    const steering = /^usr_\d+_steer_/.test(optimisticUser.renderKey ?? optimisticUser.id);
+    const knownHistoryIdentity = optimisticUser.historyMessageId
+      && [candidate.id, candidate.historyMessageId].includes(optimisticUser.historyMessageId);
+    if (steering && !knownHistoryIdentity) {
+      const localClock = optimisticUser.timestampMs;
+      const nativeClock = candidate.timestampMs;
+      const validClock = (value: number | undefined): value is number => typeof value === 'number'
+        && value > 0 && Number.isFinite(value) && Number.isFinite(new Date(value).getTime());
+      // Steering has no send key. Its absence cannot override two clocks
+      // that already rule out this older, otherwise identical native guide.
+      if (validClock(localClock) && validClock(nativeClock)
+        && Math.abs(localClock - nativeClock) > USER_MATCH_GRACE_MS) continue;
+    }
     if (normalizeUserText(candidate.text) !== normalizedOptimisticText) continue;
     if (!hasMissingUserMatchMetadata(candidate)) continue;
     return candidate;

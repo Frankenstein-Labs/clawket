@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 同文 Current 指南的历史显示身份错绑（本轮完整安卓 QA 的独立修复）。
+  - 真机运行中第一条指南不再显示，完成后两条原生指南恢复；完成态 XML 的消息容器确认两个不同 native ID，但第一条 10:39 指南的用户正文 render key 是第二次 10:41 dispatch 的本地身份。原始 UserMessageText testID 误读为 message.id 的私有记录已保留，并由父节点关联的更正版明确取代。新完成态单次 history 读取完整，不能回溯运行中的 Mobile wire 或据此声称消失根因全部已证。
+  - 已识别 steering 本地行遇缺 send key 的同文 fallback 时，双方有效时钟超出现有 60 秒匹配窗就保留未归并本地行，不能把新身份给旧 native 指南；已知精确 native/history 身份、缺失/无效时钟以及普通 OpenClaw/Hermes 旧匹配路径保留。未改变控制器、发送或原生协议，也未重放指南。
+  - 实际现有历史合并消费链：62 秒、125 秒与 completed/cold 连续归并基线 3 红，精确身份/旧匹配基线 2 绿；窄修后单文件 65 项、Mobile 类型、check:docs 7 指令对 / 5 检查器用例通过，heavy 已释放。完整门禁由本 PR CI 验证；真实手机回归由 Root 在候选中进行。未操作设备、Native/QA RPC、生产服务、打包或发布。
+
 - 2026-10-04 Codex R4L idle 正文空白现场与滚动/冷开恢复对照（仍未修复验收）。
   - Root未发后续手势期间，586–588截图完全同SHA：在线header/首时间chip/底边guide仍可见，正文大面积空白。ownQA-PID 250日志entry实际4,752行/552,480字节，记录Reanimated SurfaceMountingManager找不到tag警告，无Fatal/ShadowTree；不据此定因。UIA visible message节点7→2，同guide/随后assistant原点均+1,205px；屏外clipped bounds在正常585也存在，不能当新增非法布局证据。
   - 负责人实际滚动后恢复，589显示init/main/assistant重新出现；Root未代发手势或消息。只在QA包做一次保数据冷开，591Roster/593同会话tail/595两guide正常；actual cache仍26af/d874，Native仍4starts/4receipts/3complete/1abort且0新增输入，两guide presentation keys均回canonical Native IDs。冷开与手势恢复不证明具体根因。
