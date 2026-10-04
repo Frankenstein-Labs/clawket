@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 相册导出载荷 MIME 窄修（独立 `codex/image-picker-payload-mime`）。
+  - Expo Android quality 0.8 的 base64 导出为 JPEG，但原 provider GIF/PNG MIME 可保留到发送准备与 wire；仅在成功相册结果进入 PendingImage 前用最多 12 字节确认 JPEG/PNG/GIF/WebP 签名，未知签名保留原声明/默认。URI、quality、原载荷、动画导出语义、六图上限、scope 与 camera/recent-photo 路径保持。
+  - 实际 hook→发送准备→Codex 序列化帧基线 7 红/11 绿，窄修后 hook 单文件 20、既有发送准备单文件 4 项串行通过；Mobile 类型与 docs 7 指令对/5 用例通过。没有操作手机/Native、构建、发布或改负责人候选；小 GIF 真机 gallery 输出与修后 MIME 仍待 HT-PICKER-MIME-1004，源码/模拟 wire 不替代真机验收。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。
@@ -1382,6 +1386,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-PICKER-MIME-1004 | 相册导出 MIME 真机验收 | 在负责人合入本修复的 QA App，从系统相册选择小 GIF 与 PNG；仅自建 QA 会话发送一次，未知不重发。 | 观察实际 base64 签名和发送 MIME 一致、视觉首帧正确、取消/scope/六图上限保持；不宣称恢复 GIF 动画或制造容量超限。 | hook/发送 wire 回归已通过；真机 gallery 输出待负责人验收。本轮没有设备或发布动作。 |
 | HT-NATIVE-NAME-1002 | 新增原生连接电脑名修复的 Bridge 交付与手机验收 | 在另行授权的 Bridge 发布/更新后，用旧设备配置执行显式 Codex / Claude Code pair，再在手机新增连接；普通运行不会自行补名称，已有连接可在连接设置手动改名。 | 新连接显示 Product · 电脑名；旧手机继续连接，已有/手动名称不被重配覆盖。本次只改源码并由 CI 验证，不发布、不修改现有配对配置。 | 待负责人授权交付与验收 |
 | HT-USER-FOLD-1002 | 用户消息折叠的双端体验验收 | 在包含本轮代码的开发 App 或后续授权更新中，查看中英文长消息、连续换行、带图片 / 文件的消息；调整字号并在 iPad 分栏查看。 | 默认 6 行，展开 / 收起可达且阅读不被拉向页尾；时间和送达标记不盖文字；长按状态一致、复制 / 分享保留全文；短消息及助手回复照旧。 | 定向自动化已通过；待负责人真机视觉 / 手感验收，本轮未打包或发布。 |
 | HT-HERMES-GATEWAY-KEY-1002 | Hermes gateway 所有权恢复（#69）的发布决定 | 3.1.10 从 `accfe2f4` 起，不含本修复；由负责人决定随哪个 Bridge 版本发布 | 升级后用 `clawket pair --backend hermes --restart-hermes` 让新 bridge 启动并记录 gateway，再 `clawket reset` 后重新配对：手机应直接连上，`hermes-bridge.log` 出现 `owner=clawket`；没有记录的旧 gateway 应在配对时失败并提示 `--restart-hermes` | 待负责人决定；本轮不打包、不发布。 |
