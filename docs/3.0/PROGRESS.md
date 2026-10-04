@@ -1,5 +1,16 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 Codex 相机权限/取消与实际拍照真机检查；保留中断现场，全面验收继续。
+  - 拒绝权限及临时授权后Cancel保留exact草稿/0附件。临时权限回合等待期间10636退出，Android reason8 permission_change/后台importance400；959只有shutter、0确认，不能记为accepted image丢失或Native crash。系统重建14313遇QA开发script加载失败，两USB reverse实际丢失；仅恢复QA开发连接及一次QA保数据重启，新15648，Native Desktop/商店/Production不动。原时间解析/时区误差保留并另记纠正；device实际+0800。
+  - 15648前后完整cache size/SHA与早先9959全传输相同（22,536,264B/8c7c206e…），不是第二次完整传输。应用时权限下one shutter/Okay、1附件中心预览、Close保1、明确Remove0与原草稿通过，0Send。当前Mobile没有Expo pending-result消费者；未确认回合不冒称成功结果丢失，真实confirmed-result重建与原会话恢复仍待。
+  - 041–047完整转存/源前后stat+SHA/宿主全SHA+fsync成立，0活跃screenrecord；容器/全编码帧/视觉审查独立继续。闲置空白按用户“滚动恢复”反馈，继续区分虚拟窗口坐标与实际paint，未定根因。
+
+- 2026-10-05 Codex 图片/产物/引用与 B 六页真机验收；修复附件中心误删，全面验收继续。
+  - b851 手机实际PNG/GIF输出分别为928/774B JPEG，声明与签名一致、预期颜色回复成立；第三次无工具回复的RGB产物预览/双击、58B TXT下载SHA及系统分享取消通过。六图唯一尝试在本地容量门被保留，Edit还原原文/6图；前后完整Native/receipts仍3 starts/completes/users/receipts、全字节不变。蓝泡来自预检前queue，非dispatch证明；独立42.9秒后1006重连原因未定。
+  - E非默认项目引用普通创建有可编辑草稿、0Send，host确认项目继承而非设备默认；未触草稿Back清理新Bridge索引，源/默认保留，不冒称Native文件删除。B六Profile页完成隔离写入/刷新/后台、Cancel及stale-Save拒绝后恢复205/127B原SHA、model/skill语义还原，清理exact新增fixtures；MCP/Plugins仅空态，quota不可用、真实HOME/account未改。
+  - 实抓GIF中心误删：44pt目标及hitSlop重叠56pt缩略图中心。整合cff→9959仅12→24pt trailing reserve，保原可访问删除目标。初次QA JS reload在10636完成完整手机缓存22,536,264B/SHA8c7c206e…、20source/38marker成立；首checker因Metro末comma格式拒绝保留，独立v2重新全传输通过。GIF/PNG中心预览、Close保附件、明确Remove、六图2列与第6预览6/6真机通过，0Send。
+  - Root窄PendingImageBar8、Mobile类型、docs9指令对/5检查器通过；b851及standalone160 exact CI功能/类型/v1绿、唯一未批准braces仍阻merge，PR141/160未合并/发布。041–047的后续转存见上方相机检查里程碑；容器/视觉审核仍待；idle空白与原Desktop Retry因果仍未明，后者仍owner-only GUI检查。详见更新的Codex Android QA报告。
+
 - 2026-10-05 修复草稿附件中心误删（Codex 真机 QA 发现，所有后端共享组件）。
   - 56 点缩略图中心被右上角 44 点删除 target 与 hitSlop 覆盖；附件 wrapper 右侧预留从 12 改为 24 点，中心打开预览，删除 target 尺寸、文件卡片与动画保持原样。
   - 实际组件几何与 Pressable 路由回归先 4 红 / 1 兼容通过，修复后 PendingImageBar 单文件 8 项、Mobile 类型、UI 246 文件、设计文档 11 组件及 check:docs 7 指令对 / 5 用例通过。涵盖 GIF/PNG/JPEG 中心、独立删除、多附件索引、文件卡片和可访问标签。宿主测试不运行原生 hit testing，负责人将合入后真机复测；未操作手机、Native、发布或 Root 组合源码。
