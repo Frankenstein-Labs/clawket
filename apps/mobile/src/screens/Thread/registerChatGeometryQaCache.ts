@@ -1,4 +1,4 @@
-import { DevSettings, Platform } from 'react-native';
+import { DevSettings, Platform, ToastAndroid } from 'react-native';
 import * as Application from 'expo-application';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { ChatGeometryQaApi } from './chatGeometryQa';
@@ -40,6 +40,12 @@ export function registerChatGeometryQaCache(api: ChatGeometryQaApi | null): void
     shared.binding = { api, sink };
   }
   // Read the current binding at invocation, rather than closing over a retired API/module.
-  DevSettings.addMenuItem('QA Geometry Start', () => { shared.binding?.sink.start(); });
+  DevSettings.addMenuItem('QA Geometry Start', () => {
+    if (!qaGeometryCacheEnabled(typeof __DEV__ !== 'undefined' && __DEV__, Platform.OS,
+      Application.applicationId, process.env.EXPO_PUBLIC_CHAT_GEOMETRY_QA_CACHE)) return;
+    const message = shared.binding?.sink.start() === 'started' ? 'QA Geometry started' : 'QA Geometry unavailable';
+    // Sampler acceptance is not asynchronous file-write success. Feedback must not change the gate.
+    try { ToastAndroid.show(message, ToastAndroid.SHORT); } catch { /* QA feedback is best effort. */ }
+  });
   DevSettings.addMenuItem('QA Geometry Stop', () => { shared.binding?.sink.stop(); });
 }
