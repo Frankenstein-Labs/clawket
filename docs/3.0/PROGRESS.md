@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 组合 cc4 实际更新与普通阅读取证继续（全面验收未完成）。
+  - Root 串行 cc4 Service337/cache17/registry11/observer8/Thread201共574、Mobile/Runtime/CLI类型、docs和开发CLI通过。旧C18/E1058认证非空全显式idle后各一次parent停止并确认精确child/端口退役；新C/E CLI SHA dd5ecfe9…与新手机完整22,533,994字节/SHA fa5d22d0…留证。没有以旧roster或源码替代新代实际推理验收；Production/商店/Native Desktop未改。
+  - 新opt-in实际字节与QA菜单确认，完成态R4L只Start一次但两次固定final-file观察均未见缓存；Inspector0page、0evaluate。原次闭合unreported，不重试、不宣称sampler接受/rawSDK坐标或空白根因。菜单固定反馈与同页Profile refresh栅栏另行整合，Root两实际UI文件14/16、Mobile类型/docs通过，真机尚旧cc4。
+  - A4M Copy→exact自身draft→clear、Favorite、poster→实际系统Share→0recipient取消→close留证，0Native输入。026/027真实容器36.024/45.475s，有界八秒205原始PTS帧由独立审片员逐帧核验正文，Root亲看四locator；非旧idle空白因果。032完整传输530,271字节，尚未probe/decode；681–683两普通拖动及后续idle正文正常，不能宣称全面空白修复。
+  - fresh Q4G empty会话已创建并选Low，init/Plan/问答取消尚待；新同文Current、媒体/Profile/兼容继续。相关PR功能CI通过仍受未批准braces门禁，不merge/release；原Desktop Retry现场仍owner-only GUI，不绕过工具限制。
+
 - 2026-10-04 Codex 安卓 QA 菜单 Start 状态反馈（独立源码任务）。
   - 真机首次 Start 点击后固定缓存未出现，现有菜单忽略采集器返回值；目前不能区分绑定拒绝和异步文件失败，原次操作保持 unreported，不重试、不补造 accepted ACK。
   - 仅四门成立的 Android QA 显式 Start 显示固定 started/unavailable Toast；started 只指采集器接受 arm，不指缓存落盘。注册不反馈/采样/IO，过期菜单在 gate 关闭后静默；旧菜单仍读取当前绑定，单次 arm、未知部分成功阻塞和 Stop 路径保持。
