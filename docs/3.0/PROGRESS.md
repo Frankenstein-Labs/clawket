@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 组合 3e4209 真正 Read-only 与原始授权闭环留证；全面真机验收继续。
+  - 串行窄验证：CodexService 328、Mobile collector 11/observer 8/UI follow 13/Thread 201，共 561；Mobile/Runtime/CLI 类型、docs 9 指令对/5 检查器及本地开发 CLI 通过。只有认证全显式 idle 后才各一次停止隔离旧 C/E parent，并确认精确 child/端口退出；新 C/E 本地目录 C17/E1057 均正常。actual CLI SHA237c916e…、手机完整缓存22,522,652字节/SHAc2183364… 经进程代际/配置/前后完整字节校验；Production/商店/Native Desktop 未更改。默认关闭几何诊断已加载，但 public Inspector list 为0 page，未开启采样/未得到 raw/SDK 坐标，不能以源码或滚动恢复认定空白根因。
+  - fresh A4M 初始化与唯一主输入都在原生实际确认命名 Read-only、on-request/user、有效只读、6.1Sol/low/default；2 starts/completes/唯一 receipts、usage成立且0 abort/error。真正原 turn ordinal2 的 pending审批 schema/命令/目录/原 item 严格匹配后，手机只 Allow 一次；同一次只读 IPC capture 记录原 command completed/exit0，QA 小文件恰26字节/一行。手机原 PID 保持、online并显示原生最终回复，留观截图与030/031录屏保存；本轮未观察到此前允许后退出，不等于崩溃修复已完整验收。
+  - 冻结 v6 after 严格工具格式仍 unverified：模型使用 text(result) 而非 JSON 包装，返回 yielded cell；测试 prompt 禁止另一工具，模型未 wait并最终报告结果不确定。单命令原生 live终态/文件证明与该完整夹具失败分开，旧 baseline/reader/result未放宽或重写，未重发主输入。第一次捕获仅 pending；Root 中文问号校验在 intent/点击前误拒绝，0决定；纠正后新的显式只读捕获仍同原请求，0自动重连/新 writer，不能把跨 capture盐哈希当同身份。
+  - 原普通阅读026/027视频完整传输，独立有界审片计划及两peer通过，媒体尚未执行。下一步为默认关闭的QA缓存几何取证、fresh同轮Current别名与真实 question/media/管理覆盖。Desktop旧会话重开/Retry仍owner-only GUI检查；未批准braces审计仍阻挡合并，未发布/部署。
+
 - 2026-10-04 Codex 0.160 首轮 lazy 线程兼容与每次发送权限绑定（独立任务，手机复测待新 QA）。
   - A4L 首次 Read-only 选择的固定诊断为 request_failed，尚无初始化输入；reference 专门回归确证未 materialize 的线程不能 resume，同一已加载线程的 metadata read 有兼容返回。该源码事实支持修复路径，不从未记录原生错误推定现场唯一原因。
   - 仅当前 RPC 成功 thread/start 的精确 record/native ID/cwd/loaded 资格允许首轮 metadata 验证；完整 ACK 提供命名权限，再在 0.160 turn/start 显式绑定 permissions/policy/reviewer，不能同时发 sandboxPolicy。资格在实际 dispatch 前退休；旧 index/cold resume/import/Desktop 无推断 fallback，未知发送不重放、不创建第二 writer。已保存会话保留 warm 配置围栏；配置一致不是实际 execution attestation，Owner environment/真实 Read-only 仍待新手机 QA。
