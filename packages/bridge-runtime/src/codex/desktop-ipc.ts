@@ -52,7 +52,7 @@ export class DesktopIpc extends EventEmitter {
   private pending = new Map<string, { method: string; resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private followed = new Set<string>();
   private permanentFollows = new Set<string>();
-  handler?: { accepts(method: string, params: any): boolean; request(method: string, params: any): Promise<any> };
+  handler?: { accepts(method: string, params: any): boolean; request(method: string, params: any, sourceClientId?: string): Promise<any> };
   broadcast(method: string, params: object): void {
     if (this.ready) this.write({ type: 'broadcast', method, version: versions[method] ?? 1, sourceClientId: this.clientId, params });
   }
@@ -175,12 +175,12 @@ export class DesktopIpc extends EventEmitter {
     if (this.ready) this.announceFollowing(id, false);
     this.emit('observation-released', id);
   }
-  private announceFollowing(id: string, following: boolean): void {
+  private announceFollowing(id: string, following: boolean, targetClientId?: string): void {
     if (this.ready) {
       // The owner answers this subscription (including repeated subscriptions)
       // with its current snapshot. Loading complete history here would turn a
       // normal follow or patch repair into an unbounded native history scan.
-      this.write({ type: 'broadcast', method: 'thread-stream-following-changed', version: 1, sourceClientId: this.clientId, params: { hostId: 'local', conversationId: id, following } });
+      this.write({ type: 'broadcast', method: 'thread-stream-following-changed', version: 1, sourceClientId: this.clientId, ...(targetClientId ? { targetClientIds: [targetClientId] } : {}), params: { hostId: 'local', conversationId: id, following } });
     }
     else void this.connect().catch(() => {});
   }
@@ -211,13 +211,37 @@ export class DesktopIpc extends EventEmitter {
         const supportedVersion = frame.version === (versions[frame.method] ?? 1)
           || (frame.method === 'thread-follower-update-thread-settings' && frame.version === 1);
         if (!current() || !handler?.accepts(frame.method, frame.params ?? {}) || !supportedVersion) throw new Error('Unsupported desktop operation');
-        return handler.request(frame.method, frame.params ?? {});
+        return handler.request(frame.method, frame.params ?? {}, frame.sourceClientId);
       }).then(result => { if (current()) this.write({ type: 'response', requestId: frame.requestId, method: frame.method, resultType: 'success', handledByClientId: clientId, result }); }, error => {
         if (current()) this.write({ type: 'response', requestId: frame.requestId, method: frame.method, resultType: 'error', handledByClientId: this.clientId, error: error instanceof DesktopHistoryLimitError ? error.message : 'Clawket could not complete this operation' });
       }).catch(() => {});
       return;
     }
-    if (frame.type === 'broadcast' && frame.method === 'thread-stream-following-changed' && frame.params?.hostId === 'local') this.emit('follow', frame.params.conversationId, frame.params.following === true);
+    if (frame.type === 'broadcast') {
+      const source = frame.sourceClientId, p = frame.params;
+      const identity = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 256 && value.trim() === value;
+      if (identity(source) && source !== this.clientId) {
+        if (frame.method === 'thread-stream-following-changed' && frame.version === 1
+          && p?.hostId === 'local' && identity(p.conversationId) && typeof p.following === 'boolean') {
+          this.emit('follow', p.conversationId, p.following, source); return;
+        }
+        if (frame.method === 'thread-stream-following-status-requested' && frame.version === 1
+          && p?.hostId === 'local' && this.followed.has(p.conversationId)) {
+          this.announceFollowing(p.conversationId, true, source); return;
+        }
+        // The native broker uses version 0 for this broker-authored lifecycle
+        // shape. Require the frame source rather than trusting a payload identity.
+        if (frame.method === 'client-status-changed' && frame.version === 0 && p?.clientId === source && p.isSelf !== true) {
+          if (p.status === 'disconnected') {
+            for (const snapshot of this.snapshots.values()) if (snapshot.source === source) snapshot.fresh = false;
+            this.emit('client-offline', source);
+          } else if (p.status === 'connected') {
+            for (const id of this.followed) this.announceFollowing(id, true, source);
+          }
+          return;
+        }
+      }
+    }
     if (frame.type !== 'broadcast' || frame.method !== 'thread-stream-state-changed' || frame.sourceClientId === this.clientId) return;
     const p = frame.params, id = p?.conversationId;
     if (p.hostId !== 'local' || typeof frame.sourceClientId !== 'string' || !this.followed.has(id)) return; // Never cache unrelated desktop content.

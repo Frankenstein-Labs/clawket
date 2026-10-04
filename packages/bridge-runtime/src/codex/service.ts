@@ -72,7 +72,7 @@ export class CodexService extends EventEmitter {
   private catalog: any[] = [];
   private projects = new Map<string, ReturnType<typeof projectDescriptor>>();
   private desktop?: DesktopIpc;
-  private desktopFollowers = new Set<string>();
+  private desktopFollowers = new Map<string, Set<string>>();
   private publishTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private publishedRevision = new Map<string, number>();
   private rawRequests = new Map<string, any>();
@@ -104,8 +104,24 @@ export class CodexService extends EventEmitter {
       for (const r of this.records) { if (r.cwd && !options.device && r.cwd !== this.project) throw new Error('Project authorization mismatch'); this.rememberProject(r.cwd ?? this.project); }
       {
         this.desktop = options.desktop ?? new DesktopIpc();
-        this.desktop.on('follow', (id: string, following: boolean) => { if (following && this.records.some(r => r.threadId === id && this.loaded.has(r.id))) { this.desktopFollowers.add(id); void this.publishDesktop(id).catch(() => {}); } else this.desktopFollowers.delete(id); });
-        this.desktop.handler = { accepts: (method, p) => this.acceptDesktop(method, p), request: (method, p) => this.desktopRequest(method, p) };
+        this.desktop.on('follow', (id: string, following: boolean, source: string) => {
+          if (!this.validDesktopFollower(source)) return;
+          if (following) {
+            try { if (this.addDesktopFollower(id, source)) void this.publishDesktop(id).catch(() => {}); }
+            catch { /* A full subscription set never evicts an existing follower. */ }
+          } else {
+            const followers = this.desktopFollowers.get(id);
+            followers?.delete(source); if (!followers?.size) this.retireDesktopFollowers(id);
+          }
+        });
+        this.desktop.on('client-offline', (source: string) => {
+          if (!this.validDesktopFollower(source)) return;
+          for (const [id, followers] of this.desktopFollowers) {
+            followers.delete(source); if (!followers.size) this.retireDesktopFollowers(id);
+          }
+        });
+        this.desktop.on('offline', () => this.retireDesktopFollowers());
+        this.desktop.handler = { accepts: (method, p) => this.acceptDesktop(method, p), request: (method, p, source) => this.desktopRequest(method, p, source) };
         this.desktop.on('unsupported', (id: string) => { const r = this.records.find(row => row.threadId === id); if (r && !this.desktop?.isObservationOnly?.(id)) this.update({ type: 'error', sessionKey: r.id, code: 'unsupported', message: 'This Codex Desktop version cannot be followed safely. Continue on your computer.' }); });
         this.sessionActivity = new CodexSessionActivity(this.desktop, activity => {
           if (!this.loaded.has(activity.key)) this.emit('update', { type: 'session_activity_update', activity });
@@ -152,7 +168,7 @@ export class CodexService extends EventEmitter {
     });
     rpc.on('closed', () => {
       if (this.rpc !== rpc || this.stopped) return;
-      this.disconnected = true; this.loaded.clear(); this.effectiveSettings.clear(); this.desktopHistory.clear();
+      this.disconnected = true; this.loaded.clear(); this.effectiveSettings.clear(); this.desktopHistory.clear(); this.retireDesktopFollowers();
       this.nextRecoveryAt = Date.now() + 1000;
       for (const waiter of this.settingsWaiters.values()) { clearTimeout(waiter.timer); waiter.reject(new Error('Codex settings could not be confirmed; reconnect before sending.')); }
       this.settingsWaiters.clear();
@@ -237,14 +253,18 @@ export class CodexService extends EventEmitter {
       'thread-follower-command-approval-decision', 'thread-follower-file-approval-decision', 'thread-follower-permissions-request-approval-response', 'thread-follower-submit-user-input',
     ].includes(method);
   }
-  private desktopRequest(method: string, p: any): Promise<any> {
-    return this.updateAdmission.request(() => this.desktopRequestNow(method, p));
+  private desktopRequest(method: string, p: any, sourceClientId?: string): Promise<any> {
+    return this.updateAdmission.request(() => this.desktopRequestNow(method, p, sourceClientId));
   }
-  private async desktopRequestNow(method: string, p: any): Promise<any> {
+  private async desktopRequestNow(method: string, p: any, sourceClientId?: string): Promise<any> {
     const r = this.records.find(row => row.threadId === p.conversationId)!;
     const call = (method: string, params: object) => this.request({ type: 'req', id: randomUUID(), method, params: { sessionKey: r.id, ...params } });
     if (method === 'thread-owner-discovery') return { supportsUntrustedAppInput: false };
-    if (method === 'thread-follower-load-complete-history') { this.desktopFollowers.add(r.threadId!); return { revision: await this.publishDesktop(r.threadId!, true) }; }
+    if (method === 'thread-follower-load-complete-history') {
+      if (!this.validDesktopFollower(sourceClientId)) throw new Error('Invalid Desktop follower');
+      if (!this.addDesktopFollower(r.threadId!, sourceClientId)) throw new Error('Conversation is not owned here');
+      return { revision: await this.publishDesktop(r.threadId!, true) };
+    }
     if (method === 'thread-follower-update-thread-settings') {
       const settings = p.threadSettings;
       if (!settings || typeof settings !== 'object' || Array.isArray(settings)
@@ -305,14 +325,43 @@ export class CodexService extends EventEmitter {
     if (!consent || consent.permissions || !['accept', 'decline'].includes(p.decision)) throw new Error('Unsupported approval response');
     return call('approvals.resolve', { id: consent.approval.id, decision: p.decision === 'accept' ? 'allow-once' : 'deny' });
   }
+  private validDesktopFollower(source: unknown): source is string {
+    return typeof source === 'string' && source.length > 0 && source.length <= 256 && source.trim() === source;
+  }
+  private addDesktopFollower(id: string, source: string): boolean {
+    const r = this.records.find(row => row.threadId === id);
+    if (!r || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop) return false;
+    const followers = this.desktopFollowers.get(id) ?? new Set<string>();
+    if (!followers.has(source) && followers.size >= 128) throw new Error('Too many Desktop followers');
+    followers.add(source); this.desktopFollowers.set(id, followers); return true;
+  }
+  private retireDesktopFollowers(id?: string): void {
+    if (id === undefined) {
+      this.desktopFollowers.clear();
+      for (const timer of this.publishTimers.values()) clearTimeout(timer);
+      this.publishTimers.clear(); return;
+    }
+    this.desktopFollowers.delete(id);
+    const timer = this.publishTimers.get(id); if (timer) clearTimeout(timer);
+    this.publishTimers.delete(id);
+  }
   private scheduleDesktop(r: Entry): void {
     if (!r.threadId || !this.desktopFollowers.has(r.threadId) || this.publishTimers.has(r.threadId)) return;
     const id = r.threadId;
     this.publishTimers.set(id, setTimeout(() => { this.publishTimers.delete(id); void this.publishDesktop(id).catch(() => {}); }, 500));
   }
-  private publishing = new Map<string, Promise<number>>();
+  private publishing = new Map<string, { followers?: Set<string>; promise: Promise<number> }>();
   private publishDesktop(threadId: string, complete = false): Promise<number> {
-    const existing = this.publishing.get(threadId); if (existing) return complete ? existing.then(() => this.publishDesktop(threadId, true)) : existing;
+    const followers = this.desktopFollowers.get(threadId);
+    const currentMembership = () => !followers || this.desktopFollowers.get(threadId) === followers;
+    const ensureMembership = () => { if (!currentMembership()) throw new Error('Desktop subscription changed; refresh this conversation'); };
+    const existing = this.publishing.get(threadId);
+    if (existing) {
+      if (existing.followers !== followers) return existing.promise.catch(() => {}).then(() => {
+        ensureMembership(); return this.publishDesktop(threadId, complete);
+      });
+      return complete ? existing.promise.then(() => { ensureMembership(); return this.publishDesktop(threadId, true); }) : existing.promise;
+    }
     const work = (async () => {
       const r = this.records.find(row => row.threadId === threadId);
       if (!r || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop) throw new Error('Conversation is not owned here');
@@ -321,6 +370,8 @@ export class CodexService extends EventEmitter {
       let history = this.desktopHistory.get(threadId);
       if (!history || (complete && !history.complete)) {
         history = await loadDesktopHistory(this.rpc, threadId, r.cwd ?? this.project, complete);
+        ensureMembership();
+        if (this.stopped || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop) throw new Error('Conversation ownership changed');
         this.desktopHistory.set(threadId, history);
       }
       const thread = { ...history.thread, turns: [...history.thread.turns] };
@@ -343,11 +394,12 @@ export class CodexService extends EventEmitter {
       for (const id of this.rawRequests.keys()) if (id.startsWith(r.id + ':') && !pendingIds.has(id)) this.rawRequests.delete(id);
       const state = desktopState(thread, requests, settings, history.cursor);
       const revision = (this.publishedRevision.get(threadId) ?? 0) + 1;
+      ensureMembership();
       if (this.stopped || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop) throw new Error('Conversation ownership changed');
       this.desktop!.broadcast('thread-stream-state-changed', { hostId: 'local', conversationId: threadId, change: { type: 'snapshot', revision, conversationState: state } });
       this.publishedRevision.set(threadId, revision); return revision;
     })().finally(() => this.publishing.delete(threadId));
-    this.publishing.set(threadId, work); return work;
+    this.publishing.set(threadId, { followers, promise: work }); return work;
   }
   private projectDetails(path: string) {
     const descriptor = projectDescriptor(path);
@@ -880,7 +932,7 @@ export class CodexService extends EventEmitter {
           if (archived) await this.assertArchivable(r);
           await this.rpc.request(archived ? 'thread/archive' : 'thread/unarchive', { threadId: r.threadId });
           r.archived = archived; this.loaded.delete(r.id); this.effectiveSettings.delete(r.id);
-          this.desktopHistory.delete(r.threadId!); this.save();
+          this.desktopHistory.delete(r.threadId!); this.retireDesktopFollowers(r.threadId); this.save();
           this.desktop?.broadcast(archived ? 'thread-archived' : 'thread-unarchived', { hostId: 'local', conversationId: r.threadId });
           this.update({ type: 'session_info_update', session: this.descriptor(r) }); return { ok: true };
         });
@@ -889,6 +941,7 @@ export class CodexService extends EventEmitter {
         const r = this.record(p.sessionKey); if (r.native) throw new Error('Native conversation metadata is read-only'); if (this.runs.has(r.id)) throw new Error('Stop the task and wait for it to finish first');
         return this.changeMetadata(r, async () => {
           if (r.threadId && (r.activity || this.loaded.has(r.id))) { await this.assertArchivable(r); await this.rpc.request('thread/archive', { threadId: r.threadId }); }
+          if (r.threadId) this.retireDesktopFollowers(r.threadId);
           if (frame.method === 'sessions.delete') { this.records = this.records.filter(row => row !== r); }
           else { r.threadId = undefined; r.model = undefined; r.provider = undefined; r.preview = undefined; r.activity = undefined; r.effort = undefined; r.serviceTier = undefined; r.speedPreference = undefined; }
           this.loaded.delete(r.id); this.effectiveSettings.delete(r.id); delete r.permissionsUnconfirmed; this.save(); return { ok: true };
@@ -1295,7 +1348,7 @@ export class CodexService extends EventEmitter {
 
   async stop(): Promise<void> {
     if (this.stopped) return; this.stopped = true; this.artifacts.clear();
-    for (const timer of this.publishTimers.values()) clearTimeout(timer); this.publishTimers.clear();
+    this.retireDesktopFollowers();
     for (const waiter of this.settingsWaiters.values()) { clearTimeout(waiter.timer); waiter.reject(new Error('Codex Bridge stopped')); }
     this.settingsWaiters.clear(); this.sessionActivity?.stop(); this.desktop?.stop();
     this.profile.clear(); await this.rpc.stop(); this.artifacts.clear();
