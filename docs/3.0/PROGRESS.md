@@ -1,5 +1,6 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 同回合工作胶囊追加 partial 审批 attention 边界：实际 Thread 缺少原始输入、工具带 turn 身份而有效审批无 turn 身份时，先确认 1 项失败/4 项负向通过；独立消费当前会话的有效请求后 5 项通过，Review 定位实际审批卡，已解决、过期、不支持及 pairing 请求不复活工作审批。请求不加入未知工具、执行收据或计时归属，切换会话不保留旧请求。整文件、类型和 docs 由主任务组合验证；本分支已释放 heavy，无设备/Native/QA RPC/Production 操作。
 - 2026-10-04 Codex 同原生回合引导的工作胶囊计时与步骤边界：在 fresh main 独立树明确依赖 f722 + 7d，以实际 Thread 只插入引导和未加载原始输入的分页窗口先复现 2 项失败。消费者复用 turnIdentity 和当前控制器拥有的会话/执行/原始输入证据，保持总计时、步骤编号及已完成的首步等待；不同执行/发送 key、未知旧后端和 partial/scope/terminal 保留边界。工具自身计时不在本修复范围。本机串行逐文件：ThreadView 169、turn-work 19、work-dock-model 7、controller contract 62，共 257 项通过；Mobile 类型、UI/设计系统、check:docs 7 指令对/5 用例通过。真机仍由主任务验收；没有操作 Native、设备、QA RPC 或 Production，未发布/部署。
 
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。

@@ -2530,6 +2530,51 @@ describe('work dock', () => {
     expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
   });
 
+  it('keeps current approval attention on a partial run without assigning the request to its native turn', () => {
+    const start = Date.parse('2026-10-04T00:00:00Z');
+    jest.setSystemTime(start + 95_000);
+    const current = { ...run, turnId: 'native-turn' };
+    const identity = { scope: {}, sessionKey: 'agent:atlas:main', runId: 'bridge-run', turnId: 'native-turn', inputMessageId: 'unloaded-main', startedAt: start };
+    const approval: UiMessage = { id: 'approval_partial', role: 'system', text: '',
+      approval: { id: 'partial-request', kind: 'exec', command: 'rm -rf build', status: 'pending', expiresAtMs: null } };
+    const props = createProps({ isRunning: true, messages: [approval, current], runWorkIdentity: identity });
+    const view = render(<ThreadView {...props} />);
+    const dock = view.getByTestId('thread-screen-work-dock');
+    expect(within(dock).getByText('Waiting for your approval')).toBeTruthy();
+    expect(within(dock).getByText('Review')).toBeTruthy();
+    expect(view.getByTestId('thread-approval-approval_partial')).toBeTruthy();
+    const list = view.getByTestId('thread-screen-timeline');
+    fireEvent(list, 'load', { elapsedTimeInMs: 10 });
+    fireEvent(list, 'scrollBeginDrag');
+    fireEvent.scroll(list, scrollEvent(800));
+    mockScrollToEnd.mockClear();
+    fireEvent.press(dock);
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(1);
+    expect(approval.turnId).toBeUndefined();
+    view.rerender(<ThreadView {...props} messages={[{ ...approval, approval: { ...approval.approval!, status: 'allowed' } }, current]} />);
+    expect(view.queryByText('Review')).toBeNull();
+    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 1:36')).toBeTruthy();
+    view.rerender(<ThreadView {...props} sessionKey='another-session' runWorkIdentity={{ ...identity, scope: {}, sessionKey: 'another-session', runId: 'other-run', turnId: 'other-turn', inputMessageId: 'other-main', startedAt: Date.now() }} messages={[{ ...current, turnId: 'other-turn' }]} />);
+    expect(view.queryByText('Review')).toBeNull();
+    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+  });
+
+  it.each(['expired', 'resolved', 'unsupported', 'pair'] as const)('does not revive %s approval attention on a partial run', (kind) => {
+    const start = Date.parse('2026-10-04T00:00:00Z');
+    jest.setSystemTime(start);
+    const identity = { scope: {}, sessionKey: 'agent:atlas:main', runId: 'bridge-run', turnId: 'native-turn', inputMessageId: 'unloaded-main', startedAt: start };
+    const approval: UiMessage = { id: 'approval_inactive', role: 'system', text: '', approval: kind === 'pair'
+      ? { kind: 'pair', id: 'pair-request', target: 'device', displayName: null, platform: null, receivedAtMs: start, status: 'pending' }
+      : { kind: 'exec', id: 'inactive-request', command: 'rm -rf build', status: kind === 'resolved' ? 'denied' : 'pending', expiresAtMs: kind === 'expired' ? start : null } };
+    const view = render(<ThreadView {...createProps({ isRunning: true, runWorkIdentity: identity, messages: [approval, { ...run, turnId: 'native-turn' }], capabilities: { ...CAPABILITY_MATRIX.openclaw, execApproval: kind !== 'unsupported' } })} />);
+    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Running npm test')).toBeTruthy();
+    expect(view.queryByText('Review')).toBeNull();
+  });
+
   it('restarts work presentation for a different execution and retires it at terminal completion', () => {
     const start = Date.parse('2026-10-04T00:00:00Z');
     jest.setSystemTime(start + 95_000);
