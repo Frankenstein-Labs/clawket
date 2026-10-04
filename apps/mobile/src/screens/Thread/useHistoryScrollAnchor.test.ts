@@ -164,6 +164,47 @@ it('keeps the new reader position when a fresh drag supersedes an old clamped co
   expect(f.getViewportY('21')).toBe(readingY);
 });
 
+it.each([
+  { lateCommand: false, missingBeginLayout: false }, { lateCommand: true, missingBeginLayout: false },
+  { lateCommand: false, missingBeginLayout: true }, { lateCommand: true, missingBeginLayout: true },
+])('accepts fresh reader movement after a same-height prepend: late=$lateCommand missingLayout=$missingBeginLayout', ({ lateCommand, missingBeginLayout }) => {
+  const f = fixture();
+  act(() => f.result.current.capture(100, 2100));
+  f.setRows([date('date:09'), message('09'), message('25'), message('26')],
+    lateCommand ? [0, 60, 560, 720] : [0, 60, 460, 620]);
+  const committed = () => ({ nativeMaxOffset: 1500, nativeOffset: 100,
+    nativeHeight: 2100, viewport: 600, nativeGeometryCommitted: true,
+    windowCommitEpoch: f.result.current.windowCommitEpoch });
+  act(() => f.result.current.restore(committed()));
+  act(() => f.result.current.restore(committed()));
+  if (lateCommand) {
+    expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 600, animated: false });
+    f.setRows(f.currentRows(), [0, 60, 460, 620]);
+    act(() => f.result.current.restore(committed()));
+  }
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 500, animated: false });
+  act(() => f.result.current.readerScrolled(500, false, 2100));
+  expect(f.result.current.isCorrectionPending()).toBe(false);
+
+  if (missingBeginLayout) f.setRows(f.currentRows(), []);
+  act(() => f.result.current.beginDrag(false, { offset: 500, height: 2100 }));
+  if (missingBeginLayout) f.setRows(f.currentRows(), [0, 60, 460, 620]);
+  f.setOffset(480);
+  let correction = true;
+  act(() => { correction = f.result.current.readerScrolled(480, true, 2100); });
+  expect(correction).toBe(false); // This is a new finger, not the retired page.
+  const readingY = f.getViewportY('25');
+  if (lateCommand) {
+    f.setOffset(600);
+    act(() => { correction = f.result.current.readerScrolled(600, true, 2100); });
+    expect(correction).toBe(true); // An unacknowledged command retains its own ledger fence.
+  }
+  f.setRows(f.currentRows(), [0, 60, 500, 660]);
+  act(() => f.result.current.restore({ nativeOffset: lateCommand ? 600 : 480, nativeMaxOffset: 1500 }));
+  expect(f.list.scrollToOffset).toHaveBeenLastCalledWith({ offset: 520, animated: false });
+  expect(f.getViewportY('25')).toBe(readingY);
+});
+
 it('keeps a fresh finger displacement in the old native page while the new child has not committed', () => {
   const f = fixture();
   f.list.scrollToOffset.mockImplementation(() => {});

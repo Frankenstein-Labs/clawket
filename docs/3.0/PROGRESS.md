@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 分页确认后同总高度的新阅读手势（独立任务，依赖 PR #128 / #149；不是闲置空白根因结论）。
+  - 源码确认：prepend 与估高修正可以让原生内容总高保持不变。旧高度记录在补偿 ACK 后仍保留，新手势虽重新捕捉内容，随后的真实移动却按旧高度被吞；下一次布局会拉回上一位置。仅在几何已确认、新鲜 drag 的实际有限原生高度到达后退休同高旧记录，再尝试捕捉内容；起始布局暂缺时，同一手势后续有效事件仍能捕捉。保持 pending old-child 位移、未确认 offset 命令 ledger、scope/list 与底部跟随边界。
+  - 实际 hook 两项与 Thread Codex/OpenClaw/Hermes 三项先红，布局错误回到 960 而非读者选择的 920；首版成功 capture 才退休的补丁又被缺起始布局的同 5 项打红。最终仅新手势入口收紧，hook 整文件 24、Thread 整文件 199 共 223 项逐文件串行通过，含迟到未确认命令与缺起始布局组合；Mobile 类型、247 UI 文件/66 检查器结果、App config 7 项、设计文档 5 项与 check:docs 7 指令对/5 用例通过。不宣称解决 586–588 闲置空白、原生绘制或崩溃，不操作手机/Native/服务或发布。
+
 - 2026-10-04 Codex 组合 cc4 实际更新与普通阅读取证继续（全面验收未完成）。
   - Root 串行 cc4 Service337/cache17/registry11/observer8/Thread201共574、Mobile/Runtime/CLI类型、docs和开发CLI通过。旧C18/E1058认证非空全显式idle后各一次parent停止并确认精确child/端口退役；新C/E CLI SHA dd5ecfe9…与新手机完整22,533,994字节/SHA fa5d22d0…留证。没有以旧roster或源码替代新代实际推理验收；Production/商店/Native Desktop未改。
   - 新opt-in实际字节与QA菜单确认，完成态R4L只Start一次但两次固定final-file观察均未见缓存；Inspector0page、0evaluate。原次闭合unreported，不重试、不宣称sampler接受/rawSDK坐标或空白根因。菜单固定反馈与同页Profile refresh栅栏另行整合，Root两实际UI文件14/16、Mobile类型/docs通过，真机尚旧cc4。

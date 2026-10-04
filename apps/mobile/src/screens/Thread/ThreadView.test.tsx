@@ -2623,6 +2623,51 @@ describe('ThreadView', () => {
     } finally { view.unmount(); }
   });
 
+  it.each([
+    { backend: 'codex', missingBeginLayout: false }, { backend: 'openclaw', missingBeginLayout: false },
+    { backend: 'hermes', missingBeginLayout: false }, { backend: 'codex', missingBeginLayout: true },
+    { backend: 'openclaw', missingBeginLayout: true }, { backend: 'hermes', missingBeginLayout: true },
+  ] as const)('keeps a fresh reader gesture after a same-height prepend: $backend missingLayout=$missingBeginLayout', ({ backend, missingBeginLayout }) => {
+    jest.useFakeTimers();
+    const stamp = new Date('2026-10-04T10:14:00Z').getTime();
+    const props = createProps({ capabilities: CAPABILITY_MATRIX[backend], messages: [
+      { id: '26', role: 'assistant', text: 'Reply 26', timestampMs: stamp + 1000 },
+      { id: '25', role: 'user', text: 'Read 25', timestampMs: stamp },
+    ] });
+    mockHistoryGeometry = { first: 0, offset: 0, header: 80, positions: [0, 60, 220] };
+    mockListLayout.content = 2020;
+    mockListLayout.viewport = 600;
+    const view = render(<ThreadView {...props} />);
+    const timeline = () => view.getByTestId('thread-screen-timeline');
+    const scroll = (offset: number) => ({ nativeEvent: { contentSize: { height: 2100 },
+      layoutMeasurement: { height: 600 }, contentOffset: { y: offset } } });
+    try {
+      act(() => { timeline().props.onScrollBeginDrag(scroll(0)); timeline().props.onScroll(scroll(0)); });
+      view.rerender(<ThreadView {...props} messages={[...props.messages,
+        { id: '09', role: 'user', text: 'Earlier 09', timestampMs: stamp - 1000 },
+      ]} />);
+      mockHistoryGeometry.positions = [0, 60, 1000, 1220];
+      act(() => timeline().props.onCommitLayoutEffect());
+      act(() => timeline().props.onCommitLayoutEffect());
+      act(() => timeline().props.onContentSizeChange(393, 2100));
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 940, animated: false });
+      act(() => { timeline().props.onScroll(scroll(940)); timeline().props.onScrollEndDrag(scroll(940)); });
+      act(() => jest.advanceTimersByTime(160));
+
+      if (missingBeginLayout) mockHistoryGeometry.positions = [];
+      act(() => timeline().props.onScrollBeginDrag(scroll(940)));
+      if (missingBeginLayout) mockHistoryGeometry.positions = [0, 60, 1000, 1220];
+      mockHistoryGeometry.offset = 900;
+      act(() => timeline().props.onScroll(scroll(900)));
+      mockHistoryGeometry.positions = [0, 80, 1020, 1240];
+      act(() => timeline().props.onCommitLayoutEffect());
+      expect(mockScrollToOffset).toHaveBeenLastCalledWith({ offset: 920, animated: false });
+      // Reader 25 moved from Y=140 to Y=180 before the layout converged;
+      // the layout correction keeps that new position, not the old drag's Y.
+      expect(mockHistoryGeometry.positions[2]! + 80 - mockHistoryGeometry.offset).toBe(180);
+    } finally { view.unmount(); mockHistoryGeometry = null; }
+  });
+
   it.each([false, true])('preserves 25 when an old zero-offset end-drag arrives between the prepend commit and native size growth (fresh old-child drag: %s)', freshDrag => {
     jest.useFakeTimers();
     const originalScroll = mockScrollToOffset.getMockImplementation()!;
