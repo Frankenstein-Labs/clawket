@@ -1,4 +1,5 @@
 import { validTurnIdentity } from './turnIdentity';
+import { onSessionReset } from '../connection/session-reset';
 import { extractHistoryAttachments } from '../connection/adapters/gateway-attachments';
 import { normalizeMessageAttribution } from './messageAttribution';
 import { RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -376,6 +377,7 @@ export function useChatHistoryState({
       didSelect: () => { selectionVersion = historyScopeVersionRef.current; },
     };
   }, [readScope]);
+  const resetCacheReadBlockedRef = useRef<number | null>(null);
   const cursorWindowRef = useRef<{ scope: typeof readScope; key: string; window: CursorHistoryWindow } | null>(null);
   const historyTransportVersionRef = useRef(0);
   useEffect(() => {
@@ -418,35 +420,44 @@ export function useChatHistoryState({
     dbg,
   });
   const { resetLocalHistoryPaging } = localHistoryPaging;
+  const retireHistory = useCallback((key: string | null) => {
+    // Key and content must change together. Otherwise the new session's list
+    // mounts with the previous session's messages until asynchronous I/O ends.
+    messageSessionKeyRef.current = key;
+    historyScopeVersionRef.current += 1;
+    historyRequestIdRef.current += 1;
+    cacheRestoreRequestRef.current += 1;
+    historyLoadInFlightRef.current.clear();
+    historyReconcileInFlightRef.current.clear();
+    cacheHydrationSessionKeyRef.current = key;
+    cacheHydrationMessageIdsRef.current = new Set();
+    messagesRef.current = [];
+    localOlderMessagesRef.current = [];
+    historyRawCountRef.current = 0;
+    historyLimitRef.current = HISTORY_PAGE_SIZE;
+    loadMoreLockRef.current = false;
+    resetLocalHistoryPaging(key);
+    setMessages([]);
+    setHistoryLoaded(false);
+    setActivitySnapshot(null);
+    setLoadingMoreHistory(false);
+    setHistoryLoadMoreError(false);
+    cursorWindowRef.current = null;
+    setHasMoreHistory(true);
+    historyCommitVersionRef.current += 1;
+    historyLoadedRef.current = false;
+  }, [resetLocalHistoryPaging]);
   const setSessionKey = useCallback((key: string | null) => {
-    if (messageSessionKeyRef.current !== key) {
-      // Key and content must change together. Otherwise the new session's list
-      // mounts with the previous session's messages until asynchronous I/O ends.
-      messageSessionKeyRef.current = key;
-      historyScopeVersionRef.current += 1;
-      historyRequestIdRef.current += 1;
-      cacheRestoreRequestRef.current += 1;
-      historyLoadInFlightRef.current.clear();
-      historyReconcileInFlightRef.current.clear();
-      cacheHydrationSessionKeyRef.current = key;
-      cacheHydrationMessageIdsRef.current = new Set();
-      messagesRef.current = [];
-      localOlderMessagesRef.current = [];
-      historyRawCountRef.current = 0;
-      historyLimitRef.current = HISTORY_PAGE_SIZE;
-      loadMoreLockRef.current = false;
-      resetLocalHistoryPaging(key);
-      setMessages([]);
-      setHistoryLoaded(false);
-      setActivitySnapshot(null);
-      setLoadingMoreHistory(false);
-      setHistoryLoadMoreError(false);
-      cursorWindowRef.current = null;
-      setHasMoreHistory(true);
-    }
+    if (messageSessionKeyRef.current !== key) retireHistory(key);
     sessionKeyRef.current = key;
     setSessionKeyState(key);
-  }, [resetLocalHistoryPaging, sessionKeyRef]);
+  }, [retireHistory, sessionKeyRef]);
+
+  const captureSessionScope = useCallback((key: string) => {
+    const version = historyScopeVersionRef.current;
+    return () => mountedRef.current && readScopeRef.current === readScope
+      && historyScopeVersionRef.current === version && sessionKeyRef.current === key;
+  }, [readScope, sessionKeyRef]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -488,7 +499,7 @@ export function useChatHistoryState({
     key: string,
     options?: { clearWhenEmpty?: boolean; sessionId?: string },
   ): Promise<boolean> => {
-    if (!gatewayConfigId) return false;
+    if (!gatewayConfigId || resetCacheReadBlockedRef.current === historyScopeVersionRef.current) return false;
 
     const restoreRequest = ++cacheRestoreRequestRef.current;
     const commitVersion = historyCommitVersionRef.current;
@@ -1191,6 +1202,41 @@ export function useChatHistoryState({
     }
   }, [adapter, dbg, measuredToolsRef, readScope, sessionKeyRef, t]);
 
+  const resetReloadRef = useRef(loadHistory);
+  resetReloadRef.current = loadHistory;
+  useEffect(() => {
+    if (!adapter) return;
+    let subscribed = true;
+    const unsubscribe = onSessionReset(adapter, target => {
+      const version = historyScopeVersionRef.current;
+      const isCurrent = () => subscribed && mountedRef.current && readScopeRef.current === readScope
+        && sessionKeyRef.current === target.key && target.agentId === currentAgentId;
+      if (!isCurrent()) return null;
+      let retiredVersion: number | null = null;
+      return {
+        isCurrent: () => isCurrent() && historyScopeVersionRef.current === version,
+        retire() {
+          retireHistory(target.key);
+          retiredVersion = historyScopeVersionRef.current;
+          resetCacheReadBlockedRef.current = retiredVersion;
+          // Only this explicit ACK retires omitted native identity/preview.
+          setSessions(previous => previous.map(session => {
+            if (session.key !== target.key) return session;
+            const { sessionId: _id, lastMessagePreview: _preview, ...remaining } = session;
+            return remaining;
+          }));
+          setHasMoreHistory(false);
+        },
+        reload(cacheDeleted: boolean) {
+          if (retiredVersion === null || !isCurrent() || historyScopeVersionRef.current !== retiredVersion) return;
+          if (cacheDeleted) resetCacheReadBlockedRef.current = null;
+          return resetReloadRef.current(target.key, HISTORY_PAGE_SIZE);
+        },
+      };
+    });
+    return () => { subscribed = false; unsubscribe(); };
+  }, [adapter, currentAgentId, readScope, retireHistory, sessionKeyRef]);
+
   const onRefresh = useCallback(async () => {
     const request = beginSessionRead('refresh');
     if (!request.isCurrent()) return;
@@ -1622,6 +1668,7 @@ export function useChatHistoryState({
     setMessages,
     sessionKey,
     setSessionKey,
+    captureSessionScope,
     sessions,
     setSessions,
     refreshing,

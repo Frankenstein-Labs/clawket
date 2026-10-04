@@ -45,6 +45,7 @@ const historyMock = {
   restoreCachedMessages: jest.fn().mockResolvedValue(undefined),
   loadSessionsAndHistory: jest.fn().mockResolvedValue(undefined),
   reconcileLatestAssistantFromHistory: jest.fn().mockResolvedValue(undefined),
+  captureSessionScope: jest.fn(() => () => true),
   refreshCurrentSessionHistory: jest.fn().mockResolvedValue(undefined),
 };
 

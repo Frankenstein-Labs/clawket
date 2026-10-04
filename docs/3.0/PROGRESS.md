@@ -1,5 +1,7 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 修复已确认 Reset 后同屏仍显示旧正文。独立任务基于 fresh main；显式 ACK 退休当前同 key 历史/分页/缓存与运行呈现，重新读头页。保留草稿、附件、Saved copy，队列保持 held；拒绝/迟到 ACK 与普通刷新语义不变。实机仅确认同屏旧正文，重入后清空；本补丁仍待组合后的 fresh QA 会话复测，未操作设备或 Native。验证见 `../3.1/session-reset-history.md`。
+
 - 2026-10-05 Codex 9959 会话管理真机检查发现重置后旧正文留屏；立即修复继续。
   - 新独立C管理会话首发恰好1输入/回执/start/complete、0工具；重命名及恢复显示名在手机、Bridge和Native name字段确认（不是SQLite title字段）。归档/恢复在两端确认，同Native身份与原问答保留；Markdown251B与JSON445B实文件含完整2消息，系统分享均取消，未选接收者。手机本地副本阅读、置顶/取消置顶通过。
   - 唯一Reset确认后，Bridge绑定/activity已清且旧Native已归档，原任务仍1 start/complete、0新Send；1188当前页面仍2旧消息/1旧回复，Root亲看截图。1193返回首页重入后为空；本次不声称重入持续旧缓存。QA PID15648固定W/E窗口0行，不能当无错误证明。显式成功ACK的同scope历史退休窄修已启动，修复/新fixture真机复测尚待。

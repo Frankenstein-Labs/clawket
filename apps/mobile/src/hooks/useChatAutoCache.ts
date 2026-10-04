@@ -1,8 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { ChatCacheService } from '../services/chat-cache';
 import { UiMessage } from '../types/chat';
+import type { AgentAdapter } from '@clawket/agent-protocol';
+import { onSessionReset } from '../connection/session-reset';
 
 type Params = {
+  adapter?: AgentAdapter | null;
   /** Stable gateway identifier (e.g. derived from URL). */
   gatewayConfigId: string | null;
   agentId: string;
@@ -23,6 +26,7 @@ const DEBOUNCE_MS = 2000;
  * the message list changes, debounced to avoid excessive writes.
  */
 export function useChatAutoCache({
+  adapter,
   gatewayConfigId,
   agentId,
   agentName,
@@ -39,6 +43,21 @@ export function useChatAutoCache({
   latestRef.current = { gatewayConfigId, agentId, agentName, agentEmoji, sessionKey, sessionId, sessionLabel, messages, historyLoaded };
 
   useEffect(() => {
+    if (!adapter) return;
+    let current = true;
+    const unsubscribe = onSessionReset(adapter, target => {
+      if (target.key !== sessionKey || target.agentId !== agentId) return null;
+      return { isCurrent: () => current, retire() {
+        // Retire before cache deletion, including before React's effect cleanup.
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = null;
+        latestRef.current = { ...latestRef.current, historyLoaded: false, messages: [] };
+      } };
+    });
+    return () => { current = false; unsubscribe(); };
+  }, [adapter, gatewayConfigId, agentId, sessionKey]);
+
+  useEffect(() => {
     if (!historyLoaded || !sessionKey || !gatewayConfigId) return;
     // Skip if there are no real messages to cache
     if (messages.length === 0) return;
@@ -49,7 +68,7 @@ export function useChatAutoCache({
 
     timerRef.current = setTimeout(() => {
       const latest = latestRef.current;
-      if (!latest.gatewayConfigId || !latest.sessionKey) return;
+      if (!latest.gatewayConfigId || !latest.sessionKey || !latest.historyLoaded || !latest.messages.length) return;
       ChatCacheService.saveMessages(
         {
           gatewayConfigId: latest.gatewayConfigId,
