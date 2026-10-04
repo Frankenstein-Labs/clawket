@@ -1,6 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
-- 2026-10-05 修复已确认 Reset 后同屏仍显示旧正文。独立任务基于 fresh main；显式 ACK 退休当前同 key 历史/分页/缓存与运行呈现，重新读头页。保留草稿、附件、Saved copy，队列保持 held；拒绝/迟到 ACK 与普通刷新语义不变。实机仅确认同屏旧正文，重入后清空；本补丁仍待组合后的 fresh QA 会话复测，未操作设备或 Native。验证见 `../3.1/session-reset-history.md`。
+- 2026-10-05 Reset 窄修整合到 74f696bd，fresh M2 真机验收通过，全面 Codex 测试继续。
+  - 完整手机缓存22,543,551B/SHA d958f357…与24源码/44标记验证；新QA PID26323正常加载。开发加载过程中保留 Unable-load-script/ANR 与 USB reverse 恢复记录，只操作 QA 开发服务/保数据冷开，未触商店、Desktop owner 或 Production；未把零字节探测归因手机网络。
+  - M2唯一初始化Send得到1回执/start/complete/user/reply、0工具/error/abort。唯一Reset后不离开当前会话即0消息，已验证未发送草稿保留；被动检查、离开重入后的 settled 截图仍空且草稿保留。只读Native核验旧线程归档、完整历史SHA不变、仍仅1回执；重入正常准备不同空Native绑定，不能要求永远无绑定。原M1显式Saved copy仍显示完整问答。058开始至Reset确认248.424秒超过180秒录制窗，不能声称该视频包含Reset；不重放M2造证据。
+  - Root组合6文件逐一in-band 482项、Mobile类型通过；文档随实际边界更新。044/050/056串行natural EOF与独立全部345张contact/4127编码帧视觉审核完成；050抓到约101.322ms编码帧间的09–11→24–27位置跳变，没有实际原生坐标/录制起点与手势对齐，分页及用户反馈的滚动恢复空白仍未定因。051–054/057–058审片继续。PR141待本次push及exact CI，braces未批准、未merge/release；Desktop Retry仍owner-only GUI。详见 `../3.1/session-reset-history.md` 与 QA 报告。
 
 - 2026-10-05 Codex 9959 会话管理真机检查发现重置后旧正文留屏；立即修复继续。
   - 新独立C管理会话首发恰好1输入/回执/start/complete、0工具；重命名及恢复显示名在手机、Bridge和Native name字段确认（不是SQLite title字段）。归档/恢复在两端确认，同Native身份与原问答保留；Markdown251B与JSON445B实文件含完整2消息，系统分享均取消，未选接收者。手机本地副本阅读、置顶/取消置顶通过。
