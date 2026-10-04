@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 分页确认后同总高度的新阅读手势（独立任务，依赖 PR #128 / #149；不是闲置空白根因结论）。
+  - 源码确认：prepend 与估高修正可以让原生内容总高保持不变。旧高度记录在补偿 ACK 后仍保留，新手势虽重新捕捉内容，随后的真实移动却按旧高度被吞；下一次布局会拉回上一位置。仅在几何已确认、新鲜 drag 的实际有限原生高度到达后退休同高旧记录，再尝试捕捉内容；起始布局暂缺时，同一手势后续有效事件仍能捕捉。保持 pending old-child 位移、未确认 offset 命令 ledger、scope/list 与底部跟随边界。
+  - 实际 hook 两项与 Thread Codex/OpenClaw/Hermes 三项先红，布局错误回到 960 而非读者选择的 920；首版成功 capture 才退休的补丁又被缺起始布局的同 5 项打红。最终仅新手势入口收紧，hook 整文件 24、Thread 整文件 199 共 223 项逐文件串行通过，含迟到未确认命令与缺起始布局组合；Mobile 类型、247 UI 文件/66 检查器结果、App config 7 项、设计文档 5 项与 check:docs 7 指令对/5 用例通过。不宣称解决 586–588 闲置空白、原生绘制或崩溃，不操作手机/Native/服务或发布。
+
 - 2026-10-04 普通阅读首个手势建立滚动锚点（独立任务，依赖已审查 PR #128，真机空白仍待因果确认）。
   - 实际 Thread 两条回归确认：未分页的首次拖动没有建立应用锚点；起始布局不可用时，同一手势的后续有效原生事件也不能补捕捉。现首个 drag 尝试有效内容锚点，reading 事件允许首次捕捉；保留补偿 ACK、旧尺寸、pending 几何、新手势与 scope 的既有门。只有捕捉成功才关闭该 list 的 SDK MVCP，不全局关闭。底部手势未移动或期间 tail 增长仍由手指控制，实际结束回到底部后继续跟随；换会话退休旧锚点。
   - 单文件串行：实际 Thread 基线 2 红→整文件 193 绿（新 4 项）；useHistoryScrollAnchor 20 项绿。真实已安装 FlashList RecyclerView/controller/manager/layout/tracker 另 2 项绿：注入 Native 与 JS 不一致的 clamp 后，SDK 100 ms ignore gate 丢弃反馈，定时结束不会自己纠正，下一真实 scroll 才恢复窗口；禁用 SDK 补偿时反馈可到达消费者。仅 Native host/measurement/scroll 反馈为夹具，不复制 SDK 算法。RN 正常在 mount 后应用 MVCP，注入旧 maximum 不证明真实手机发生该时序；586–588 空白和 596 同位置正常的现场尚无原生 offset/engaged-window 数据，不宣称本修改解决其根因、绘制或原生崩溃。
