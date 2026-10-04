@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 Codex 组合候选 d843 已实际加载，权限确认仍阻断新会话首发；全面真机验收继续。
+  - 新开发 CLI SHA `8fe4ba52…` 与 actual 手机缓存 bundle `0d2ea853…`（22,503,721 字节）经进程代际、配置和完整字节校验；C/E 仅在认证目录显式 idle 后更新，Production、商店包和账号配置保持。首次加载的短暂白屏随后出现正文；该 QA PID 的过滤日志为空，不能声称未发生错误。
+  - fresh A4K 新会话首次选择 Read-only 即返回 permissionsUnconfirmed，0 输入、0 baseline、0 审批决定；fresh R4M 保持默认 Workspace，唯一 pure-init Send 也被同一配置校验阻断。手机显示尚未发送；对应唯一创建窗 record 为 0 receipts，固定 first/cwd 的只读 Native 查询 0 行。两轮关闭、不重试，不发送 approval main、Current、Stop 或其他后续输入；尚未验证真实 Read-only 执行、Allow Once 崩溃回归或新 alias 的真机效果。
+  - source 确认 warm resume 的权限确认依赖了可缺省的非权限字段，独立真实 service 回归新增四项先红；严格 permission-view 解析修复与定类诊断继续，现场尚未证实具体拒绝条件。普通阅读首手势修复已合入组合源码，手机仍 d843；独立 SDK 注入时序不冒充空白现场根因。
+  - exact d843 CI 37174989985 的三 Mobile 分片、类型、tests/static、v1、secret scan、macOS/Windows 全绿；实际读取 audit job 确认唯一 blocker 是两锁文件未批准的 braces 高危公告。上游没有官方已修版本，保持既有 owner-only 审计决策；PR141/146/147/148/149 未合并、未发布。
+
 - 2026-10-04 普通阅读首个手势建立滚动锚点（独立任务，依赖已审查 PR #128，真机空白仍待因果确认）。
   - 实际 Thread 两条回归确认：未分页的首次拖动没有建立应用锚点；起始布局不可用时，同一手势的后续有效原生事件也不能补捕捉。现首个 drag 尝试有效内容锚点，reading 事件允许首次捕捉；保留补偿 ACK、旧尺寸、pending 几何、新手势与 scope 的既有门。只有捕捉成功才关闭该 list 的 SDK MVCP，不全局关闭。底部手势未移动或期间 tail 增长仍由手指控制，实际结束回到底部后继续跟随；换会话退休旧锚点。
   - 单文件串行：实际 Thread 基线 2 红→整文件 193 绿（新 4 项）；useHistoryScrollAnchor 20 项绿。真实已安装 FlashList RecyclerView/controller/manager/layout/tracker 另 2 项绿：注入 Native 与 JS 不一致的 clamp 后，SDK 100 ms ignore gate 丢弃反馈，定时结束不会自己纠正，下一真实 scroll 才恢复窗口；禁用 SDK 补偿时反馈可到达消费者。仅 Native host/measurement/scroll 反馈为夹具，不复制 SDK 算法。RN 正常在 mount 后应用 MVCP，注入旧 maximum 不证明真实手机发生该时序；586–588 空白和 596 同位置正常的现场尚无原生 offset/engaged-window 数据，不宣称本修改解决其根因、绘制或原生崩溃。
