@@ -1046,6 +1046,7 @@ function ThreadScreenContent({
         loadingMoreHistory={!sessionPreview && controller.loadingMoreHistory}
         historyPagingBlocked={controller.refreshing}
         historyScope={`${connectionId}:${agentId}:${sessionKey}`}
+        qaGeometryActive={focused && routeIsActive && !locked && controller.sessionKey === sessionKey}
         historyLoadMoreError={!sessionPreview && controller.historyLoadMoreError}
         onRetryHistory={!sessionPreview ? controller.retryLoadMoreHistory : undefined}
         topInset={insets.top}

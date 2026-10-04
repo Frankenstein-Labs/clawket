@@ -162,6 +162,7 @@ let consoleErrorSpy: jest.SpyInstance;
 afterEach(() => consoleErrorSpy.mockRestore());
 
 beforeEach(() => {
+  Object.defineProperty(globalThis, '__DEV__', { configurable: true, writable: true, value: true });
   consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation((message?: unknown, ...rest: unknown[]) => {
     if (typeof message === 'string' && message.includes('react-test-renderer is deprecated')) return;
     originalConsoleError(message, ...rest);
@@ -327,4 +328,58 @@ it('reports a list it cannot measure instead of scrolling it', () => {
   expect(onUnavailable).toHaveBeenCalledTimes(3);
   expect(mockSprings).toHaveLength(0);
   expect(mockScrollTo).not.toHaveBeenCalled();
+});
+
+it('keeps raw QA recording off until requested and samples native events without scrolling', () => {
+  const { follow, events } = renderFollow();
+  follow.bind(mockScroller);
+  const receive = jest.fn();
+  act(() => events.handler(scrollEventFor('onScroll', 100)));
+  act(() => follow.qaGeometry.sample(receive));
+  expect(receive).toHaveBeenLastCalledWith({ available: true, sequence: 0, event: 'none' });
+  act(() => follow.qaGeometry.enable(true));
+  for (let index = 0; index < 120; index += 1) {
+    act(() => events.handler({ ...scrollEventFor('onScroll', 5400),
+      contentSize: { height: 6000 }, layoutMeasurement: { height: 600 } }));
+  }
+  // Recording does not cross to JS for each native event.
+  expect(receive).toHaveBeenCalledTimes(1);
+  act(() => follow.qaGeometry.sample(receive));
+  expect(receive).toHaveBeenLastCalledWith(expect.objectContaining({ available: true, sequence: 120,
+    offset: 5400, contentHeight: 6000, viewportHeight: 600, event: 'scroll' }));
+  expect(mockScrollTo).not.toHaveBeenCalled();
+  act(() => follow.qaGeometry.enable(false));
+  act(() => events.handler(scrollEventFor('onScroll', 20)));
+  act(() => follow.qaGeometry.sample(receive));
+  expect(receive).toHaveBeenLastCalledWith({ available: true, sequence: 0, event: 'none' });
+});
+
+it('reports raw registration separately from missing events and retires a native binding revision', () => {
+  const { follow } = renderFollow();
+  const receive = jest.fn();
+  act(() => follow.qaGeometry.enable(true));
+  act(() => follow.qaGeometry.sample(receive));
+  expect(receive).toHaveBeenLastCalledWith({ available: false, sequence: 0, event: 'none' });
+  const first = follow.qaGeometry.bindingRevision();
+  follow.bind(mockScroller);
+  expect(follow.qaGeometry.bindingRevision()).toBeGreaterThan(first);
+  const bound = follow.qaGeometry.bindingRevision();
+  follow.bind({ tag: 9, getInnerViewRef: () => mockContent });
+  expect(follow.qaGeometry.bindingRevision()).toBeGreaterThan(bound);
+});
+
+it('refuses raw recording and UI sampling when the static development gate is false', () => {
+  const { follow, events } = renderFollow();
+  follow.bind(mockScroller);
+  Object.defineProperty(globalThis, '__DEV__', { configurable: true, writable: true, value: false });
+  try {
+    const receive = jest.fn();
+    act(() => follow.qaGeometry.enable(true));
+    act(() => events.handler(scrollEventFor('onScroll', 100)));
+    act(() => follow.qaGeometry.sample(receive));
+    expect(receive).toHaveBeenCalledWith({ available: false });
+    expect(mockScrollTo).not.toHaveBeenCalled();
+  } finally {
+    Object.defineProperty(globalThis, '__DEV__', { configurable: true, writable: true, value: true });
+  }
 });
