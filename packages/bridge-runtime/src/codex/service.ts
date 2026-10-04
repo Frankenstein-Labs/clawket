@@ -32,6 +32,15 @@ type QuestionGroup = { desktop?: boolean; wireId: string | number; entry: Entry;
 type MetadataBaseline = Map<Entry, { threadId: string; revision: number; pending: boolean }>;
 const ID = /^[a-f0-9-]{36}$/;
 const PERMISSIONS = { approvalPolicy: 'on-request', approvalsReviewer: 'user', permissions: ':workspace' };
+const UNCONFIRMED_PERMISSIONS = 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.';
+const permissionSettings = (settings: NativeSettings) => ({ approvalPolicy: settings.approvalPolicy,
+  approvalsReviewer: settings.approvalsReviewer, sandboxPolicy: settings.sandboxPolicy, activePermissionProfile: settings.activePermissionProfile });
+const requestedPermissionSettings = (previous: NativeSettings | undefined, patch: Record<string, unknown>) => {
+  const requested: Record<string, unknown> = { ...(previous ? permissionSettings(previous) : {}), ...patch };
+  if (Object.hasOwn(patch, 'permissions')) { delete requested.sandboxPolicy; delete requested.activePermissionProfile; }
+  else if (Object.hasOwn(patch, 'sandboxPolicy')) delete requested.activePermissionProfile;
+  return requested;
+};
 // Native catalog/index metadata may lack a model; the wire field is optional string.
 const modelName = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
 
@@ -194,11 +203,42 @@ export class CodexService extends EventEmitter {
   }
   private rememberSettings(r: Entry, settings: NativeSettings): void {
     if (settings.cwd !== (r.cwd ?? this.project)) return;
+    const previous = this.effectiveSettings.get(r.id);
+    const waiter = this.settingsWaiters.get(r.id);
+    const permissionWrite = waiter && ['permissions', 'sandboxPolicy', 'approvalPolicy', 'approvalsReviewer'].some(key => Object.hasOwn(waiter.patch, key))
+      && matchesNativeSettings(settings, requestedPermissionSettings(previous, waiter.patch));
+    if (this.rpc.nativeVersion === '0.160.0' && !r.native && this.loaded.has(r.id) && previous && !permissionWrite
+      && !matchesNativeSettings(settings, permissionSettings(previous))) r.permissionsUnconfirmed = true;
     this.effectiveSettings.set(r.id, settings);
     r.model = settings.model; r.provider = settings.modelProvider; r.effort = settings.effort ?? undefined; r.serviceTier = settings.serviceTier;
     this.save();
-    const waiter = this.settingsWaiters.get(r.id);
     if (waiter && matchesNativeSettings(settings, waiter.patch)) { clearTimeout(waiter.timer); this.settingsWaiters.delete(r.id); waiter.resolve(settings); }
+  }
+  private async confirmExecutionPermissions(r: Entry, expected = this.effectiveSettings.get(r.id), requested?: Record<string, unknown>): Promise<void> {
+    // 0.160 settings notifications describe saved defaults; the existing writer's
+    // metadata resume reads its ready execution environment. Never probe a cold or imported thread.
+    if (this.rpc.nativeVersion !== '0.160.0' || r.native || !this.loaded.has(r.id)) return;
+    const rpc = this.rpc, threadId = r.threadId, cwd = r.cwd ?? this.project;
+    const current = () => this.rpc === rpc && !this.stopped && !this.disconnected && this.loaded.has(r.id)
+      && this.records.includes(r) && !r.native && r.threadId === threadId && !this.runs.has(r.id)
+      && this.effectiveSettings.get(r.id) === expected;
+    try {
+      if (!threadId || !expected || !current()) throw new Error(UNCONFIRMED_PERMISSIONS);
+      // No overrides: this uses the already-owned thread, retains its listener and acquires no new writer.
+      const response = await rpc.request('thread/resume', { threadId, excludeTurns: true });
+      if (!current()) throw new Error(UNCONFIRMED_PERMISSIONS);
+      const execution = nativeSettings(response, true);
+      const valid = response?.thread?.id === threadId && response.thread.cwd === cwd
+        && response.thread.status?.type === 'idle' && execution?.cwd === cwd;
+      // The ready environment is verification evidence, not latestThreadSettings.
+      // Do not overwrite saved defaults or fields omitted by the resume response.
+      if (!valid || !matchesNativeSettings(execution!, permissionSettings(expected))
+        || (requested && !matchesNativeSettings(execution!, requested))) throw new Error(UNCONFIRMED_PERMISSIONS);
+    } catch {
+      if (this.rpc === rpc && this.records.includes(r) && r.threadId === threadId) { r.permissionsUnconfirmed = true; this.save(); }
+      // This failed before input receipt/dispatch, including a timed-out metadata probe.
+      throw new Error(UNCONFIRMED_PERMISSIONS);
+    }
   }
   private async confirmedSettings(r: Entry, patch: Record<string, unknown>, dispatch: () => Promise<unknown>): Promise<void> {
     if (this.settingsWaiters.has(r.id)) throw new Error('A settings change is already pending');
@@ -559,10 +599,20 @@ export class CodexService extends EventEmitter {
     if (metadata.thread?.cwd !== (r.cwd ?? this.project) || metadata.thread?.status?.type === 'active') throw new Error('Conversation is unavailable or has active work');
   }
   private async nativeSettings(r: Entry, settings: Record<string, unknown>): Promise<void> {
+    const permissionWrite = ['permissions', 'sandboxPolicy', 'approvalPolicy', 'approvalsReviewer'].some(key => Object.hasOwn(settings, key));
     const effective = this.effectiveSettings.get(r.id);
+    const confirmPermissions = async () => {
+      if (!permissionWrite) return;
+      await this.confirmExecutionPermissions(r, this.effectiveSettings.get(r.id), requestedPermissionSettings(effective, settings));
+      if (this.rpc.nativeVersion === '0.160.0' && !r.native && this.loaded.has(r.id)
+        && ['permissions', 'sandboxPolicy'].some(key => Object.hasOwn(settings, key))) { delete r.permissionsUnconfirmed; this.save(); }
+    };
     // Cached explicit instructions cannot prove a null request has selected the
     // native preset. Accept preset normalization only after native dispatch.
-    if (effective && matchesNativeSettings(effective, settings, false)) return;
+    if (effective && matchesNativeSettings(effective, settings, false)) {
+      await confirmPermissions();
+      return;
+    }
     if (!this.loaded.has(r.id)) {
       try {
         this.desktop!.follow(r.threadId!);
@@ -577,8 +627,12 @@ export class CodexService extends EventEmitter {
       }
     }
     const current = this.effectiveSettings.get(r.id);
-    if (current && matchesNativeSettings(current, settings, false)) return;
+    if (current && matchesNativeSettings(current, settings, false)) {
+      await confirmPermissions();
+      return;
+    }
     await this.confirmedSettings(r, settings, () => this.rpc.request('thread/settings/update', { threadId: r.threadId, ...settings }));
+    await confirmPermissions();
     this.scheduleDesktop(r);
   }
   private desktopSnapshot(threadId: string, snapshot: DesktopSnapshot): void {
@@ -1166,6 +1220,7 @@ export class CodexService extends EventEmitter {
       // serialized operation. Another client cannot change settings between
       // native confirmation and the turn that requested those settings.
       if (desktopOverrides && Object.keys(desktopOverrides).length) await this.nativeSettings(r, desktopOverrides);
+      if (!desktopOwned) await this.confirmExecutionPermissions(r);
       const model = this.catalog.find(m => m.model === r.model);
       if (images.length && model && !model.inputModalities?.includes('image')) throw new Error('This model does not support images');
       if (!desktopOwned && input.thinkingLevel && !model?.supportedReasoningEfforts?.some((e: any) => e.reasoningEffort === input.thinkingLevel)) throw new Error('This model does not support that reasoning level');
