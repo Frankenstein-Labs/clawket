@@ -1,4 +1,5 @@
 import React from 'react';
+import { RefreshControl } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { AgentProfileOperations } from '@clawket/agent-protocol';
 import { NativeProfileScreen } from './NativeProfileScreen';
@@ -6,7 +7,8 @@ import { NativeQuotaCard } from './NativeQuotaCard';
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
   const host = (name: string) => ReactRuntime.forwardRef(({ children, ...props }: any, ref: any) => ReactRuntime.createElement(name, { ...props, ref }, children));
-  return { Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default }, StyleSheet: { create: (v: any) => v, hairlineWidth: 1 }, View: host('View'), Text: host('Text'), Pressable: host('Pressable'), ScrollView: host('ScrollView'), RefreshControl: host('RefreshControl'), TextInput: host('TextInput'), Switch: host('Switch'), ActivityIndicator: host('ActivityIndicator') };
+  const ScrollView = ReactRuntime.forwardRef(({ children, refreshControl, ...props }: any, ref: any) => ReactRuntime.createElement('ScrollView', { ...props, ref }, refreshControl, children));
+  return { Platform: { OS: 'ios', select: (v: any) => v.ios ?? v.default }, StyleSheet: { create: (v: any) => v, hairlineWidth: 1 }, View: host('View'), Text: host('Text'), Pressable: host('Pressable'), ScrollView, RefreshControl: host('RefreshControl'), TextInput: host('TextInput'), Switch: host('Switch'), ActivityIndicator: host('ActivityIndicator') };
 });
 jest.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
@@ -88,6 +90,71 @@ it('keeps a fresh skill read after returning from its document when an older tog
   await act(async () => confirm({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'Old confirmation', enabled: true, editable: true }], errorCount: 0 }));
   expect(screen.getByTestId('native-skill-toggle-example').props.value).toBe(false);
   expect(screen.getByText('New read')).toBeTruthy();
+  expect(profile.setSkillEnabled).toHaveBeenCalledTimes(1);
+});
+it('keeps a newer pull-to-refresh result when an older skill toggle confirms on the same page', async () => {
+  let confirm!: (value: any) => void;
+  profile.setSkillEnabled.mockImplementation(() => new Promise(resolve => { confirm = resolve; }));
+  const screen = render(<NativeProfileScreen {...props('skills')} />);
+  await waitFor(() => expect(screen.getByTestId('native-skill-toggle-example')).toBeTruthy());
+  fireEvent(screen.getByTestId('native-skill-toggle-example'), 'valueChange', true);
+  profile.skills.mockResolvedValue({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'New refresh', enabled: false, editable: true }], errorCount: 0 });
+  fireEvent(screen.UNSAFE_getByType(RefreshControl), 'refresh');
+  await waitFor(() => expect(screen.getByText('New refresh')).toBeTruthy());
+  await act(async () => confirm({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'Old confirmation', enabled: true, editable: true }], errorCount: 0 }));
+  expect(screen.getByText('New refresh')).toBeTruthy();
+  expect(screen.queryByText('Old confirmation')).toBeNull();
+  expect(screen.getByTestId('native-skill-toggle-example').props.value).toBe(false);
+  expect(screen.getByTestId('native-skill-toggle-example').props.disabled).toBe(false);
+  expect(profile.setSkillEnabled).toHaveBeenCalledTimes(1);
+});
+it('does not retire an in-flight refresh when an older skill toggle confirms', async () => {
+  let confirm!: (value: any) => void, refreshed!: (value: any) => void;
+  profile.setSkillEnabled.mockImplementation(() => new Promise(resolve => { confirm = resolve; }));
+  const screen = render(<NativeProfileScreen {...props('skills')} />);
+  await waitFor(() => expect(screen.getByTestId('native-skill-toggle-example')).toBeTruthy());
+  fireEvent(screen.getByTestId('native-skill-toggle-example'), 'valueChange', true);
+  profile.skills.mockImplementation(() => new Promise(resolve => { refreshed = resolve; }));
+  fireEvent(screen.UNSAFE_getByType(RefreshControl), 'refresh');
+  await waitFor(() => expect(profile.skills).toHaveBeenCalledTimes(2));
+  await act(async () => confirm({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'Old confirmation', enabled: true, editable: true }], errorCount: 0 }));
+  expect(screen.queryByText('Old confirmation')).toBeNull();
+  await act(async () => refreshed({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'New refresh', enabled: false, editable: true }], errorCount: 0 }));
+  expect(screen.getByText('New refresh')).toBeTruthy();
+  expect(screen.getByTestId('native-skill-toggle-example').props.value).toBe(false);
+  expect(profile.setSkillEnabled).toHaveBeenCalledTimes(1);
+});
+it('does not show a previous skill toggle failure over a successful same-page refresh', async () => {
+  let reject!: (error: Error) => void;
+  profile.setSkillEnabled.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const screen = render(<NativeProfileScreen {...props('skills')} />);
+  await waitFor(() => expect(screen.getByTestId('native-skill-toggle-example')).toBeTruthy());
+  fireEvent(screen.getByTestId('native-skill-toggle-example'), 'valueChange', true);
+  profile.skills.mockResolvedValue({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'New refresh', enabled: false, editable: true }], errorCount: 0 });
+  fireEvent(screen.UNSAFE_getByType(RefreshControl), 'refresh');
+  await waitFor(() => expect(screen.getByText('New refresh')).toBeTruthy());
+  await act(async () => reject(new Error('Previous write failed')));
+  expect(screen.queryByText('profile.loadError')).toBeNull();
+  expect(screen.getByText('New refresh')).toBeTruthy();
+  expect(screen.getByTestId('native-skill-toggle-example').props.disabled).toBe(false);
+  expect(profile.setSkillEnabled).toHaveBeenCalledTimes(1);
+});
+it('keeps a newer retry read when a skill toggle confirms after a failed refresh', async () => {
+  let confirm!: (value: any) => void;
+  profile.setSkillEnabled.mockImplementation(() => new Promise(resolve => { confirm = resolve; }));
+  const screen = render(<NativeProfileScreen {...props('skills')} />);
+  await waitFor(() => expect(screen.getByTestId('native-skill-toggle-example')).toBeTruthy());
+  profile.skills.mockRejectedValueOnce(new Error('Refresh failed'));
+  fireEvent(screen.UNSAFE_getByType(RefreshControl), 'refresh');
+  await waitFor(() => expect(screen.getByText('profile.loadError')).toBeTruthy());
+  fireEvent(screen.getByTestId('native-skill-toggle-example'), 'valueChange', true);
+  profile.skills.mockResolvedValue({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'New retry', enabled: false, editable: true }], errorCount: 0 });
+  fireEvent.press(screen.getByText('Retry'));
+  await waitFor(() => expect(screen.getByText('New retry')).toBeTruthy());
+  await act(async () => confirm({ skills: [{ id: 's', name: 'example', scope: 'project', description: 'Old confirmation', enabled: true, editable: true }], errorCount: 0 }));
+  expect(screen.getByText('New retry')).toBeTruthy();
+  expect(screen.queryByText('profile.loadError')).toBeNull();
+  expect(screen.getByTestId('native-skill-toggle-example').props.value).toBe(false);
   expect(profile.setSkillEnabled).toHaveBeenCalledTimes(1);
 });
 it('does not surface a previous focus generation write failure over a fresh skill read', async () => {
