@@ -24,6 +24,10 @@
   - 已 loaded 的 Bridge-created 0.160 会话在权限 ACK 后及 receipt 前，通过同一 owned writer、无 override 的 warm resume 独立核验保存的未来配置权限；严格同 RPC/thread/cwd/idle/settings generation。漂移、缺字段/失败确认要求重新确认，0 receipt/0 input dispatch；被动权限通知不得静默扩大下一次发送。Legacy/imported/Desktop owner 路径保留，不创建第二 writer 或自动重发。
   - 隔离空 HOME/CODEX_HOME 离线生成 installed 0.160 experimental schema，确证受支持权限字段；未启动 AppServer/RPC/inference 或改 Native/global/Production。reference 完整 caller 链确认 warm response 是 future configuration；Thread-origin 正常切权应可用，Owner-configured 环境另保原profile。撤回基于旧 active snapshot 推断会必拒下一 turn 的局部结论。参数支持不等于实际执行已恢复，本修复是配置读回安全围栏；新的 Read-only 真机执行验收仍待负责人 A4K 场景。新增 19 项定向回归在旧实现 18 红；术语修订后重验 service 单文件 177 项、Bridge-runtime 类型与 docs 7 对/5 项通过，涵盖 ACK/首发漂移、部分权限写、保留设置缓存的配置确认、迟到旧代与 legacy/imported 兼容。
 
+- 2026-10-04 Codex 新 owner 请求关注方重报（负责人授权补远程续聊后 Desktop 状态更新的明确协议缺口）。
+  - 只读已安装 Desktop 源码确认：owner 首次取得 stream role 时会请求 following status；Bridge 此前忽略尚未 loaded 的订阅，但合法 resume 后没有发该控制公告，已有 Desktop 关注方可能一直收不到活跃／终态快照。成功 start／安全 resume／fork 后，仅无已知订阅的当前 owner 发 version-1 local following-status 请求；绑定 captured RPC、原 record／thread／loaded，失败、旧进程与退休结果不公告。控制发送失败不使已完成的 Native 接管变成失败，不另建 writer、不重发输入。
+  - 独立 freshmain 任务只叠必要 PR147 会员依赖。真实 framed broker＋实际 Service 消费者：早订阅→明确 no-owner／idle→延期合法 resume→重报→活跃／终态快照；基线两项红／四安全项绿，窄修后通过。补陌生 cold／不确定 owner、控制发送失败边界；service 单文件 176 项通过，保留 128 会员与历史 await 栅栏。未操作手机、Native、Desktop GUI、账号或现有服务；该协议证明不等于用户 Desktop Retry 现场验收。fresh own core 类型产物补建后 runtime 类型通过，check:docs 7 指令对／5 检查器用例通过；安全门禁与 owner-only 例外仍遵守。
+
 - 2026-10-04 Codex Desktop 逐客户端跟随退役（负责人授权全面 Codex QA 修复，并补充远程续聊后 Desktop 重开报错）。
   - 只读实际安装包核对：本地 IPC 跟随有 source client，生命周期广播 version 0；此前 Bridge 只按 thread 保存一个 boolean，两个客户端跟随后任一 unfollow 会停掉另一个客户端的后续状态广播。改为每 thread 最多 128 个独立客户端，精确退役；连接丢失、Native owner 退出及 thread archive/reset/delete 清旧订阅和调度。
   - 已有订阅对新客户端和 version-1 local following-status 请求定向续订；不加载完整历史、不调用 Native dispatch。实际 owner 断开只使其 snapshot stale，不生成 no-owner／终态或自动重发。显式完整历史请求保留 IPC-frame source，完整 settings/turn 状态契约和旧 socket 栅栏保持。

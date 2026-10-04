@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, realpathSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createServer, type Socket } from 'node:net';
 import { execFileSync } from 'node:child_process';
 const mock = vi.hoisted(() => ({ instances: [] as any[], request: vi.fn(), respond: vi.fn(), refuse: vi.fn(), resumeSpeed: vi.fn() }));
 vi.mock('./resume-settings.js', () => ({ nativeResumeSpeed: (...args: any[]) => mock.resumeSpeed(...args) }));
@@ -31,6 +32,7 @@ vi.mock('./desktop-ipc.js', async importOriginal => {
 import { CodexService } from './service.js';
 import { codexMessages } from './history.js';
 import { DesktopIpcError } from './desktop-ipc.js';
+import { desktopTurns } from './desktop-state.js';
 import { permissionPatch } from './settings.js';
 // Use Node's standalone loader rather than Vitest's cross-workspace transform.
 function validateRows(rows: unknown[]) {
@@ -2607,6 +2609,135 @@ it('reports package version and protects active work before fencing update admis
   await expect((subject as any).desktopRequest('thread-owner-discovery', { conversationId: threadId })).rejects.toThrow('restarting');
 });
 
+
+describe('Desktop owner acquisition following status', () => {
+  it('does not announce a cold stranger or a thread whose owner discovery remains uncertain', async () => {
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    Object.assign((service as any).records[0], { threadId, activity: 1000 });
+    desktop.emit('follow', randomUUID(), true, 'desktop-a'); desktop.emit('follow', threadId, true, 'desktop-a');
+    vi.spyOn(desktop, 'request').mockRejectedValue(new DesktopIpcError('uncertain', 'Unknown owner'));
+    await request('models.list', { sessionKey: key });
+    expect((service as any).desktopFollowers.size).toBe(0); expect(broadcast).not.toHaveBeenCalled();
+    expect(mock.request.mock.calls.some(([method]) => ['thread/start', 'thread/resume', 'thread/fork', 'turn/start'].includes(method))).toBe(false);
+  });
+  it('keeps a successful native acquisition when its subscription control cannot be sent', async () => {
+    const broadcast = vi.spyOn((service as any).desktop, 'broadcast').mockImplementation(() => { throw new Error('IPC closed'); });
+    await expect(request('models.list', { sessionKey: key })).resolves.toMatchObject({ currentModel: 'native-model' });
+    await request('models.list', { sessionKey: key });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(1);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+  });
+  it('renews an early subscriber through actual IPC frames after a legal delayed resume, then publishes the active and terminal turn', async () => {
+    await service.stop();
+    const { DesktopIpc } = await vi.importActual<typeof import('./desktop-ipc.js')>('./desktop-ipc.js');
+    const path = process.platform === 'win32' ? String.raw`\\.\pipe\clawket-owner-follow-${randomUUID()}` : join(root, 'owner-follow.sock');
+    const peers = new Set<Socket>(), received: any[] = [];
+    let remote!: Socket;
+    const send = (value: object) => {
+      const body = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4); header.writeUInt32LE(body.length);
+      remote.write(Buffer.concat([header, body]));
+    };
+    const following = (source: string, following = true, id = threadId) => send({ type: 'broadcast', version: 1,
+      method: 'thread-stream-following-changed', sourceClientId: source,
+      params: { hostId: 'local', conversationId: id, following } });
+    const server = createServer(socket => {
+      remote = socket; peers.add(socket); socket.on('close', () => peers.delete(socket));
+      let buffer = Buffer.alloc(0);
+      socket.on('data', chunk => {
+        buffer = Buffer.concat([buffer, chunk]);
+        while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32LE()) {
+          const size = buffer.readUInt32LE(), frame = JSON.parse(buffer.subarray(4, 4 + size).toString());
+          buffer = buffer.subarray(4 + size); received.push(frame);
+          if (frame.method === 'initialize') send({ type: 'response', requestId: frame.requestId, resultType: 'success', result: { clientId: 'bridge' } });
+          if (frame.type === 'request' && frame.method === 'thread-owner-discovery') send({ type: 'response', method: frame.method,
+            requestId: frame.requestId, resultType: 'error', error: 'no-client-found' });
+          // The already-following Desktop responds to the new owner's status request.
+          if (frame.method === 'thread-stream-following-status-requested') following('desktop-a');
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(path, resolve); });
+    const desktop = new DesktopIpc([path]);
+    service = new CodexService({ project, directory: join(root, 'state'), desktop });
+    const record = (service as any).records[0]; Object.assign(record, { threadId, activity: 1000 }); (service as any).save();
+    const original = mock.request.getMockImplementation()!;
+    let resolveResume!: () => void, terminal = false;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/resume') return new Promise(resolve => { resolveResume = () => resolve(original(method, params)); });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: terminal
+        ? [{ id: 'turn-1', status: 'completed', items: [{ id: 'reply', type: 'agentMessage', text: 'Done' }] }]
+        : [{ id: 'old-turn', status: 'completed', items: [] }] });
+      return original(method, params);
+    });
+    const snapshots = () => received.filter(frame => frame.method === 'thread-stream-state-changed');
+    try {
+      await desktop.connect(); following('desktop-a'); following('desktop-a', true, 'unrelated');
+      await vi.waitFor(() => expect((service as any).desktopFollowers.size).toBe(0));
+      const picker = request('models.list', { sessionKey: key });
+      await vi.waitFor(() => expect(resolveResume).toBeTypeOf('function'));
+      expect(received.some(frame => frame.method === 'thread-stream-following-status-requested')).toBe(false);
+      expect(snapshots()).toHaveLength(0);
+      resolveResume(); await picker;
+      await vi.waitFor(() => expect(snapshots()).toHaveLength(1));
+      expect(received.filter(frame => frame.method === 'thread-stream-following-status-requested')).toEqual([
+        { type: 'broadcast', method: 'thread-stream-following-status-requested', version: 1, sourceClientId: 'bridge',
+          params: { hostId: 'local', conversationId: threadId } },
+      ]);
+      expect((service as any).desktopFollowers.get(threadId)).toEqual(new Set(['desktop-a']));
+      expect(snapshots()[0]).toMatchObject({ version: 11, params: { change: { conversationState: {
+        source: 'appServer', originator: 'clawket', latestThreadSettings: settings,
+      } } } });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/resume')).toHaveLength(1);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/settings/update'].includes(method))).toBe(false);
+      await request('models.list', { sessionKey: key });
+      expect(received.filter(frame => frame.method === 'thread-stream-following-status-requested')).toHaveLength(1);
+      await request('chat.send', { sessionKey: key, text: 'hello', idempotencyKey: 'owner-follow-send' });
+      notify('turn/started', { turn: { id: 'turn-1' } });
+      await vi.waitFor(() => expect(desktopTurns(snapshots().at(-1)?.params.change.conversationState).some(turn => turn.id === 'turn-1' && turn.status === 'inProgress')).toBe(true), { timeout: 2000 });
+      terminal = true; notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      await vi.waitFor(() => expect(desktopTurns(snapshots().at(-1)?.params.change.conversationState).some(turn => turn.id === 'turn-1' && turn.status === 'completed')).toBe(true), { timeout: 2000 });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+    } finally {
+      await service.stop(); for (const peer of peers) peer.destroy();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+  it.each(['failed', 'closed', 'replaced', 'retired'])('does not announce a %s acquisition completion', async outcome => {
+    Object.assign((service as any).records[0], { threadId, activity: 1000 });
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    const original = mock.request.getMockImplementation()!;
+    let resume!: () => void, rejectResume!: () => void;
+    mock.request.mockImplementation((method, params) => method === 'thread/resume' ? new Promise((resolve, reject) => {
+      resume = () => resolve(original(method, params)); rejectResume = () => reject(new Error('Resume failed'));
+    }) : original(method, params));
+    const picker = request('models.list', { sessionKey: key }); void picker.catch(() => {});
+    await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+    if (outcome === 'failed') rejectResume();
+    else {
+      if (outcome === 'closed' || outcome === 'replaced') mock.instances.at(-1).emit('closed');
+      if (outcome === 'replaced') { (service as any).nextRecoveryAt = 0; await request('health'); }
+      if (outcome === 'retired') (service as any).records = [];
+      resume();
+    }
+    await picker.catch(() => {});
+    expect(broadcast.mock.calls.filter(([method]) => method === 'thread-stream-following-status-requested')).toHaveLength(0);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+  });
+  it('announces a newly started owner once and its distinct fork owner after successful native confirmation', async () => {
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    await request('models.list', { sessionKey: key }); await request('models.list', { sessionKey: key });
+    const sourceId = threadId, branchId = randomUUID(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/fork'
+      ? Promise.resolve({ ...response(), thread: { id: branchId, cwd: project } }) : original(method, params));
+    await request('sessions.create', { fromSession: key, title: 'QA branch' });
+    expect(broadcast.mock.calls.filter(([method]) => method === 'thread-stream-following-status-requested')).toEqual([
+      ['thread-stream-following-status-requested', { hostId: 'local', conversationId: sourceId }],
+      ['thread-stream-following-status-requested', { hostId: 'local', conversationId: branchId }],
+    ]);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+  });
+});
 
 describe('Desktop follower membership for owned conversations', () => {
   async function settlePublications() {
