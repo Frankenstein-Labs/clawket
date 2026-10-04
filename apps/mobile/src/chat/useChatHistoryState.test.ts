@@ -8,6 +8,7 @@ import { useChatHistoryState } from './useChatHistoryState';
 import { ChatCacheService } from '../services/chat-cache';
 import { StorageService } from '../services/storage';
 import { AdapterError } from '@clawket/agent-protocol';
+import { resetSessionHistory } from '../connection/session-reset';
 import { SessionCatalogSupersededError } from '../connection/adapters/session-catalog';
 
 jest.mock('../services/storage', () => ({
@@ -22,6 +23,7 @@ jest.mock('../services/storage', () => ({
 jest.mock('../services/chat-cache', () => ({
   ChatCacheService: {
     getMessages: jest.fn(),
+    deleteMessages: jest.fn().mockResolvedValue(undefined),
     getTimelinePage: jest.fn(),
     listSessions: jest.fn(),
   },
@@ -2311,5 +2313,132 @@ describe('shouldRestoreCacheBeforeHistoryRefresh', () => {
         { id: 'u1', role: 'user', text: 'hello' },
       ],
     })).toBe(true);
+  });
+});
+
+
+describe('acknowledged session Reset history', () => {
+  const key = 'agent:main:reset-case';
+  const old = [
+    { id: 'old-user', role: 'user', text: 'old question', timestampMs: 1000 },
+    { id: 'old-reply', role: 'assistant', text: 'old reply', timestampMs: 2000 },
+  ];
+  function setup(backendKind = 'codex') {
+    const adapter = { connection: { id: 'reset-connection', backendKind }, state: 'ready',
+      resetSession: jest.fn().mockResolvedValue(undefined),
+      loadSession: jest.fn().mockResolvedValue({ key, messages: old, sessionId: 'old-native', nextCursor: 'old-cursor', hasActiveRun: false }),
+    };
+    const hook = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, routeSessionKey: key, gatewayConfigId: 'reset-connection', currentAgentId: 'main' });
+    });
+    return { adapter, ...hook };
+  }
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (ChatCacheService.getMessages as jest.Mock).mockResolvedValue([]);
+    (ChatCacheService.deleteMessages as jest.Mock).mockResolvedValue(undefined);
+    (ChatCacheService.getTimelinePage as jest.Mock).mockResolvedValue({ messages: [], hasMore: false });
+  });
+
+  it('clears the same key immediately after ACK, reads a new head, and preserves only new optimistic input', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const ack = deferred<void>();
+    const head = deferred<any>();
+    adapter.resetSession.mockReturnValueOnce(ack.promise);
+    adapter.loadSession.mockReturnValueOnce(head.promise);
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    expect(result.current.messages).toHaveLength(2);
+    await act(async () => { ack.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.activitySnapshot).toBeNull();
+    expect(result.current.sessions.find(item => item.key === key)?.sessionId).toBeUndefined();
+    expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+    expect(adapter.loadSession).toHaveBeenLastCalledWith(key, { limit: 50 });
+    act(() => { result.current.setMessages([{ id: 'usr_123_fresh', role: 'user', text: 'new draft sent', sentLocally: true, timestampMs: Date.now() }]); });
+    await act(async () => { head.resolve({ key, messages: [], hasActiveRun: false }); await reset; });
+    expect(result.current.messages.map(item => item.id)).toEqual(['usr_123_fresh']);
+    expect(result.current.hasMoreHistory).toBe(false);
+    expect(ChatCacheService.deleteMessages).toHaveBeenCalledWith('reset-connection', 'main', key);
+  });
+
+  it('retires an old deferred history and cache hydration before their late results arrive', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const oldRead = deferred<any>();
+    const oldCache = deferred<any>();
+    adapter.loadSession.mockReturnValueOnce(oldRead.promise).mockResolvedValueOnce({ key, messages: [], hasActiveRun: false } as any);
+    (ChatCacheService.getMessages as jest.Mock).mockReturnValueOnce(oldCache.promise);
+    let read!: Promise<number>, cache!: Promise<boolean>;
+    act(() => { read = result.current.loadHistory(key); cache = result.current.restoreCachedMessages(key); });
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', key); });
+    await act(async () => {
+      oldRead.resolve({ key, messages: old, sessionId: 'old-native', nextCursor: 'old-cursor' });
+      oldCache.resolve(old); await read; await cache;
+    });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.hasMoreHistory).toBe(false);
+    expect(adapter.loadSession).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the confirmed empty timeline if its new read fails', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    adapter.loadSession.mockRejectedValueOnce(new Error('read failed'));
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', key); });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.historyLoaded).toBe(true);
+  });
+
+  it('blocks old cache hydration when both ACK cache deletion and the fresh head read fail', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    (ChatCacheService.deleteMessages as jest.Mock).mockRejectedValueOnce(new Error('storage failed'));
+    (ChatCacheService.getMessages as jest.Mock).mockResolvedValue(old);
+    adapter.loadSession.mockRejectedValueOnce(new Error('read failed'));
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', key); });
+    let restored!: boolean;
+    await act(async () => { restored = await result.current.restoreCachedMessages(key); });
+    expect(restored).toBe(false);
+    expect(result.current.messages).toEqual([]);
+    expect(adapter.resetSession).toHaveBeenCalledTimes(1);
+    expect(ChatCacheService.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('leaves history and cache intact when Reset is rejected', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const before = result.current.messages;
+    adapter.resetSession.mockRejectedValueOnce(new Error('denied'));
+    await act(async () => { await expect(resetSessionHistory(adapter as any, 'main', key)).rejects.toThrow('denied'); });
+    expect(result.current.messages).toBe(before);
+    expect(ChatCacheService.deleteMessages).not.toHaveBeenCalled();
+    expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not clear a new selection after leaving and returning to the same key before ACK', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const ack = deferred<void>();
+    adapter.resetSession.mockReturnValueOnce(ack.promise);
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    act(() => { result.current.setSessionKey('another'); });
+    act(() => { result.current.setSessionKey(key); result.current.setMessages([{ id: 'new-scope', role: 'assistant', text: 'current scope' }]); });
+    await act(async () => { ack.resolve(); await reset; });
+    expect(result.current.messages.map(item => item.id)).toEqual(['new-scope']);
+    expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['openclaw', 'hermes'])('preserves %s normal refresh semantics without a Reset ACK', async backend => {
+    const { adapter, result } = setup(backend);
+    adapter.loadSession.mockResolvedValue({ key, messages: [], hasActiveRun: false } as any);
+    act(() => { result.current.setMessages([{ id: 'usr_123_optimistic', role: 'user', text: 'pending', sentLocally: true, timestampMs: Date.now() }]); });
+    await act(async () => { await result.current.loadHistory(key); });
+    expect(result.current.messages.map(item => item.id)).toEqual(['usr_123_optimistic']);
+    expect(ChatCacheService.deleteMessages).not.toHaveBeenCalled();
   });
 });

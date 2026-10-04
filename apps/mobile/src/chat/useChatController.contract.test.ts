@@ -1,3 +1,6 @@
+import { useChatHistoryState } from './useChatHistoryState';
+import { resetSessionHistory } from '../connection/session-reset';
+import { ChatCacheService } from '../services/chat-cache';
 import { clearUncertainSends } from './sendRecovery';
 import { act, renderHook } from '@testing-library/react-native';
 import * as Network from 'expo-network';
@@ -49,6 +52,7 @@ const historyMock = {
   restoreCachedMessages: jest.fn().mockResolvedValue(undefined),
   loadSessionsAndHistory: jest.fn(),
   reconcileLatestAssistantFromHistory: jest.fn().mockResolvedValue(undefined),
+  captureSessionScope: jest.fn(() => () => true),
   refreshCurrentSessionHistory: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -338,6 +342,101 @@ describe('useChatController contract', () => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
     consoleErrorSpy.mockRestore();
+  });
+
+  it('retires Reset run presentation while retaining the draft, attachments and held queue without sending', async () => {
+    const adapter = { ...createAdapter(), resetSession: jest.fn().mockResolvedValue(undefined) };
+    const removeCache = jest.spyOn(ChatCacheService, 'deleteMessages').mockResolvedValue(undefined);
+    const { result, rerender, unmount } = renderHook(() => useChatController({ adapter, debugMode: false }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const events = () => jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events().onState!('ready'); await Promise.resolve(); });
+    act(() => { events().onUpdate!({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'old-run', activeRunId: 'old-run', isSending: true, startedAtMs: Date.now() }); });
+    act(() => { events().onUpdate!({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'old-run', activeRunId: 'old-run', isSending: true, text: 'old streamed reply', visible: true }); });
+    expect(result.current.isSending).toBe(true);
+    act(() => { result.current.setInput('queued unsent'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(result.current.queuedMessages).toHaveLength(1);
+    act(() => { result.current.setInput('current draft'); });
+    imagePickerHookMock.pendingImages = [{ uri: 'local-image', base64: 'image-bytes', mimeType: 'image/png' }];
+    rerender({});
+    imagePickerHookMock.clearPendingImages.mockClear();
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', 'agent:main:main'); });
+    expect(result.current.isSending).toBe(false);
+    expect(result.current.activeRunId).toBeNull();
+    expect(result.current.listData.some(message => message.text === 'old streamed reply')).toBe(false);
+    expect(result.current.input).toBe('current draft');
+    expect(result.current.pendingImages).toBe(imagePickerHookMock.pendingImages);
+    expect(result.current.queuedMessages).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'queued unsent')?.delivery).toBe('held');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    expect(imagePickerHookMock.clearPendingImages).not.toHaveBeenCalled();
+    unmount(); removeCache.mockRestore();
+  });
+
+  it('rejects a late Reset ACK after same-batch away/back using the real history scope token', async () => {
+    const actualHistory = jest.requireActual('./useChatHistoryState').useChatHistoryState;
+    let state: any;
+    jest.mocked(useChatHistoryState).mockImplementation(options => {
+      state = actualHistory(options);
+      return state;
+    });
+    const ack = deferred<void>();
+    const adapter = { ...createAdapter(), resetSession: jest.fn(() => ack.promise) };
+    const removeCache = jest.spyOn(ChatCacheService, 'deleteMessages').mockResolvedValue(undefined);
+    const key = 'agent:main:main';
+    const { result, unmount } = renderHook(() => useChatController({ adapter, routeSessionKey: key, debugMode: false }));
+    const events = () => jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events().onState!('ready'); await Promise.resolve(); await Promise.resolve(); });
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    act(() => { state.setSessionKey('another'); state.setSessionKey(key); });
+    act(() => { events().onUpdate!({ type: 'run_started', sessionKey: key, runId: 'new-run', activeRunId: 'new-run', isSending: true, startedAtMs: Date.now() }); });
+    act(() => { result.current.setInput('new scope draft'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(result.current.queuedMessages).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('queued');
+    act(() => { result.current.setInput('current draft'); });
+    await act(async () => { ack.resolve(); await reset; });
+    expect(result.current.activeRunId).toBe('new-run');
+    expect(result.current.isSending).toBe(true);
+    expect(result.current.input).toBe('current draft');
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('queued');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    unmount(); removeCache.mockRestore();
+    jest.mocked(useChatHistoryState).mockImplementation(() => historyMock as any);
+  });
+
+  it('retires history and controller together after successful Reset ACK using the real scope token', async () => {
+    const actualHistory = jest.requireActual('./useChatHistoryState').useChatHistoryState;
+    let state: any;
+    jest.mocked(useChatHistoryState).mockImplementation(options => {
+      state = actualHistory(options);
+      return state;
+    });
+    const ack = deferred<void>();
+    const adapter = { ...createAdapter(), resetSession: jest.fn(() => ack.promise) };
+    const removeCache = jest.spyOn(ChatCacheService, 'deleteMessages').mockResolvedValue(undefined);
+    const key = 'agent:main:main';
+    const { result, unmount } = renderHook(() => useChatController({ adapter, routeSessionKey: key, debugMode: false }));
+    const events = () => jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events().onState!('ready'); await Promise.resolve(); await Promise.resolve(); });
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    act(() => { events().onUpdate!({ type: 'run_started', sessionKey: key, runId: 'new-run', activeRunId: 'new-run', isSending: true, startedAtMs: Date.now() }); });
+    act(() => { result.current.setInput('new scope draft'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(result.current.queuedMessages).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('queued');
+    act(() => { result.current.setInput('current draft'); });
+    await act(async () => { ack.resolve(); await reset; });
+    expect(result.current.activeRunId).toBeNull();
+    expect(result.current.isSending).toBe(false);
+    expect(result.current.input).toBe('current draft');
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('held');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    unmount(); removeCache.mockRestore();
+    jest.mocked(useChatHistoryState).mockImplementation(() => historyMock as any);
   });
 
   it('exposes stable public fields and forwards extracted hook outputs', () => {

@@ -1,3 +1,4 @@
+import { resetSessionHistory } from './src/connection/session-reset';
 import { useBridgeRelease } from './src/features/app-updates/useBridgeRelease';
 import { useBridgeVersions } from './src/features/app-updates/useBridgeVersions';
 import { newerVersion, usesBridge, stableVersion } from './src/features/app-updates/bridge-release';
@@ -1379,7 +1380,7 @@ function AppContent({
       if (!adapter.archiveSession || !adapter.capabilities.sessionArchive) throw new Error('Archive unavailable');
       await adapter.archiveSession(row.key, !row.archived);
     }
-    if (action === 'reset') await adapter.resetSession?.(row.key);
+    if (action === 'reset') await resetSessionHistory(adapter, row.agentId, row.key);
     if (action === 'delete') {
       await adapter.deleteSession?.(row.key);
       await SessionPreferencesService.clearSession(row.connectionId, row.agentId, row.key);

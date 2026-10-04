@@ -52,6 +52,7 @@ import { APPROVE_COMMAND, HISTORY_PAGE_SIZE, MAX_IMAGES } from "./constants";
 import type { ChatControllerOptions } from "./types";
 import { useAppContext } from "../contexts/AppContext";
 import { onAdapterPathRecovered, recoverAdapterConnection } from '../connection/adapter-recovery';
+import { onSessionReset } from '../connection/session-reset';
 import {
   AgentActivity,
   agentIdFromSessionKey,
@@ -724,6 +725,7 @@ export function useChatController({
     [history.messages, uncertainSends],
   );
   useChatAutoCache({
+    adapter,
     gatewayConfigId,
     agentId: cacheAgentIdentity.agentId,
     agentName: cacheAgentIdentity.agentName,
@@ -1384,6 +1386,35 @@ export function useChatController({
     connectionState, scheduleForegroundRefresh, requestRunRecovery,
     recoverForegroundRunIfStuck, sessionKey: history.sessionKey,
   };
+
+  useEffect(() => {
+    if (!adapter) return;
+    let subscribed = true;
+    const unsubscribe = onSessionReset(adapter, target => {
+      const capturedScope = sendScope;
+      const historyCurrent = history.captureSessionScope(target.key);
+      const isCurrent = () => subscribed && historyCurrent() && capturedScope.active && sendScopeRef.current === capturedScope
+        && target.agentId === currentAgentId && sessionKeyRef.current === target.key;
+      if (!isCurrent()) return null;
+      return { isCurrent, retire() {
+        // Keep all unsent input. Clearing run presentation must not release the outbox.
+        messageQueueRef.current.hold();
+        clearActiveRunState(target.key, 'session-reset');
+        measuredToolsRef.current = [];
+        sessionAbortableRunRef.current = null;
+        lastLiveRunEventRef.current = null;
+        runRecoveryInFlightRef.current = null;
+        recentRunRecoveryRef.current = null;
+        historyReloadInFlightRef.current = null;
+        recentHistoryReloadRef.current = null;
+        clearPendingRunTimeout();
+        clearPostStreamHistoryRefreshTimer();
+        clearForegroundRunRecoveryTimer();
+      } };
+    });
+    return () => { subscribed = false; unsubscribe(); };
+  }, [adapter, currentAgentId, sendScope, history.captureSessionScope, clearActiveRunState, clearPendingRunTimeout,
+    clearPostStreamHistoryRefreshTimer, clearForegroundRunRecoveryTimer]);
 
   const pathRecoveryRef = useRef(history.refreshCurrentSessionHistory);
   pathRecoveryRef.current = history.refreshCurrentSessionHistory;
