@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 共享 Thread 空白现场的最小开发诊断（Codex 安卓 QA 范围，默认关闭）。
+  - `__DEV__` Inspector 内存入口 `__CLAWKET_CHAT_GEOMETRY_QA__` 支持 start/read/stop；不依赖 logcat，不增 UI、不触发 React render、滚动或布局。对照既有 raw native 事件与 FlashList 公共坐标/可见范围，最多读取四个 layout。
+  - 1 Hz、256 条、20 分钟、一个在途查询；会话/连接/焦点/list/native binding/后台退役及迟到回调栅栏。仅有限数字、布尔和固定类别，不输出正文、ID、key、路径或凭据。
+  - 公共 SDK 无 engaged/paint ACK；诊断和注入 SDK 时序的回归不能作为 586 闲置空白的根因证据。真机采集仍由负责人在明确加载候选后执行；未操作设备/Native/QA 服务、未发布。
+  - 独立依赖、heavy 串行验证：collector 11、observer hook 8、UI follow 13、原 Thread 166（共 198）通过；Mobile typecheck、docs 7 对/5 用例、UI 248 文件通过。Release 模块不装 Inspector 入口，默认关闭和损坏/越界字段、迟到/重复采样及退役都有回归；CI 及真实设备采集另行验证。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。

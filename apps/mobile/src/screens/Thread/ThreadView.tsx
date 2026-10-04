@@ -9,6 +9,7 @@ import { useReplyEntranceDelay } from '../../chat/useReplyEntranceDelay';
 import { messageTextRaise } from '../../chat/textCentering';
 import { SessionPreviewNotice, SessionPreviewFooter } from './components/SessionPreviewNotice';
 import { useUiThreadFollow, type UiThreadFollow } from './useUiThreadFollow';
+import { useChatGeometryQa } from './useChatGeometryQa';
 import { useOlderHistoryPaging } from './useOlderHistoryPaging';
 import { useTranslation } from 'react-i18next';
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -376,6 +377,8 @@ export type ThreadViewProps = Readonly<{
   historyLoadMoreError?: boolean;
   historyPagingBlocked?: boolean;
   historyScope?: string;
+  /** Focused active route only; development metadata sampling defaults off. */
+  qaGeometryActive?: boolean;
   onRetryHistory?: () => void | Promise<unknown>;
   topInset?: number;
   bottomInset?: number;
@@ -515,6 +518,7 @@ export function ThreadView({
   historyLoadMoreError = false,
   historyPagingBlocked = false,
   historyScope,
+  qaGeometryActive = false,
   onRetryHistory,
   topInset = 0,
   bottomInset = 0,
@@ -910,6 +914,18 @@ export function ThreadView({
       clearFollowGlide();
       if (followNewMessagesRef.current && !readerScrollingRef.current) snapNatively();
     },
+  });
+  useChatGeometryQa({
+    active: qaGeometryActive,
+    scope: historyScope ?? sessionKey ?? '',
+    list: timelineRef,
+    rows: timelineItems,
+    raw: uiFollow.qaGeometry,
+    reading: () => ({ ...scrollMetricsRef.current,
+      readerScrolling: readerScrollingRef.current,
+      bottomFollowing: followNewMessagesRef.current,
+      historyPaging: historyPagingBusyRef.current,
+    }),
   });
   // Follow corrections go straight to the native scroll view: FlashList's own
   // scrollToEnd waits a macrotask, leaving grown content clipped under the
