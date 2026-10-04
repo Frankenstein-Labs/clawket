@@ -1,5 +1,7 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-04 展开输入框发送后的 Current/Next 选择器被键盘遮住：真机选择器已有遮罩，手动隐藏键盘后立即可见；源码确认 Send 后收起触发两次无条件恢复焦点，覆盖发送前 blur。独立 fresh main 分支让发送及显式 blur 同步退休待执行布局焦点，仅手动编辑或显式 focus 可重新声明，打开选择器同时 dismiss 键盘。保留普通 compact Send、同一原生输入/草稿、两平台手动展开收起和各后端协议。实际 Composer 基线 3 红/3 绿、Screen 入口基线 1 红均命中缺陷；修复后 Composer 6、Screen 整文件 70 与 Mobile 类型检查串行通过，UI 样式 246 文件、设计系统及指令文档 7 对/5 用例通过。真机键盘遮挡修复仍待主任务加载候选复验；无设备、Native、QA RPC、Production 或发布操作。
+
 - 2026-10-04 主任务工作栏/partial审批组合验证318项通过：Thread197、turn-work21、work-dock-model7、controller93，Mobile类型/check:docs 9指令对5用例通过，保131显式unknown/139逐项clock/8b29final资格/ACK顺序及revision门。只对全显式idle的隔离C/E旧owner发SIGINT并确认退出，再启开发CLI bba5a2；配置字节及Production进程保持，认证目录再次全idle。手机仍旧2033；组合源准备装载，真实审批与fresh运行控制继续，不冒称手机已验收。
 
 - 2026-10-04 同回合工作胶囊追加 partial 审批 attention 边界：实际 Thread 缺少原始输入、工具带 turn 身份而有效审批无 turn 身份时，先确认 1 项失败/4 项负向通过；独立消费当前会话的有效请求后 5 项通过，Review 定位实际审批卡，已解决、过期、不支持及 pairing 请求不复活工作审批。请求不加入未知工具、执行收据或计时归属，切换会话不保留旧请求。整文件、类型和 docs 由主任务组合验证；本分支已释放 heavy，无设备/Native/QA RPC/Production 操作。

@@ -14,6 +14,7 @@ jest.mock('./components/SkillPickerSheet', () => ({ SkillPickerSheet: (props: an
 jest.mock('./components/SelectedSkill', () => ({ SelectedSkill: () => null }));
 jest.mock('../../services/incoming-share', () => ({ IncomingShareStore: { list: jest.fn(async () => []), remove: jest.fn(async () => undefined) } }));
 import React from 'react';
+import { Keyboard } from 'react-native';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { CAPABILITY_MATRIX } from '@clawket/agent-protocol';
 import type { ComposerHandle } from '../../components/ui/Composer';
@@ -321,6 +322,24 @@ describe('ThreadScreen connection container', () => {
     expect(mockController.onSend).not.toHaveBeenCalled();
     act(() => mockRunInputSheetProps?.onNext());
     expect(mockController.onSend).toHaveBeenCalledTimes(1);
+    expect(mockController.onSteer).not.toHaveBeenCalled();
+  });
+
+  it('dismisses the editing keyboard before presenting the current-or-next chooser without sending', () => {
+    const props = createNavigationProps();
+    const blur = jest.fn();
+    mockController.composerRef = { current: { blur, focus: jest.fn(), clear: jest.fn() } };
+    mockController.canChooseRunInput = true;
+    mockController.canSteer = true;
+    mockController.onSteer = jest.fn();
+    mockController.activeRunId = 'current-run';
+    (Keyboard.dismiss as jest.Mock).mockClear();
+    render(<ThreadScreen {...props} />);
+    act(() => mockThreadViewProps?.onSend());
+    expect(blur).toHaveBeenCalledTimes(1);
+    expect(Keyboard.dismiss).toHaveBeenCalledTimes(1);
+    expect(mockRunInputSheetProps?.visible).toBe(true);
+    expect(mockController.onSend).not.toHaveBeenCalled();
     expect(mockController.onSteer).not.toHaveBeenCalled();
   });
 

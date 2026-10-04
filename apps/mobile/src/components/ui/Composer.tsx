@@ -100,11 +100,21 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
   const inputRef = useRef<TextInput>(null);
   const previousExpandedRef = useRef(expanded);
   const focusAfterLayoutRef = useRef(false);
+  const resizeFocusIntentRef = useRef(true);
+  const retireResizeFocus = () => {
+    resizeFocusIntentRef.current = false;
+    focusAfterLayoutRef.current = false;
+  };
+  const changeEditingMode = (next: boolean) => {
+    resizeFocusIntentRef.current = true;
+    onExpandedChange?.(next);
+  };
+  const send = () => { retireResizeFocus(); onSend(); };
   useLayoutEffect(() => {
     if (previousExpandedRef.current === expanded) return;
     previousExpandedRef.current = expanded;
-    focusAfterLayoutRef.current = true;
-    inputRef.current?.focus();
+    focusAfterLayoutRef.current = resizeFocusIntentRef.current;
+    if (resizeFocusIntentRef.current) inputRef.current?.focus();
   }, [expanded]);
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const glassChrome = useMemo(() => (appearance === 'glass' ? createChatGlassStyle(theme) : null), [appearance, theme]);
@@ -220,8 +230,8 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
     onBlur: (event) => { setFocused(false); onBlur?.(event); },
   };
   useImperativeHandle(forwardedRef, () => ({
-    focus: () => inputRef.current?.focus(),
-    blur: () => inputRef.current?.blur(),
+    focus: () => { resizeFocusIntentRef.current = true; inputRef.current?.focus(); },
+    blur: () => { retireResizeFocus(); inputRef.current?.blur(); },
     clear: () => { inputRef.current?.clear(); onChangeText(''); },
   }), [onChangeText]);
 
@@ -256,13 +266,13 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
         testID={testID ? `${testID}-stop` : undefined} />
     </Animated.View> : null}
     <SlotMorph slot="queue-send" ready={slotReady}>
-      <ComposerAction icon={ArrowUp} label={accessibilityLabels.queue ?? accessibilityLabels.send} onPress={onSend}
+      <ComposerAction icon={ArrowUp} label={accessibilityLabels.queue ?? accessibilityLabels.send} onPress={send}
         tone="send" disabled={primaryDisabled} testID={testID ? `${testID}-primary` : undefined} />
     </SlotMorph>
   </>
     : <SlotMorph slot={isRunning ? 'stop' : 'send'} ready={slotReady}>
       <ComposerAction icon={isRunning ? Square : ArrowUp} label={isRunning ? accessibilityLabels.stop : accessibilityLabels.send}
-        onPress={isRunning ? (onStop ?? (() => undefined)) : onSend} tone={isRunning ? 'primary' : 'send'}
+        onPress={isRunning ? (onStop ?? (() => undefined)) : send} tone={isRunning ? 'primary' : 'send'}
         disabled={primaryDisabled} testID={testID ? `${testID}-primary` : undefined} />
     </SlotMorph>;
   const dismissHandlers = expanded ? null : keyboardDismissResponder.panHandlers;
@@ -275,7 +285,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
   return (
     <View testID={testID} style={[styles.composer, style, expanded ? styles.expanded : null]}>
       {expanded ? <View testID={testID ? `${testID}-editor-header` : undefined} style={styles.editorHeader}>
-        <ComposerAction icon={Minimize2} label={t('Collapse editor')} onPress={() => onExpandedChange?.(false)}
+        <ComposerAction icon={Minimize2} label={t('Collapse editor')} onPress={() => changeEditingMode(false)}
           testID={testID ? `${testID}-collapse` : undefined} />
         <Text style={styles.editorTitle} numberOfLines={1}>{t('Draft message')}</Text>
         <ComposerAction icon={ChevronDown} label={t('Hide keyboard')} onPress={Keyboard.dismiss} disabled={!focused}
@@ -333,7 +343,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
               accessible={false} pointerEvents={inputVoiceTarget || voiceActive ? 'auto' : 'none'}
               style={StyleSheet.absoluteFill} />
             {!expanded && !voiceActive && showExpand ? <View style={styles.expandAction}>
-              <ComposerAction icon={Maximize2} label={t('Expand editor')} onPress={() => onExpandedChange?.(true)}
+              <ComposerAction icon={Maximize2} label={t('Expand editor')} onPress={() => changeEditingMode(true)}
                 testID={testID ? `${testID}-expand` : undefined} />
             </View> : null}
             {!expanded && accessory && !voiceActive ? <View testID={testID ? `${testID}-accessory` : undefined}
