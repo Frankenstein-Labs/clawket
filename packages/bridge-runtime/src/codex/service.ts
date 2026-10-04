@@ -335,6 +335,15 @@ export class CodexService extends EventEmitter {
     if (!followers.has(source) && followers.size >= 128) throw new Error('Too many Desktop followers');
     followers.add(source); this.desktopFollowers.set(id, followers); return true;
   }
+  private announceDesktopOwnership(r: Entry, rpc: CodexRpc, threadId: string): void {
+    if (this.stopped || this.disconnected || this.rpc !== rpc || !this.records.includes(r)
+      || r.threadId !== threadId || !this.loaded.has(r.id) || this.runs.get(r.id)?.desktop
+      || this.desktopFollowers.has(threadId)) return;
+    // A subscriber may have announced before this process acquired the native
+    // writer. Ask existing followers to renew; this control does not load history.
+    try { this.desktop?.broadcast('thread-stream-following-status-requested', { hostId: 'local', conversationId: threadId }); }
+    catch { /* Subscription discovery cannot invalidate successful native acquisition. */ }
+  }
   private retireDesktopFollowers(id?: string): void {
     if (id === undefined) {
       this.desktopFollowers.clear();
@@ -724,6 +733,7 @@ export class CodexService extends EventEmitter {
   private async thread(r: Entry, released = false, permissionSelection?: Record<string, unknown>): Promise<void> {
     if (r.permissionsUnconfirmed && !permissionSelection) throw new Error('Codex did not restore the conversation permissions. Select and confirm permissions before sending.');
     if (this.loaded.has(r.id)) return;
+    const rpc = this.rpc;
     const resume = !!r.threadId && !!r.activity;
     const requestedEffort = resume ? undefined : r.effort;
     const requestedSpeed = resume ? undefined : r.speedPreference;
@@ -783,6 +793,7 @@ export class CodexService extends EventEmitter {
     if (effective && requestedSpeed?.provider === effective.modelProvider && requestedSpeed.serviceTier !== effective.serviceTier) {
       await this.nativeSettings(r, { serviceTier: requestedSpeed.serviceTier });
     }
+    this.announceDesktopOwnership(r, rpc, result.thread.id);
   }
   private async refreshModels(): Promise<any[]> {
     const models = new Map<string, any>();
@@ -887,9 +898,11 @@ export class CodexService extends EventEmitter {
         const threadId = owned?.threadId ?? native?.id;
         if (!threadId || native?.status?.type === 'active') throw new Error('Source conversation is unavailable or still running');
         const cwd = owned?.cwd ?? native?.cwd ?? this.project;
+        const rpc = this.rpc;
         const result = await this.rpc.request('thread/fork', { ...PERMISSIONS, threadId, cwd, excludeTurns: true });
         if (!ID.test(result.thread?.id) || result.thread.cwd !== cwd) throw new Error('Invalid Codex branch');
-        const r = this.create(p.title as string, cwd); r.threadId = result.thread.id; r.model = result.model; r.provider = result.modelProvider; r.effort = result.reasoningEffort; if (hasServiceTier(result)) r.serviceTier = result.serviceTier; r.activity = Date.now(); this.loaded.add(r.id); this.save(); const effective = nativeSettings(result, true, this.rpc.nativeVersion === '0.153.3'); if (effective) this.rememberSettings(r, effective); return this.descriptor(r);
+        const r = this.create(p.title as string, cwd); r.threadId = result.thread.id; r.model = result.model; r.provider = result.modelProvider; r.effort = result.reasoningEffort; if (hasServiceTier(result)) r.serviceTier = result.serviceTier; r.activity = Date.now(); this.loaded.add(r.id); this.save(); const effective = nativeSettings(result, true, this.rpc.nativeVersion === '0.153.3'); if (effective) this.rememberSettings(r, effective);
+        this.announceDesktopOwnership(r, rpc, result.thread.id); return this.descriptor(r);
       }
       case 'sessions.rename': return this.serial(this.record(p.sessionKey), async () => {
         const r = this.record(p.sessionKey); if (typeof p.title !== 'string' || !p.title.trim() || p.title.length > 200) throw new Error('Invalid title');
