@@ -291,7 +291,8 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
       <View testID={testID ? `${testID}-row` : undefined} style={expanded ? styles.editorBody : styles.row}>
         {expanded ? null : <View testID={testID ? `${testID}-leading` : undefined} style={styles.side} {...dismissHandlers}>{leadingAction}</View>}
         <View testID={testID ? `${testID}-capsule` : undefined}
-          style={expanded ? styles.editorCapsule : [styles.capsule, compactTray ? styles.clearSurface : [capsuleSurface, glassChrome]]}>
+          collapsable={false}
+          style={expanded ? styles.editorCapsule : [styles.capsule, compactTray ? styles.integratedCapsule : [capsuleSurface, glassChrome]]}>
           <Animated.View testID={testID ? `${testID}-input-shell` : undefined}
             collapsable={false}
             onLayout={({ nativeEvent }) => {
@@ -435,6 +436,9 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
     capsule: { flex: 1, minWidth: 0, minHeight: ControlSize.floatingButton, borderRadius: Radius.xl, paddingVertical: 2, paddingLeft: Space.sm, paddingRight: Space.xs, justifyContent: 'center', overflow: 'hidden' },
     attachmentBody: { borderRadius: Radius.xl, padding: Space.xs },
     clearSurface: { backgroundColor: 'transparent' },
+    // The shared body owns the attachment surface's corners. The inner shell
+    // still clips the native editor to its height, without a second round clip.
+    integratedCapsule: { backgroundColor: 'transparent', borderRadius: undefined, overflow: 'visible' },
     editorBody: { flex: 1, minHeight: 0 },
     editorCapsule: { flex: 1, minHeight: 0, gap: Space.xs },
     inputShell: { minHeight: ControlSize.pill, flexDirection: 'row', paddingHorizontal: Space.sm, overflow: 'hidden' },

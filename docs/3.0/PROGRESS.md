@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 附件共享 surface 首候选真机未通过，继续同 UI 任务的最窄候选。
+  - 真实有附件时 surface、Add/Send 与预览均可见，placeholder、输入草稿与 model chip 像素空白；UIA 保留完整文本/有效 bounds，聚焦和实际短草稿仍不可见。明确移除附件后同一未发送草稿和 model 立即可见，0Send。不能用首候选79项组件绿升级为真机通过，也未证明 Android drawable clip bounds 就是原因。
+  - 仅紧凑附件态取消透明内 capsule 的重复圆角/overflow clip，保持 input-shell 高度裁剪、同 input/native parent、无附件和展开样式；固定 capsule native host 避免移除裁剪后因缺 test ID 被 layout-only flatten。gallery/容量/24点 reserve/44点 Remove/回调不变。
+  - 新 light/dark host 样式边界基线2红/68绿→候选70绿，显式断言 flatten 后没有内层半径；UI246文件/959 token来源、设计文档11组件/10 token families＋5用例、check:docs 7指令对＋5用例通过。UI gate曾拒literal radius0，候选改显式 undefined 让 RN 清除旧半径，未新增token或扩大改动；本轮无新类型，不重复tsc/fullsuite。负责人新手机候选绘制验收仍待后续组合。
+
 - 2026-10-05 待发附件托盘与输入区整合（负责人根据实际手机截图要求优化）。
   - 有附件时用一块共享 surface/glass 承载全宽托盘及底部输入/动作行，加号变为同底面的轻量图标；无附件保留 A+ 单行。托盘 Add 使用现有56点触区内的44点细边控件，去除重复白色填充和叠加上留白。
   - 保留同一个原生输入的父链、展开/键盘/模型/语音和发送行为，保留56点预览、44点删除目标与24点右侧隔离；不改选择、预览、删除、六项容量、动画/减少动态效果、附件会话作用域或后端合同。

@@ -1234,6 +1234,34 @@ describe.each(['light', 'dark'] as const)('%s glass chrome over a wallpaper', (s
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it('leaves attachment corners to the shared surface while retaining the editor height clip', () => {
+    const props = { testID: 'composer', value: 'Unsent draft', placeholder: 'Message',
+      accessibilityLabels: { add: 'Add', voice: 'Voice', send: 'Send', stop: 'Stop' },
+      onChangeText: jest.fn(), onSend: jest.fn(), onPasteFiles: jest.fn() };
+    const result = render(<Composer {...props} />);
+    const capsule = result.getByTestId('composer-capsule');
+    const shell = result.getByTestId('composer-input-shell');
+    const input = result.getByTestId('composer-input');
+    expect(flattenStyle(capsule.props.style)).toMatchObject({ borderRadius: Radius.xl, overflow: 'hidden' });
+    result.rerender(<Composer {...props} hasAttachments attachments={<Text>Attachment</Text>} />);
+    // This is a host/style contract, not proof of an Android draw or clip path.
+    expect(result.getByTestId('composer-capsule')).toBe(capsule);
+    expect(capsule.props.collapsable).toBe(false);
+    expect(flattenStyle(capsule.props.style)).toMatchObject({
+      backgroundColor: 'transparent', overflow: 'visible',
+    });
+    expect(flattenStyle(capsule.props.style).borderRadius).toBeUndefined();
+    expect(result.getByTestId('composer-input-shell')).toBe(shell);
+    expect(flattenStyle(shell.props.style).overflow).toBe('hidden');
+    expect(result.getByTestId('composer-input')).toBe(input);
+    result.rerender(<Composer {...props} expanded />);
+    expect(flattenStyle(capsule.props.style)).toMatchObject({ flex: 1, minHeight: 0 });
+    expect(flattenStyle(capsule.props.style).overflow).toBeUndefined();
+    result.rerender(<Composer {...props} />);
+    expect(flattenStyle(capsule.props.style)).toMatchObject({ borderRadius: Radius.xl, overflow: 'hidden' });
+    expect(result.getByTestId('composer-input')).toBe(input);
+  });
+
   it('keeps disabled add and distinct stop/queued send actions in the shared attachment surface', () => {
     const onStop = jest.fn();
     const onSend = jest.fn();
