@@ -30,8 +30,10 @@ export type SessionUpdate =
   | { type: 'question_requested'; sessionKey: string; question: AgentQuestion }
   | { type: 'question_resolved'; sessionKey: string; questionId: string }
   | { type: 'history_reconciled'; sessionKey: string; history: SessionHistory }
-  | { type: 'run_started'; sessionKey: string; runId: string }
-  | { type: 'agent_message_chunk'; sessionKey: string; runId: string; text: string; textMode?: 'snapshot' | 'delta' }
+  | { type: 'run_started'; sessionKey: string; runId: string;
+      turnId?: string; inputMessageId?: string; inputMessageKey?: string }
+  | { type: 'agent_message_chunk'; sessionKey: string; runId: string; text: string; textMode?: 'snapshot' | 'delta'; timestampMs?: number;
+      turnId?: string; inputMessageId?: string; inputMessageKey?: string }
   | { type: 'agent_thought_chunk'; sessionKey: string; runId: string; text: string }
   | {
       type: 'tool_call';
@@ -39,15 +41,23 @@ export type SessionUpdate =
       runId: string;
       toolCallId: string;
       title: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       kind?: string;
       rawInput?: unknown;
+      /** Omission retains the legacy live-start event; unknown does not prove execution. */
+      status?: 'running' | 'success' | 'error' | 'unknown';
     }
   | {
       type: 'tool_call_update';
       sessionKey: string;
       runId: string;
       toolCallId: string;
-      status: 'running' | 'success' | 'error';
+      status: 'running' | 'success' | 'error' | 'unknown';
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       rawOutput?: unknown;
     }
   | {
@@ -108,6 +118,8 @@ export interface AgentAdapter {
   /** Optional negotiated, read-only activity for at most 32 visible sessions. */
   readSessionActivity?(keys: readonly string[]): Promise<SessionActivity[]>;
   loadSession(key: string, options?: { limit?: number; cursor?: string }): Promise<SessionHistory>;
+  /** Optional synchronous local validation; never sends, probes or authorizes retry. */
+  validatePrompt?(key: string, input: PromptInput): void;
   prompt(key: string, input: PromptInput): Promise<{ runId: string }>;
   /** Read-only receipt lookup. Recorded proves durable Bridge receipt, not native execution. */
   getPromptStatus?(key: string, idempotencyKey: string): Promise<PromptStatus>;

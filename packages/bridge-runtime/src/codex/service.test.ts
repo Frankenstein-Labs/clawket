@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, realpathSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createServer, type Socket } from 'node:net';
 import { execFileSync } from 'node:child_process';
 const mock = vi.hoisted(() => ({ instances: [] as any[], request: vi.fn(), respond: vi.fn(), refuse: vi.fn(), resumeSpeed: vi.fn() }));
 vi.mock('./resume-settings.js', () => ({ nativeResumeSpeed: (...args: any[]) => mock.resumeSpeed(...args) }));
@@ -30,7 +31,9 @@ vi.mock('./desktop-ipc.js', async importOriginal => {
 });
 import { CodexService } from './service.js';
 import { codexMessages } from './history.js';
+import { desktopTurns } from './desktop-state.js';
 import { DesktopIpcError } from './desktop-ipc.js';
+import { desktopTurns } from './desktop-state.js';
 import { permissionPatch } from './settings.js';
 // Use Node's standalone loader rather than Vitest's cross-workspace transform.
 function validateRows(rows: unknown[]) {
@@ -54,7 +57,7 @@ function response(cwd = project) {
   return { ...settings, cwd, thread: { id: threadId, cwd }, sandbox: settings.sandboxPolicy, reasoningEffort: settings.effort };
 }
 const request = (method: string, params: Record<string, unknown> = {}) => service.request({ type: 'req', id: randomUUID(), method, params }) as Promise<any>;
-const notify = (method: string, params: object) => mock.instances.at(-1).emit('notification', { method, params: { threadId, ...params } });
+const notify = (method: string, params: object, emittedAtMs?: unknown) => mock.instances.at(-1).emit('notification', { method, params: { threadId, ...params }, emittedAtMs });
 async function start() {
   const result = await request('chat.send', { sessionKey: key, text: 'hello', idempotencyKey: 'send-1' });
   await Promise.resolve(); notify('turn/started', { turn: { id: 'turn-1' } }); return result;
@@ -94,6 +97,451 @@ beforeEach(async () => {
 });
 afterEach(async () => { await service.stop(); rmSync(root, { recursive: true, force: true }); });
 describe('Codex owned sessions', () => {
+  it('publishes the original receipt-bound native input immediately and never promotes a guide', async () => {
+    const sent = await start();
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'a', delta: 'Before the tool.' });
+    notify('item/started', { turnId: 'turn-1', item: { id: 'main', type: 'userMessage', clientId: 'send-1', content: [] } });
+    expect(updates.filter(update => update.type === 'run_started')).toEqual([
+      expect.objectContaining({ runId: sent.runId }),
+      expect.objectContaining({ runId: sent.runId, turnId: 'turn-1', inputMessageId: 'main' }),
+    ]);
+    notify('item/started', { turnId: 'turn-1', item: { id: 'guide1', type: 'userMessage', content: [] } });
+    notify('item/completed', { turnId: 'turn-1', item: { id: 'guide2', type: 'userMessage', clientId: 'unknown-key', content: [] } });
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'b', delta: 'After the guide.' });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.activeRun).toMatchObject({ runId: sent.runId, turnId: 'turn-1', inputMessageId: 'main' });
+    expect(history.messages.filter((message: any) => ['main', 'guide1', 'guide2'].includes(message.id)))
+      .toEqual([expect.objectContaining({ id: 'main', turnId: 'turn-1', idempotencyKey: 'send-1' }),
+        expect.objectContaining({ id: 'guide1', turnId: 'turn-1' }), expect.objectContaining({ id: 'guide2', turnId: 'turn-1' })]);
+    expect(updates.at(-1)).toMatchObject({ type: 'agent_message_chunk', turnId: 'turn-1', inputMessageId: 'main' });
+    expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+  });
+
+  describe('0.160 lazy first thread permissions', () => {
+    const refused = 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.';
+    const owned = () => (service as any).records[0];
+    const metadata = () => ({ thread: { id: threadId, cwd: project, status: { type: 'idle' } } });
+    const prepare = async () => {
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation(async (method, params) => {
+        if (method === 'thread/resume') throw new Error('Unmaterialized native thread');
+        if (method === 'thread/read') return metadata();
+        const result = await original(method, params);
+        return method === 'thread/start' ? { ...result, thread: { ...result.thread, status: { type: 'idle' } } } : result;
+      });
+      await request('models.list', { sessionKey: key });
+    };
+    const replaceRead = (read: () => any | Promise<any>) => {
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/read' ? read() : original(method, params));
+    };
+    const input = () => request('chat.send', { sessionKey: key, text: 'first input', idempotencyKey: 'first' });
+    const notSent = () => {
+      expect(owned().keys).toEqual({}); expect((service as any).runs.size).toBe(0);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(0);
+    };
+    it('selects fresh Read-only without resuming an unmaterialized thread and binds it to the first turn', async () => {
+      await prepare();
+      await expect(request('models.permissions', { sessionKey: key, mode: 'read-only' })).resolves.toMatchObject({ permissions: { mode: 'read-only', requiresConfirmation: false } });
+      await input();
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/resume')).toHaveLength(0);
+      expect(mock.request).toHaveBeenCalledWith('thread/read', { threadId, includeTurns: false });
+      const params = mock.request.mock.calls.find(([method]) => method === 'turn/start')![1];
+      expect(params).toMatchObject({ permissions: ':read-only', approvalPolicy: 'on-request', approvalsReviewer: 'user', clientUserMessageId: 'first' });
+      expect(params).not.toHaveProperty('sandboxPolicy');
+    });
+    it.each(['workspace', 'full-access'] as const)('binds the confirmed %s named profile to the first turn', async mode => {
+      await prepare(); await request('models.permissions', { sessionKey: key, mode }); await input();
+      expect(mock.request.mock.calls.find(([method]) => method === 'turn/start')![1]).toMatchObject({
+        permissions: mode === 'workspace' ? ':workspace' : ':danger-full-access', approvalPolicy: mode === 'workspace' ? 'on-request' : 'never', approvalsReviewer: 'user',
+      });
+    });
+    it('retains a native-confirmed custom named profile and supported granular review policy', async () => {
+      await prepare();
+      const policy = { granular: { mcp_elicitations: true, rules: false, sandbox_approval: true } };
+      await (service as any).desktop.handler.request('thread-follower-update-thread-settings', {
+        conversationId: threadId, threadSettings: { permissions: ':managed-team', approvalPolicy: policy, approvalsReviewer: 'auto_review' },
+      });
+      await input();
+      const params = mock.request.mock.calls.find(([method]) => method === 'turn/start')![1];
+      expect(params).toMatchObject({ permissions: ':managed-team', approvalPolicy: policy, approvalsReviewer: 'auto_review' });
+      expect(params).not.toHaveProperty('sandboxPolicy');
+    });
+    it.each(['foreign-id', 'foreign-cwd', 'active', 'notLoaded', 'missing-status', 'missing-thread'])('rejects unsafe fresh metadata before receipt: %s', async shape => {
+      await prepare(); replaceRead(() => {
+        const result: any = metadata();
+        if (shape === 'foreign-id') result.thread.id = randomUUID();
+        if (shape === 'foreign-cwd') result.thread.cwd = root;
+        if (shape === 'active' || shape === 'notLoaded') result.thread.status.type = shape;
+        if (shape === 'missing-status') delete result.thread.status;
+        if (shape === 'missing-thread') delete result.thread;
+        return result;
+      });
+      await expect(input()).rejects.toThrow(refused); notSent();
+    });
+    it.each(['replaced-rpc', 'replaced-record', 'changed-id', 'changed-cwd', 'changed-record-id', 'active-run', 'same-value-notification'])('retires a pending fresh read on context change: %s', async change => {
+      await prepare(); replaceRead(() => {
+        if (change === 'replaced-rpc') (service as any).rpc = { nativeVersion: '0.160.0', stop: async () => {} };
+        if (change === 'replaced-record') (service as any).records[0] = { ...owned() };
+        if (change === 'changed-id') owned().threadId = randomUUID();
+        if (change === 'changed-cwd') owned().cwd = root;
+        if (change === 'changed-record-id') { const previous = owned().id; owned().id = randomUUID();
+          (service as any).loaded.add(owned().id); (service as any).effectiveSettings.set(owned().id, (service as any).effectiveSettings.get(previous)); }
+        if (change === 'active-run') (service as any).runs.set(key, { id: 'other-run' });
+        if (change === 'same-value-notification') notify('thread/settings/updated', { threadSettings: { ...settings } });
+        return metadata();
+      });
+      await expect(input()).rejects.toThrow(refused);
+      expect(owned().keys).toEqual({}); expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(0);
+    });
+    it.each(['absent-profile', 'invalid-profile', 'future-sandbox', 'future-reviewer', 'future-policy', 'missing-granular-field', 'future-granular-field', 'invalid-granular-field'])('never dispatches an unknown permission projection: %s', async shape => {
+      await prepare();
+      const saved = (service as any).effectiveSettings.get(key);
+      (service as any).effectiveSettings.set(key, { ...saved,
+        ...(shape === 'absent-profile' ? { activePermissionProfile: null } : {}),
+        ...(shape === 'invalid-profile' ? { activePermissionProfile: { id: ' '.repeat(3) } } : {}),
+        ...(shape === 'future-sandbox' ? { sandboxPolicy: { type: 'futureSandbox' } } : {}),
+        ...(shape === 'future-reviewer' ? { approvalsReviewer: 'future-reviewer' } : {}),
+        ...(shape === 'future-policy' ? { approvalPolicy: 'future-policy' } : {}),
+        ...(shape === 'missing-granular-field' ? { approvalPolicy: { granular: { mcp_elicitations: true, rules: false } } } : {}),
+        ...(shape === 'future-granular-field' ? { approvalPolicy: { granular: { mcp_elicitations: true, rules: false, sandbox_approval: true, future: true } } } : {}),
+        ...(shape === 'invalid-granular-field' ? { approvalPolicy: { granular: { mcp_elicitations: true, rules: false, sandbox_approval: 'yes' } } } : {}),
+      });
+      await expect(input()).rejects.toThrow(refused); notSent();
+    });
+    it('uses the warm configured probe after the first actual dispatch and never retries it as fresh', async () => {
+      await prepare(); await input();
+      notify('turn/completed', { turn: { id: 'turn-1', status: 'completed', items: [] } });
+      await expect(request('chat.send', { sessionKey: key, text: 'next input', idempotencyKey: 'next' })).rejects.toThrow(refused);
+      expect(mock.request).toHaveBeenCalledWith('thread/resume', { threadId, excludeTurns: true });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect(Object.keys(owned().keys)).toEqual(['first']);
+    });
+    it('does not derive fresh eligibility from an old empty index when actual recreation fails', async () => {
+      await prepare(); await service.stop();
+      service = new CodexService({ project, directory: join(root, 'state') });
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      // Empty persisted threads are explicitly recreated by the existing path;
+      // only that successful creation, never the old ID, grants fresh eligibility.
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/start' ? Promise.reject(new Error('start unavailable')) : original(method, params));
+      await expect(input()).rejects.toThrow('start unavailable'); notSent();
+    });
+    it('grants fresh eligibility only after the existing cold-empty path actually starts a new native thread', async () => {
+      await prepare(); const oldNativeId = threadId; await service.stop();
+      service = new CodexService({ project, directory: join(root, 'state') }); mock.instances.at(-1).nativeVersion = '0.160.0';
+      threadId = randomUUID(); mock.request.mockClear();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' }); await input();
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(1);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/resume')).toHaveLength(0);
+      expect(mock.request.mock.calls.find(([method]) => method === 'turn/start')![1]).toMatchObject({ threadId, permissions: ':read-only' });
+      expect(threadId).not.toBe(oldNativeId);
+    });
+    it('never reuses fresh admission after an uncertain first dispatch', async () => {
+      await prepare();
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'turn/start' ? Promise.reject(new Error('Unknown acknowledgement')) : original(method, params));
+      const accepted = await input(); await Promise.resolve();
+      expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'first' })).toMatchObject({ status: 'recorded', runId: accepted.runId });
+      await expect(request('chat.send', { sessionKey: key, text: 'later input', idempotencyKey: 'later' })).rejects.toThrow('busy');
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(1);
+    });
+    it('rejects a complete settings ACK followed by native close before allocating a turn receipt', async () => {
+      await prepare();
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation(async (method, params) => {
+        const result = await original(method, params);
+        if (method === 'thread/settings/update') mock.instances.at(-1).emit('closed');
+        return result;
+      });
+      await expect((service as any).desktop.handler.request('thread-follower-start-turn', {
+        conversationId: threadId, turnStart: { request: { threadId, input: [{ type: 'text', text: 'first input' }],
+          permissions: ':read-only', approvalPolicy: 'on-request', approvalsReviewer: 'user', clientUserMessageId: 'first' } },
+      })).rejects.toThrow(refused);
+      notSent(); expect((service as any).loaded.size).toBe(0);
+    });
+    it('keeps the pre-0.160 first-turn path unchanged', async () => {
+      await start();
+      const params = mock.request.mock.calls.find(([method]) => method === 'turn/start')![1];
+      expect(params).not.toHaveProperty('permissions'); expect(params).not.toHaveProperty('approvalPolicy');
+    });
+  });
+  describe('0.160 configured permission confirmation', () => {
+    const restored = 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.';
+    const permissionState = (mode: 'workspace' | 'read-only' | 'full-access') => ({
+      ...permissionPatch(mode, project), activePermissionProfile: {
+        id: mode === 'full-access' ? ':danger-full-access' : mode === 'read-only' ? ':read-only' : ':workspace', extends: null,
+      },
+    });
+    // These resume responses model saved future configuration, not running-turn execution.
+    const configuredView = (state: object) => ({ ...response(project), ...state, thread: { id: threadId, cwd: project, status: { type: 'idle' } },
+      sandbox: (state as any).sandboxPolicy ?? settings.sandboxPolicy });
+    const overrideConfigured = (read: () => any | Promise<any>) => {
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/resume' && params.excludeTurns === true && !params.cwd
+        ? read() : original(method, params));
+    };
+    const prepare = async () => {
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation(async (method, params) => {
+        const value = await original(method, params);
+        return method === 'thread/start' || method === 'thread/resume'
+          ? { ...value, thread: { ...value.thread, status: { type: 'idle' } } } : value;
+      });
+      // This suite exercises already-materialized owned threads. An index entry
+      // is never evidence of this process having just created a native thread.
+      await service.stop();
+      const record = { ...JSON.parse(readFileSync(join(root, 'state', 'sessions.json'), 'utf8')).sessions[0], threadId, activity: 1 };
+      writeFileSync(join(root, 'state', 'sessions.json'), JSON.stringify({ project, sessions: [record] }));
+      service = new CodexService({ project, directory: join(root, 'state') });
+      updates = []; service.on('update', u => updates.push(u)); mock.instances.at(-1).nativeVersion = '0.160.0';
+      mock.resumeSpeed.mockResolvedValue({ kind: 'native', serviceTier: null,
+        permissions: { resume: { approvalPolicy: 'on-request', approvalsReviewer: 'user', permissions: ':workspace' }, expected: { ...permissionPatch('workspace', project), permissions: ':workspace' } } });
+      await request('models.list', { sessionKey: key });
+    };
+    it('does not confirm a Read-only ACK when the independent configured profile remains Workspace', async () => {
+      await prepare();
+      overrideConfigured(() => configuredView(permissionState('workspace')));
+      await expect(request('models.permissions', { sessionKey: key, mode: 'read-only' })).rejects.toThrow(restored);
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect((await request('models.list', { sessionKey: key })).permissions).toMatchObject({ mode: 'read-only', requiresConfirmation: true });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('rejects first-send permission drift before allocating a receipt or dispatching input', async () => {
+      await prepare();
+      expect((await request('models.permissions', { sessionKey: key, mode: 'read-only' })).permissions)
+        .toMatchObject({ mode: 'read-only', requiresConfirmation: false });
+      overrideConfigured(() => configuredView(permissionState('workspace')));
+      await expect(request('chat.send', { sessionKey: key, text: 'first input', idempotencyKey: 'first-read-only' })).rejects.toThrow(restored);
+      expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'first-read-only' })).toEqual({ status: 'unknown' });
+      expect((service as any).records[0].keys).toEqual({});
+      expect((service as any).runs.size).toBe(0);
+      expect(updates.some(update => update.type === 'run_started')).toBe(false);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+      // Repair is explicit; the failed input is never automatically replayed.
+      await request('models.permissions', { sessionKey: key, mode: 'workspace' });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+      await request('chat.send', { sessionKey: key, text: 'explicit new input', idempotencyKey: 'explicit-workspace' });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+    });
+    it('allows a matching future Read-only configuration on the same already-owned writer', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      settings = { ...settings, summary: 'concise', personality: 'pragmatic' };
+      notify('thread/settings/updated', { threadSettings: settings });
+      const saved = (service as any).effectiveSettings.get(key);
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('read-only'));
+        delete configured.summary; delete configured.personality;
+        return configured;
+      });
+      mock.request.mockClear();
+      await request('chat.send', { sessionKey: key, text: 'read-only input', idempotencyKey: 'safe-read-only' });
+      expect(mock.request).toHaveBeenCalledWith('thread/resume', { threadId, excludeTurns: true });
+      expect(mock.request.mock.calls.find(([method]) => method === 'thread/resume')?.[1]).not.toHaveProperty('permissions');
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(0);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+      expect((service as any).effectiveSettings.get(key)).toBe(saved);
+      expect(saved).toMatchObject({ summary: 'concise', personality: 'pragmatic' });
+    });
+    it.each(['serviceTier', 'reasoningEffort', 'collaborationMode', 'all-optional'])('confirms permissions independently of omitted non-permission resume metadata: %s', async field => {
+      await prepare();
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('read-only'));
+        for (const name of field === 'all-optional' ? ['serviceTier', 'reasoningEffort', 'collaborationMode'] : [field]) delete configured[name];
+        return configured;
+      });
+      await expect(request('models.permissions', { sessionKey: key, mode: 'read-only' })).resolves.toMatchObject({
+        permissions: { mode: 'read-only', requiresConfirmation: false },
+      });
+      const saved = (service as any).effectiveSettings.get(key);
+      await request('chat.send', { sessionKey: key, text: 'explicit readonly input', idempotencyKey: 'optional-metadata' });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect((service as any).effectiveSettings.get(key)).toBe(saved);
+      expect(saved).toMatchObject({ model: 'native-model', serviceTier: null, effort: null, collaborationMode: { mode: 'default' } });
+    });
+    it('keeps full native ACK confirmation for mixed Desktop permission and model writes', async () => {
+      await prepare();
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('read-only'));
+        for (const field of ['model', 'modelProvider', 'reasoningEffort', 'serviceTier', 'collaborationMode']) delete configured[field];
+        return configured;
+      });
+      await expect((service as any).desktopRequest('thread-follower-update-thread-settings', { conversationId: threadId,
+        threadSettings: { permissions: ':read-only', model: 'new-native-model', effort: 'high' } })).resolves.toMatchObject({ applied: true });
+      expect((service as any).effectiveSettings.get(key)).toMatchObject({ model: 'new-native-model', effort: 'high', activePermissionProfile: { id: ':read-only' } });
+      expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it.each(['missing-policy', 'empty-policy', 'array-policy', 'null-reviewer', 'array-reviewer', 'null-sandbox',
+      'array-sandbox', 'empty-sandbox-type', 'invalid-roots', 'array-profile'])('rejects invalid permission evidence before receipt and reports only its shape: %s', async field => {
+      await prepare();
+      overrideConfigured(() => {
+        const configured = configuredView(permissionState('workspace'));
+        if (field === 'missing-policy') delete configured.approvalPolicy;
+        if (field === 'empty-policy') configured.approvalPolicy = '';
+        if (field === 'array-policy') configured.approvalPolicy = [];
+        if (field === 'null-reviewer') configured.approvalsReviewer = null;
+        if (field === 'array-reviewer') configured.approvalsReviewer = [];
+        if (field === 'null-sandbox') configured.sandbox = null;
+        if (field === 'array-sandbox') configured.sandbox = [];
+        if (field === 'empty-sandbox-type') configured.sandbox = { type: '' };
+        if (field === 'invalid-roots') configured.sandbox = { ...configured.sandbox, writableRoots: [123] };
+        if (field === 'array-profile') configured.activePermissionProfile = [];
+        return configured;
+      });
+      const diagnostics: any[] = []; service.on('permissionDiagnostic', value => diagnostics.push(value));
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: field })).rejects.toThrow(restored);
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]).toMatchObject({ failureCategory: 'response_invalid', observedPermissionMode: 'unknown',
+        sameThreadId: true, sameProjectCwd: true, idleThreadReported: true });
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect((service as any).runs.size).toBe(0);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('keeps native identifiers, paths, profiles, model values and errors out of permission diagnostics', async () => {
+      await prepare();
+      const privateThreadId = randomUUID(), privateProfile = 'private-profile-name', privateModel = 'private-model-name';
+      const privateCwd = join(root, 'private-path'), privateError = 'private-native-error';
+      overrideConfigured(() => ({ ...configuredView(permissionState('workspace')), cwd: privateCwd, model: privateModel,
+        error: privateError, activePermissionProfile: { id: privateProfile, extends: 'private-parent-profile' },
+        thread: { id: privateThreadId, cwd: privateCwd, status: { type: 'idle' } } }));
+      const diagnostics: any[] = []; service.on('permissionDiagnostic', value => diagnostics.push(value));
+      await expect(request('chat.send', { sessionKey: key, text: 'private-user-input', idempotencyKey: 'private-client-key' })).rejects.toThrow(restored);
+      expect(diagnostics).toEqual([{ failureCategory: 'response_invalid', expectedPermissionMode: 'workspace', observedPermissionMode: 'unknown',
+        sameThreadId: false, sameProjectCwd: false, idleThreadReported: true,
+        responseFieldTypes: { cwd: 'string', approvalPolicy: 'string', approvalsReviewer: 'string', sandbox: 'object', activePermissionProfile: 'object',
+          model: 'string', modelProvider: 'string', reasoningEffort: 'null', serviceTier: 'null', collaborationMode: 'object', thread: 'object' },
+        threadFieldTypes: { id: 'string', cwd: 'string', status: 'object' } }]);
+      const serialized = JSON.stringify(diagnostics);
+      for (const secret of [threadId, key, project, privateThreadId, privateProfile, privateModel, privateCwd, privateError,
+        'private-parent-profile', 'private-user-input', 'private-client-key']) expect(serialized).not.toContain(secret);
+      expect((service as any).records[0].keys).toEqual({});
+    });
+    it('requires confirmation after a passive native permission change instead of silently widening a send', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      settings = { ...settings, ...permissionState('workspace') };
+      notify('thread/settings/updated', { threadSettings: settings });
+      expect((await request('models.list', { sessionKey: key })).permissions).toMatchObject({ mode: 'workspace', requiresConfirmation: true });
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'passive-change' })).rejects.toThrow(restored);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('does not authorize unrelated permission widening during a partial approval-policy write', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      const original = mock.request.getMockImplementation()!;
+      mock.request.mockImplementation((method, params) => method === 'thread/settings/update'
+        ? original(method, { ...params, permissions: ':workspace' }) : original(method, params));
+      await expect((service as any).desktopRequest('thread-follower-update-thread-settings', { conversationId: threadId,
+        threadSettings: { approvalPolicy: 'never' } })).rejects.toThrow(restored);
+      expect((service as any).records[0].permissionsUnconfirmed).toBe(true);
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'partial-permission' })).rejects.toThrow(restored);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('lets an explicit Desktop permission selection repair the same owned writer without replaying input', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      settings = { ...settings, ...permissionState('workspace') };
+      notify('thread/settings/updated', { threadSettings: settings });
+      expect((service as any).records[0].permissionsUnconfirmed).toBe(true);
+      await (service as any).desktopRequest('thread-follower-update-thread-settings', { conversationId: threadId,
+        threadSettings: { permissions: ':workspace', approvalPolicy: 'on-request', approvalsReviewer: 'user' } });
+      expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it.each(['profile', 'thread', 'cwd', 'sandbox', 'reviewer', 'invalid-profile', 'active', 'status'])('fails closed on an unproven configured readback: %s', async field => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      overrideConfigured(() => {
+        const value = configuredView(permissionState('read-only'));
+        if (field === 'profile') delete value.activePermissionProfile;
+        if (field === 'thread') value.thread = { ...value.thread, id: randomUUID() };
+        if (field === 'cwd') value.cwd = join(root, 'outside');
+        if (field === 'sandbox') delete value.sandbox;
+        if (field === 'reviewer') delete value.approvalsReviewer;
+        if (field === 'invalid-profile') value.activePermissionProfile = { id: ':future-permission' };
+        if (field === 'active') value.thread.status = { type: 'active' };
+        if (field === 'status') delete (value.thread as any).status;
+        return value;
+      });
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: `invalid-${field}` })).rejects.toThrow(restored);
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('never treats a failed metadata confirmation as uncertain prompt dispatch', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      overrideConfigured(() => Promise.reject(Object.assign(new Error('private metadata timeout'), { outcome: 'uncertain' })));
+      await expect(request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'metadata-timeout' })).rejects.toThrow(restored);
+      expect((service as any).records[0].keys).toEqual({});
+      expect((service as any).runs.size).toBe(0);
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('rejects a late configured snapshot after the original owned AppServer has closed', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      let resolve!: (value: any) => void;
+      overrideConfigured(() => new Promise(done => { resolve = done; }));
+      const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'retired-owner' });
+      await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+      mock.instances.at(-1).emit('closed');
+      resolve(configuredView(permissionState('read-only')));
+      await expect(pending).rejects.toThrow(restored);
+      expect((service as any).loaded.size).toBe(0);
+      expect((service as any).records[0].keys).toEqual({});
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('does not overwrite a newer native permission notification with an older metadata response', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      let resolve!: (value: any) => void;
+      overrideConfigured(() => new Promise(done => { resolve = done; }));
+      const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'late-snapshot' });
+      await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+      settings = { ...settings, ...permissionState('workspace') };
+      notify('thread/settings/updated', { threadSettings: settings });
+      resolve(configuredView(permissionState('read-only')));
+      await expect(pending).rejects.toThrow(restored);
+      expect((service as any).effectiveSettings.get(key).activePermissionProfile.id).toBe(':workspace');
+      expect((service as any).records[0]).toMatchObject({ permissionsUnconfirmed: true, keys: {} });
+      expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+    });
+    it('does not mark the replacement RPC generation unconfirmed from a late old readback', async () => {
+      await prepare();
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      let resolve!: (value: any) => void;
+      overrideConfigured(() => new Promise(done => { resolve = done; }));
+      const originalRpc = (service as any).rpc;
+      const pending = request('chat.send', { sessionKey: key, text: 'blocked input', idempotencyKey: 'replaced-owner' });
+      await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+      (service as any).rpc = { nativeVersion: '0.160.0' };
+      try {
+        resolve(configuredView(permissionState('read-only')));
+        await expect(pending).rejects.toThrow(restored);
+        expect((service as any).records[0].permissionsUnconfirmed).toBeUndefined();
+        expect((service as any).records[0].keys).toEqual({});
+        expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+      } finally { (service as any).rpc = originalRpc; }
+    });
+    it('does not add a warm-resume probe to legacy or imported ownership paths', async () => {
+      await request('models.list', { sessionKey: key });
+      await request('models.permissions', { sessionKey: key, mode: 'read-only' });
+      mock.request.mockClear();
+      await request('chat.send', { sessionKey: key, text: 'legacy input', idempotencyKey: 'legacy-read-only' });
+      expect(mock.request).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+      notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      mock.instances.at(-1).nativeVersion = '0.160.0';
+      (service as any).records[0].native = true;
+      mock.request.mockClear();
+      await request('chat.send', { sessionKey: key, text: 'imported owned input', idempotencyKey: 'imported-owned' });
+      expect(mock.request).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+    });
+  });
   it.each([null, 42, false, { name: 'private-native-value' }, ['private-native-value']])(
     'keeps the complete catalog when a native model is not a string: %j', async model => {
       const knownId = randomUUID();
@@ -175,6 +623,65 @@ describe('Codex owned sessions', () => {
     expect(await request('sessions.sync')).toMatchObject({ kind: 'full', total: 1 });
     await expect(request('chat.history', { sessionKey: `native:${threadId}` })).rejects.toThrow('Session unavailable');
   });
+  it('delivers the same final completion clock live and after native history reload', async () => {
+    await start();
+    const turn = { id: 'turn-1', status: 'completed', startedAt: 1727996280, completedAt: 1727998140, items: [
+      { id: 'user', type: 'userMessage', content: [{ type: 'text', text: 'hello' }] },
+      { id: 'answer', type: 'agentMessage', phase: 'final_answer', text: 'Done' },
+    ] };
+    notify('item/completed', { turnId: turn.id, item: turn.items[1] });
+    notify('turn/completed', { turn });
+    const live = updates.find(update => update.type === 'run_finished');
+    expect(live).toMatchObject({ stopReason: 'end_turn', message: { content: 'Done', timestampMs: turn.completedAt * 1000 } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/turns/list' ? Promise.resolve({ data: [turn] })
+      : method === 'thread/items/list' ? Promise.resolve({ data: [...turn.items].reverse().map(item => ({ turnId: turn.id, item })) }) : original(method, params));
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.messages.find((message: any) => message.id === 'answer').timestampMs).toBe(live.message.timestampMs);
+    expect(history.messages.find((message: any) => message.id === 'user').timestampMs).toBe(turn.startedAt * 1000);
+    expect(history.hasActiveRun).toBe(false);
+  });
+
+  it.each([undefined, null, NaN, Infinity, -1, 9, 10.5])('omits an unproven native completion clock from the successful live final: %j', async completedAt => {
+    await start();
+    notify('item/completed', { turnId: 'turn-1', item: { id: 'answer', type: 'agentMessage', text: 'Done' } });
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'completed', startedAt: 10, completedAt } });
+    expect(updates.find(update => update.type === 'run_finished').message).not.toHaveProperty('timestampMs');
+  });
+  it.each(['commentary', 'future-phase'])('does not project %s text as a final reply clock from a terminal notification', async phase => {
+    await start();
+    const item = { id: 'answer', type: 'agentMessage', phase, text: 'Progress' };
+    notify('item/completed', { turnId: 'turn-1', item });
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'completed', startedAt: 10, completedAt: 1870, items: [item] } });
+    expect(updates.find(update => update.type === 'run_finished').message).not.toHaveProperty('timestampMs');
+  });
+  it.each(['commentary', 'future-phase'])('does not borrow a prior final-answer clock for a later %s live body', async phase => {
+    await start();
+    const first = { id: 'final', type: 'agentMessage', phase: 'final_answer', text: 'Done' };
+    const later = { id: 'later', type: 'agentMessage', phase, text: 'Later progress' };
+    notify('item/completed', { turnId: 'turn-1', item: first });
+    notify('item/completed', { turnId: 'turn-1', item: later });
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'completed', startedAt: 10, completedAt: 1870, items: [first, later] } });
+    const live = updates.find(update => update.type === 'run_finished');
+    expect(live.message.content).toBe('Later progress');
+    expect(live.message).not.toHaveProperty('timestampMs');
+  });
+  it('retimes the legacy final on the head page but preserves a preceding paragraph on an older partial page', async () => {
+    await start(); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/turns/list') return Promise.resolve({ data: [{ id: 'turn-1', status: 'completed', startedAt: 10, completedAt: 1870 }] });
+      if (method === 'thread/items/list') return Promise.resolve(params.cursor ? { data: [
+        { turnId: 'turn-1', item: { id: 'progress', type: 'agentMessage', text: 'Earlier paragraph' } },
+      ] } : { data: [{ turnId: 'turn-1', item: { id: 'final', type: 'agentMessage', text: 'Done' } }], nextCursor: 'older' });
+      return original(method, params);
+    });
+    const head = await request('chat.history', { sessionKey: key });
+    expect(head.messages[0]).toMatchObject({ id: 'final', timestampMs: 1870000 });
+    const older = await request('chat.history', { sessionKey: key, cursor: head.nextCursor });
+    expect(older.messages[0]).toMatchObject({ id: 'progress', timestampMs: 10000 });
+  });
+
   it('preserves a native failed-turn notice with the same identity in live delivery and reloaded history', async () => {
     await start();
     const turn = { id: 'turn-1', status: 'failed', startedAt: 10, completedAt: 12,
@@ -367,6 +874,44 @@ describe('Codex owned sessions', () => {
     await expect(request('chat.send', { sessionKey: '../foreign', text: 'x' })).rejects.toThrow('read-only');
     await expect(request('thread/start', { cwd: '/' })).rejects.toThrow('Unsupported');
   });
+  it('projects two native same-turn guides with their own item clocks through history', async () => {
+    await start();
+    const original = mock.request.getMockImplementation()!;
+    const user = (id: string, clientId?: string) => ({ id, type: 'userMessage', content: [{ type: 'text', text: 'Keep waiting' }], ...(clientId ? { clientId } : {}) });
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/items/list') return Promise.resolve({ data: [
+        { turnId: 'turn-1', startedAtMs: 220100, completedAtMs: 220100, item: user('guide-2') },
+        { turnId: 'turn-1', startedAtMs: 160100, completedAtMs: 160100, item: user('guide-1') },
+        { turnId: 'turn-1', startedAtMs: 100100, completedAtMs: 100100, item: user('main', 'send-1') },
+      ] });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: [{ id: 'turn-1', startedAt: 100, status: 'inProgress' }] });
+      return original(method, params);
+    });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.messages.map((message: any) => [message.id, message.timestampMs])).toEqual([
+      ['main', 100100], ['guide-1', 160100], ['guide-2', 220100],
+    ]);
+    expect(history.messages[0].idempotencyKey).toBe('send-1');
+    expect(history.messages[1].idempotencyKey).toBeUndefined();
+    expect(history.messages[2].idempotencyKey).toBeUndefined();
+  });
+
+  it.each([
+    [160100, 160200, 160100], [undefined, 160200, 160200], [160100, undefined, 160100],
+    [160100, 160099, 100000], ['160100', 160200, 100000], [160100, NaN, 100000],
+    [0, 160200, 100000], [8.64e15 + 1, undefined, 100000], [undefined, undefined, 100000],
+  ])('validates native user item timing pairs before history projection: %s / %s', async (startedAtMs, completedAtMs, expected) => {
+    await start();
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/items/list') return Promise.resolve({ data: [{ turnId: 'turn-1', startedAtMs, completedAtMs,
+        item: { id: 'guide', type: 'userMessage', content: [{ type: 'text', text: 'Keep waiting' }] } }] });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: [{ id: 'turn-1', startedAt: 100 }] });
+      return original(method, params);
+    });
+    expect((await request('chat.history', { sessionKey: key })).messages[0].timestampMs).toBe(expected);
+  });
+
   it('preserves older item-page timestamps using bounded metadata-only pages', async () => {
     await start(); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     const original = mock.request.getMockImplementation()!;
@@ -378,6 +923,78 @@ describe('Codex owned sessions', () => {
     const history = await request('chat.history', { sessionKey: key });
     expect(history.messages[0]).toMatchObject({ id: 'old-reply', timestampMs: 123000 });
     expect(mock.request).toHaveBeenCalledWith('thread/turns/list', expect.objectContaining({ itemsView: 'notLoaded', cursor: 'older-metadata' }));
+  });
+  it('retains Native per-item commentary clocks in item history rather than dating every paragraph at turn start', async () => {
+    await start(); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method, params) => {
+      if (method === 'thread/items/list') return { data: [
+        { turnId: 'turn-1', startedAtMs: 16000, completedAtMs: 17000, item: { type: 'agentMessage', id: 'third', phase: 'commentary', text: 'The second command started.' } },
+        { turnId: 'turn-1', startedAtMs: null, completedAtMs: 15000, item: { type: 'agentMessage', id: 'second', phase: 'commentary', text: 'Still waiting.' } },
+        { turnId: 'turn-1', startedAtMs: 13000, completedAtMs: 14000, item: { type: 'agentMessage', id: 'first', phase: 'commentary', text: 'Starting.' } },
+      ] };
+      if (method === 'thread/turns/list' && params.itemsView === 'notLoaded') return { data: [{ id: 'turn-1', startedAt: 10, completedAt: 18, status: 'completed' }] };
+      return original(method, params);
+    });
+    expect((await request('chat.history', { sessionKey: key })).messages.map((message: any) => [message.id, message.timestampMs]))
+      .toEqual([['first', 13000], ['second', 15000], ['third', 16000]]);
+  });
+  it.each([
+    [null, null], ['13000', null], [NaN, null], [Infinity, null], [-1, null], [0, null], [1e20, null], [13000, 12000],
+  ])('keeps legacy turn timing for missing or invalid Native item clocks %j/%j', async (startedAtMs, completedAtMs) => {
+    await start(); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method, params) => {
+      if (method === 'thread/items/list') return { data: [{ turnId: 'turn-1', startedAtMs, completedAtMs,
+        item: { type: 'agentMessage', id: 'legacy', phase: 'commentary', text: 'Older runtime.' } }] };
+      if (method === 'thread/turns/list' && params.itemsView === 'notLoaded') return { data: [{ id: 'turn-1', startedAt: 10, status: 'inProgress' }] };
+      return original(method, params);
+    });
+    expect((await request('chat.history', { sessionKey: key })).messages[0]).toMatchObject({ id: 'legacy', timestampMs: 10000 });
+  });
+  it('retains each Native item first emission clock across later deltas and active-history recovery', async () => {
+    await start();
+    notify('item/started', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 13000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: 'Starting.' }, 14000);
+    expect(updates.at(-1)).toMatchObject({ type: 'agent_message_chunk', timestampMs: 13000 });
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: ' Still working.' }, 15000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 13000 });
+    notify('item/agentMessage/delta', { turnId: 'other-turn', itemId: 'first', delta: 'Wrong turn.' }, 99999);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 13000 });
+    notify('item/started', { turnId: 'turn-1', item: { id: 'exec', type: 'commandExecution', command: 'true', status: 'inProgress' } }, 16000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'second', delta: 'A later paragraph.' }, 19000);
+    expect(updates.at(-1)).toMatchObject({ type: 'agent_message_chunk', timestampMs: 19000 });
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.activeRun).toMatchObject({ messageTimestampMs: 19000 });
+    expect(history.messages.filter((message: any) => message.role === 'assistant').map((message: any) => message.timestampMs)).toEqual([13000, 19000]);
+    expect((service as any).runs.get(key).items.get('first')).not.toHaveProperty('timestampMs');
+  });
+  it('prefers the same Native item lifecycle start over a later notification emission in live and cold history', async () => {
+    await start();
+    notify('item/started', { turnId: 'turn-1', startedAtMs: 59000,
+      item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 61000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: 'A paragraph across the minute.' }, 62000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 59000 });
+    notify('item/started', { turnId: 'turn-1', startedAtMs: 63000,
+      item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 64000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: ' More.' }, 65000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 59000 });
+    notify('item/started', { turnId: 'other-turn', startedAtMs: 99999,
+      item: { type: 'agentMessage', id: 'first', text: '', phase: 'commentary' } }, 99999);
+    const implementation = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method: string, params: any) => method === 'thread/items/list'
+      ? { data: [{ turnId: 'turn-1', startedAtMs: 59000, completedAtMs: 66000,
+          item: { type: 'agentMessage', id: 'first', text: 'A paragraph across the minute. More.', phase: 'commentary' } }] }
+      : implementation(method, params));
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.activeRun.messageTimestampMs).toBe(59000);
+    expect(history.messages.find((message: any) => message.id === 'first').timestampMs).toBe(59000);
+  });
+  it.each([undefined, null, 0, -1, '123', Infinity, NaN, 1e20])('uses first emission when Native lifecycle start is missing or invalid: %j', async startedAtMs => {
+    await start();
+    notify('item/started', { turnId: 'turn-1', startedAtMs, item: { type: 'agentMessage', id: 'first', text: '' } }, 13000);
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'first', delta: 'A paragraph.' }, 14000);
+    expect(updates.at(-1)).toMatchObject({ timestampMs: 13000 });
   });
   it('does not enable unsafe approvals and persists before turn submission', async () => {
     mock.request.mockImplementationOnce(async () => response());
@@ -399,6 +1016,61 @@ describe('Codex owned sessions', () => {
     notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
     expect(updates.filter(u => u.type === 'run_finished')).toHaveLength(1);
   });
+  it.each(['webSearch', 'imageView'].flatMap(type => ['success', 'error'].map(status => [type, status])))('keeps status-less native %s running until completion and retains its %s result after reload', async (type, status) => {
+    await start();
+    // Both native item schemas omit status, including on item/started.
+    const started = Object.freeze({ id: 'search', type, ...(type === 'webSearch'
+      ? { query: '', action: null, results: null } : { path: 'file:///image.png' }) });
+    notify('item/started', { turnId: 'turn-1', item: started });
+    expect(updates.filter(u => u.type.startsWith('tool_call'))).toEqual([
+      expect.objectContaining({ type: 'tool_call', toolCallId: 'search', title: type === 'webSearch' ? 'web_search' : 'view_image' }),
+    ]);
+    const row = (history: any) => history.messages.find((message: any) => message.id === 'toolcall_search');
+    const active = await request('chat.history', { sessionKey: key });
+    expect(active.hasActiveRun).toBe(true);
+    expect(row(active)).toMatchObject({ tool: { callId: 'search', status: 'running' } });
+    expect(started).not.toHaveProperty('status');
+    const desktop = (service as any).desktop;
+    desktop.broadcast = vi.fn();
+    const followerRow = () => {
+      const state = desktop.broadcast.mock.calls.at(-1)[1].change.conversationState;
+      return row({ messages: codexMessages([state.turnHistory.history.entitiesByKey['turn:turn-1']]) });
+    };
+    desktop.emit('follow', threadId, true, 'desktop-tool-reader');
+    await vi.waitFor(() => expect(desktop.broadcast).toHaveBeenCalled());
+    expect(followerRow()).toMatchObject({ tool: { callId: 'search', status: 'running' } });
+    const completed = Object.freeze({ ...started, ...(type === 'webSearch' ? { query: 'release notes', action: { type: 'search', query: 'release notes' },
+      results: [{ title: 'Release notes', snippet: 'Native result', future_field: true }] } : {}), ...(status === 'error' ? { error: { message: 'Search unavailable' } } : {}) });
+    notify('item/completed', { turnId: 'turn-1', item: completed });
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual([
+      expect.objectContaining({ toolCallId: 'search', status }),
+    ]);
+    const completedRow = row(await request('chat.history', { sessionKey: key }));
+    expect(completedRow).toMatchObject({ tool: { callId: 'search', status } });
+    if (type === 'webSearch') expect(completedRow.tool.output).toBe(JSON.stringify(completed.results));
+    expect(completed).not.toHaveProperty('status');
+    desktop.emit('follow', threadId, true, 'desktop-tool-reader');
+    await vi.waitFor(() => expect(followerRow()).toMatchObject({ id: completedRow.id, tool: completedRow.tool }));
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/items/list'
+      ? Promise.resolve({ data: [{ turnId: 'turn-1', item: completed }] }) : original(method, params));
+    const reloaded = await request('chat.history', { sessionKey: key });
+    expect(reloaded.hasActiveRun).toBe(false);
+    expect(row(reloaded)).toEqual(completedRow);
+  });
+  it.each(['webSearch', 'imageView'])('does not replace explicit future native %s completion state with success', async type => {
+    await start();
+    const item = Object.freeze({ id: 'future', type, status: 'future-native-state', query: '', action: { type: 'other' }, results: [{ title: 'Native result' }], path: 'file:///image.png' });
+    notify('item/started', { turnId: 'turn-1', item });
+    notify('item/completed', { turnId: 'turn-1', item });
+    expect(updates.filter(u => u.type.startsWith('tool_call')).map(u => u.status)).toEqual(['unknown', 'unknown']);
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.hasActiveRun).toBe(true);
+    expect(history.messages.at(-1).tool.status).toBe('unknown');
+    expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
+    expect(item.status).toBe('future-native-state');
+  });
   it('cancels the exact turn without claiming completion from its acknowledgement', async () => {
     const run = await start(); await request('chat.abort', { sessionKey: key, runId: run.runId });
     expect(mock.request).toHaveBeenCalledWith('turn/interrupt', { threadId, turnId: 'turn-1' });
@@ -411,6 +1083,29 @@ describe('Codex owned sessions', () => {
     await request('chat.steer', { sessionKey: key, runId: run.runId, text: 'do less' });
     expect(mock.request).toHaveBeenCalledWith('turn/steer', { threadId, expectedTurnId: 'turn-1', input: [{ type: 'text', text: 'do less' }] });
   });
+  it('withholds reset and delete from dispatch through cancellation until native confirms the original turn ended', async () => {
+    const original = mock.request.getMockImplementation()!;
+    let accept!: (value: any) => void;
+    mock.request.mockImplementation((method, params) => method === 'turn/start'
+      ? new Promise(resolve => { accept = resolve; }) : original(method, params));
+    const actions = async () => (await request('sessions.list')).find((row: any) => row.key === key).allowedActions;
+    expect(await actions()).toMatchObject({ reset: true, delete: true });
+    const run = await request('chat.send', { sessionKey: key, text: 'active', idempotencyKey: 'active-actions' });
+    const reportedActions = () => updates.filter(update => update.type === 'session_info_update' && update.session.key === key).at(-1)?.session.allowedActions;
+    expect(await actions()).toMatchObject({ reset: false, delete: false });
+    expect(reportedActions()).toMatchObject({ reset: false, delete: false });
+    await expect(request('sessions.reset', { sessionKey: key })).rejects.toThrow('Stop');
+    await expect(request('sessions.delete', { sessionKey: key })).rejects.toThrow('Stop');
+    accept({ turn: { id: 'turn-1' } }); await Promise.resolve();
+    notify('turn/started', { turn: { id: 'turn-1' } });
+    await request('chat.abort', { sessionKey: key, runId: run.runId });
+    expect(await actions()).toMatchObject({ reset: false, delete: false });
+    expect(reportedActions()).toMatchObject({ reset: false, delete: false });
+    notify('turn/completed', { turn: { id: 'turn-1', status: 'interrupted' } });
+    expect(await actions()).toMatchObject({ reset: true, delete: true });
+    expect(reportedActions()).toMatchObject({ reset: true, delete: true });
+  });
+
   it('rejects reset while work is running and preserves retry fingerprints after reset', async () => {
     const run = await start(); await expect(request('sessions.reset', { sessionKey: key })).rejects.toThrow('Stop');
     notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } }); await request('sessions.reset', { sessionKey: key });
@@ -622,10 +1317,422 @@ describe('structured user input', () => {
 describe('device project discovery and desktop routing', () => {
   async function device() {
     const { EventEmitter } = await import('node:events');
-    const desktop = Object.assign(new EventEmitter(), { ready: true, snapshots: new Map(), connect: vi.fn(async () => {}), follow: vi.fn(), stop: vi.fn(), broadcast: vi.fn(), request: vi.fn(async () => ({ result: { turn: { id: 'desktop-turn' } } })) });
+    const desktop = Object.assign(new EventEmitter(), { ready: true, snapshots: new Map(), connect: vi.fn(async () => {}), follow: vi.fn(), stop: vi.fn(), broadcast: vi.fn(), request: vi.fn(async (_method: string, _params?: object): Promise<any> => ({ result: { turn: { id: 'desktop-turn' } } })) });
     await service.stop(); service = new CodexService({ project, directory: join(root, 'device'), device: true, env: { CODEX_HOME: root }, desktop: desktop as any });
     return desktop;
   }
+  it('replays caught-up Desktop text and tools in native item order without replaying unchanged snapshots', async () => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list');
+    await request('chat.history', { sessionKey: `native:${threadId}` });
+    const items = [
+      { id: 'prompt', type: 'userMessage', content: [{ type: 'text', text: 'Inspect the project' }] },
+      { id: 'a', type: 'agentMessage', text: 'First.' },
+      { id: 'one', type: 'commandExecution', command: 'pwd', status: 'completed', exitCode: 0, aggregatedOutput: 'one' },
+      { id: 'b', type: 'agentMessage', text: 'Second.' },
+      { id: 'two', type: 'commandExecution', command: 'sleep 1', status: 'inProgress' },
+      { id: 'c', type: 'assistantMessage', message: 'Third.' },
+    ];
+    const snapshot = { fresh: true, state: { turns: [{ id: 'ordered-turn', status: 'inProgress', items }], requests: [] } };
+    const presentation = () => updates.filter(update => ['run_started', 'agent_message_chunk', 'tool_call', 'tool_call_update', 'run_finished'].includes(update.type));
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, snapshot);
+    expect(presentation()).toEqual([
+      expect.objectContaining({ type: 'run_started', runId: 'desktop:ordered-turn' }),
+      expect.objectContaining({ type: 'agent_message_chunk', text: 'First.', textMode: 'snapshot' }),
+      expect.objectContaining({ type: 'tool_call', toolCallId: 'one' }),
+      expect.objectContaining({ type: 'tool_call_update', toolCallId: 'one', status: 'success', rawOutput: 'one' }),
+      expect.objectContaining({ type: 'agent_message_chunk', text: 'First.\n\nSecond.', textMode: 'snapshot' }),
+      expect.objectContaining({ type: 'tool_call', toolCallId: 'two' }),
+      expect.objectContaining({ type: 'agent_message_chunk', text: 'First.\n\nSecond.\n\nThird.', textMode: 'snapshot' }),
+    ]);
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, structuredClone(snapshot));
+    expect(presentation()).toEqual([]);
+    const stale = structuredClone(snapshot);
+    stale.fresh = false;
+    stale.state.turns[0].items[5] = { id: 'c', type: 'assistantMessage', message: 'Stale text' };
+    desktop.emit('snapshot', threadId, stale);
+    expect(presentation()).toEqual([]);
+    const completed = { fresh: true, state: { turns: [{ id: 'ordered-turn', status: 'completed', items }], requests: [] } };
+    desktop.emit('snapshot', threadId, completed);
+    desktop.emit('snapshot', threadId, structuredClone(completed));
+    expect(presentation()).toEqual([expect.objectContaining({ type: 'run_finished', runId: 'desktop:ordered-turn', stopReason: 'end_turn' })]);
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'next-turn', status: 'inProgress', items: [{ id: 'next', type: 'agentMessage', text: 'New turn.' }] }], requests: [] } });
+    expect(presentation()).toEqual([
+      expect.objectContaining({ type: 'run_started', runId: 'desktop:next-turn' }),
+      expect.objectContaining({ type: 'agent_message_chunk', runId: 'desktop:next-turn', text: 'New turn.', textMode: 'snapshot' }),
+    ]);
+  });
+  it('updates the current Desktop tail without temporarily replaying earlier text or tool calls', async () => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list');
+    await request('chat.history', { sessionKey: `native:${threadId}` });
+    const items = [
+      { id: 'a', type: 'agentMessage', text: 'Before.' },
+      { id: 'one', type: 'commandExecution', command: 'pwd', status: 'inProgress' },
+      { id: 'b', type: 'agentMessage', text: 'After' },
+    ];
+    desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'growing-turn', status: 'inProgress', items }], requests: [] } });
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'growing-turn', status: 'inProgress', items: [
+      items[0], { ...items[1], status: 'completed', exitCode: 0, aggregatedOutput: 'done' }, { ...items[2], text: 'After the tool.' },
+    ] }], requests: [] } });
+    expect(updates.filter(update => ['agent_message_chunk', 'tool_call', 'tool_call_update'].includes(update.type))).toEqual([
+      expect.objectContaining({ type: 'tool_call_update', toolCallId: 'one', status: 'success', rawOutput: 'done' }),
+      expect.objectContaining({ type: 'agent_message_chunk', text: 'Before.\n\nAfter the tool.', textMode: 'snapshot' }),
+    ]);
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'growing-turn', status: 'inProgress', items: [
+      { ...items[0], text: 'Corrected before.' }, { ...items[1], status: 'completed', exitCode: 0, aggregatedOutput: 'done' }, { ...items[2], text: 'After the tool.' },
+    ] }], requests: [] } });
+    expect(updates.filter(update => ['agent_message_chunk', 'tool_call', 'tool_call_update'].includes(update.type))).toEqual([
+      expect.objectContaining({ type: 'agent_message_chunk', text: 'Corrected before.\n\nAfter the tool.', textMode: 'snapshot' }),
+    ]);
+  });
+  it.each(['completed', 'interrupted', 'failed'])('settles a coalesced Desktop %s turn before starting the next native turn', async status => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list');
+    await request('chat.history', { sessionKey: `native:${threadId}` });
+    const first = { id: 'first-turn', status: 'inProgress', items: [
+      { id: 'a', type: 'agentMessage', text: 'Before the tool.' },
+      { id: 'one', type: 'commandExecution', command: 'pwd', status: 'inProgress' },
+    ] };
+    desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [first], requests: [] } });
+    const completed = { ...first, status, items: [first.items[0], { ...first.items[1], status: 'completed', exitCode: 0, aggregatedOutput: 'done' },
+      { id: 'b', type: 'agentMessage', text: 'After the tool.' }] };
+    const second = { id: 'second-turn', status: 'inProgress', items: [
+      { id: 'next', type: 'agentMessage', text: 'Second turn.' },
+      { id: 'two', type: 'commandExecution', command: 'sleep 1', status: 'inProgress' },
+    ] };
+    const snapshot = { fresh: true, state: { turns: [completed, second], requests: [] } };
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, { ...snapshot, fresh: false });
+    expect(updates).toEqual([]);
+    desktop.emit('snapshot', threadId, snapshot);
+    const presentation = () => updates.filter(update => ['run_started', 'agent_message_chunk', 'tool_call', 'tool_call_update', 'run_finished'].includes(update.type));
+    expect(presentation()).toEqual([
+      expect.objectContaining({ type: 'tool_call_update', runId: 'desktop:first-turn', toolCallId: 'one', status: 'success' }),
+      expect.objectContaining({ type: 'agent_message_chunk', runId: 'desktop:first-turn', text: 'Before the tool.\n\nAfter the tool.', textMode: 'snapshot' }),
+      expect.objectContaining({ type: 'run_finished', runId: 'desktop:first-turn', stopReason: status === 'interrupted' ? 'cancelled' : status === 'failed' ? 'error' : 'end_turn' }),
+      expect.objectContaining({ type: 'run_started', runId: 'desktop:second-turn' }),
+      expect.objectContaining({ type: 'agent_message_chunk', runId: 'desktop:second-turn', text: 'Second turn.', textMode: 'snapshot' }),
+      expect.objectContaining({ type: 'tool_call', runId: 'desktop:second-turn', toolCallId: 'two' }),
+    ]);
+    expect((service as any).runs.get(`native:${threadId}`)).toMatchObject({ id: 'desktop:second-turn', turnId: 'second-turn', text: 'Second turn.' });
+    expect([...(service as any).runs.get(`native:${threadId}`).items.keys()]).toEqual(['next', 'two']);
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, structuredClone(snapshot));
+    expect(presentation()).toEqual([]);
+    await service.stop();
+    desktop.emit('snapshot', threadId, snapshot);
+    expect(presentation()).toEqual([]);
+    expect(desktop.request).not.toHaveBeenCalled();
+    expect(mock.request.mock.calls.some(([method]) => ['thread/resume', 'turn/start'].includes(method))).toBe(false);
+  });
+  it('preserves an unconfirmed Desktop turn instead of assigning a different active turn to its run', async () => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list');
+    await request('chat.history', { sessionKey: `native:${threadId}` });
+    const first = { id: 'unconfirmed-turn', status: 'inProgress', items: [{ id: 'a', type: 'agentMessage', text: 'Original turn.' }] };
+    desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [first], requests: [] } });
+    const run = (service as any).runs.get(`native:${threadId}`);
+    updates.length = 0;
+    desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [
+      { ...first, status: 'unknown' }, { id: 'different-turn', status: 'inProgress', items: [{ id: 'b', type: 'agentMessage', text: 'Different turn.' }] },
+    ], requests: [] } });
+    expect(updates).toEqual([expect.objectContaining({ type: 'error', code: 'unsupported' })]);
+    expect((service as any).runs.get(`native:${threadId}`)).toBe(run);
+    expect(run).toMatchObject({ id: 'desktop:unconfirmed-turn', turnId: 'unconfirmed-turn', text: 'Original turn.' });
+    expect([...run.items.keys()]).toEqual(['a']);
+    expect(desktop.request).not.toHaveBeenCalled();
+    expect(mock.request.mock.calls.some(([method]) => ['thread/resume', 'turn/start'].includes(method))).toBe(false);
+
+  });
+  it('does not index a native conversation when follow admission fails', async () => {
+    const desktop = await device(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list');
+    const save = vi.spyOn(service as any, 'save');
+    desktop.follow.mockImplementationOnce(() => { throw new Error('Too many active or unconfirmed desktop conversations'); });
+    await expect(request('chat.history', { sessionKey: `native:${threadId}` })).rejects.toThrow('unconfirmed');
+    expect(save).not.toHaveBeenCalled(); expect((service as any).records).toHaveLength(0);
+    await request('chat.history', { sessionKey: `native:${threadId}` });
+    expect((service as any).records).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(root, 'device', 'sessions.json'), 'utf8')).sessions).toHaveLength(1);
+  });
+  it('rolls back the in-memory native record when its index cannot be persisted', async () => {
+    await device(); const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list');
+    const save = vi.spyOn(service as any, 'save').mockImplementationOnce(() => { throw new Error('index unavailable'); });
+    await expect(request('chat.history', { sessionKey: `native:${threadId}` })).rejects.toThrow('index unavailable');
+    expect((service as any).records).toHaveLength(0); save.mockRestore();
+    await request('chat.history', { sessionKey: `native:${threadId}` }); expect((service as any).records).toHaveLength(1);
+  });
+  it('rejects a retired indexed chat before receipt at actual follow capacity and accepts only an explicit new send after capacity returns', async () => {
+    const { DesktopIpc } = await vi.importActual<typeof import('./desktop-ipc.js')>('./desktop-ipc.js');
+    const desktop = new DesktopIpc([]);
+    const receive = (frame: object) => (desktop as any).receive(frame);
+    const snapshot = (id: string, status: string) => receive({ type: 'broadcast', method: 'thread-stream-state-changed',
+      version: 11, sourceClientId: 'owner', params: { hostId: 'local', conversationId: id,
+        change: { type: 'snapshot', conversationState: { turns: [{ id: `turn:${id}`, status, items: [] }], requests: [] } } } });
+    const write = vi.fn(frame => { if (frame.method === 'thread-owner-discovery') queueMicrotask(() => receive({ type: 'response', requestId: frame.requestId, resultType: 'success', result: {} })); });
+    Object.assign(desktop, { socket: { destroyed: false, destroy: vi.fn() }, clientId: 'qa', write });
+    vi.spyOn(desktop, 'connect').mockResolvedValue(undefined);
+    const dispatch = vi.spyOn(desktop, 'request').mockImplementation(async method => method === 'thread-follower-start-turn'
+      ? { result: { turn: { id: 'sent-turn' } } } : { owner: true });
+    await service.stop(); service = new CodexService({ project, directory: join(root, 'capacity'), device: true, env: { CODEX_HOME: root }, desktop });
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); key = `native:${threadId}`;
+    await request('chat.history', { sessionKey: key }); snapshot(threadId, 'completed');
+    for (let i = 0; i < 64; i++) { desktop.follow(`occupied-${i}`); snapshot(`occupied-${i}`, 'inProgress'); }
+    expect(desktop.snapshots.has(threadId)).toBe(false); expect((desktop as any).followed.size).toBe(64);
+    const before = readFileSync(join(root, 'capacity', 'sessions.json'), 'utf8');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'capacity-unsent' })).rejects.toThrow('unconfirmed');
+      expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'capacity-unsent' })).toEqual({ status: 'unknown' });
+      expect((service as any).runs.has(key)).toBe(false);
+    }
+    expect(readFileSync(join(root, 'capacity', 'sessions.json'), 'utf8')).toBe(before);
+    expect(updates.filter(update => update.type === 'run_started')).toEqual([]);
+    expect(dispatch.mock.calls.filter(([method]) => method === 'thread-follower-start-turn')).toEqual([]);
+    snapshot('occupied-0', 'completed');
+    await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'explicit-capacity-recovery' });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(dispatch.mock.calls.filter(([method]) => method === 'thread-follower-start-turn')).toHaveLength(1);
+    expect((service as any).runs.get(key)).toMatchObject({ desktop: true, turnId: 'sent-turn' });
+    await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'explicit-capacity-recovery' });
+    expect(dispatch.mock.calls.filter(([method]) => method === 'thread-follower-start-turn')).toHaveLength(1);
+  });
+  it('settles a repeat follow write failure after receipt without replaying the recorded key', async () => {
+    const desktop = await device(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); key = `native:${threadId}`; await request('chat.history', { sessionKey: key });
+    service.on('update', update => updates.push(update));
+    desktop.follow.mockReset().mockImplementationOnce(() => {}).mockImplementationOnce(() => { throw new Error('Desktop transfer is busy; refresh shortly'); });
+    const sent = await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'observation-unsent' });
+    await new Promise(resolve => setImmediate(resolve));
+    expect((service as any).runs.has(key)).toBe(false);
+    expect(updates.filter(update => update.type === 'run_finished')).toEqual([expect.objectContaining({ runId: sent.runId, stopReason: 'error' })]);
+    expect(dispatches()).toHaveLength(0);
+    expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'observation-unsent' })).toMatchObject({ status: 'recorded', runId: sent.runId });
+    expect(await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'observation-unsent' })).toEqual(sent);
+    expect(dispatches()).toHaveLength(0);
+    await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'explicit-observation-recovery' });
+    await new Promise(resolve => setImmediate(resolve)); expect(dispatches()).toHaveLength(1);
+    expect(mock.request.mock.calls.filter(([method]) => ['thread/resume', 'turn/start'].includes(method))).toEqual([]);
+    function dispatches() { return desktop.request.mock.calls.filter(([method]) => method === 'thread-follower-start-turn'); }
+  });
+  it('does not require a Desktop follow slot for a warm locally owned native conversation', async () => {
+    const desktop = await device(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); key = `native:${threadId}`;
+    desktop.request.mockImplementation(async (method?: string) => {
+      if (method === 'thread-owner-discovery' || method === 'thread-follower-start-turn') throw new DesktopIpcError('no-owner', 'No owner');
+      return {};
+    });
+    await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'take-local-ownership' });
+    await new Promise(resolve => setImmediate(resolve)); notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    expect((service as any).loaded.has(key)).toBe(true); expect((service as any).runs.has(key)).toBe(false);
+    desktop.follow.mockClear().mockImplementation(() => { throw new Error('Too many active or unconfirmed desktop conversations'); });
+    desktop.request.mockClear(); mock.request.mockClear();
+    await request('chat.send', { sessionKey: key, text: 'Continue locally', idempotencyKey: 'warm-local-owned' });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(desktop.follow).not.toHaveBeenCalled(); expect(desktop.request).not.toHaveBeenCalled();
+    expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+  });
+  it('preserves an active snapshot delivered during renewed follow admission before receipt', async () => {
+    const desktop = await device(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); key = `native:${threadId}`; await request('chat.history', { sessionKey: key });
+    desktop.follow.mockImplementationOnce(() => {
+      const snapshot = { fresh: true, state: { turns: [{ id: 'active-owner', status: 'inProgress', items: [] }], requests: [] } };
+      desktop.snapshots.set(threadId, snapshot); desktop.emit('snapshot', threadId, snapshot);
+    });
+    await expect(request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'active-renewal' })).rejects.toThrow('busy');
+    expect((service as any).runs.get(key)).toMatchObject({ desktop: true, turnId: 'active-owner' });
+    expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'active-renewal' })).toEqual({ status: 'unknown' });
+    expect(desktop.request.mock.calls.filter(([method]) => method === 'thread-follower-start-turn')).toHaveLength(0);
+  });
+  it('protects unknown Desktop dispatch from idle follow reuse', async () => {
+    const desktop = await device(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list');
+    desktop.request.mockImplementation(async (method?: string) => {
+      if (method === 'thread-owner-discovery') return { owner: true };
+      throw new DesktopIpcError('uncertain', 'Unknown dispatch');
+    });
+    await request('chat.send', { sessionKey: `native:${threadId}`, text: 'Continue', idempotencyKey: 'follow-uncertain' });
+    await new Promise(resolve => setImmediate(resolve));
+    const snapshot = { fresh: true, state: { turns: [{ id: 'previous-turn', status: 'completed' }], requests: [] } };
+    desktop.snapshots.set(threadId, snapshot); desktop.emit('snapshot', threadId, snapshot);
+    expect((desktop as any).followProtected(threadId)).toBe(true);
+    expect((service as any).runs.get(`native:${threadId}`)).toMatchObject({ desktop: true });
+    expect(mock.request.mock.calls.filter(([method]) => ['turn/start', 'thread/resume'].includes(method))).toEqual([]);
+  });
+  it.each(['approvals', 'questions'])('protects pending %s independently of a cached terminal snapshot', async kind => {
+    const desktop = await device(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); await request('chat.history', { sessionKey: `native:${threadId}` });
+    const record = (service as any).records[0];
+    expect((desktop as any).followProtected(threadId)).toBe(false);
+    (service as any)[kind].set('pending', { entry: record });
+    expect((desktop as any).followProtected(threadId)).toBe(true);
+    (service as any)[kind].clear(); expect((desktop as any).followProtected(threadId)).toBe(false);
+
+  });
+  async function followed() {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); key = `native:${threadId}`;
+    await request('chat.history', { sessionKey: key });
+    return desktop;
+  }
+  it('completes a status-less Desktop search once, consistently with history, without completing unresolved tools or the turn', async () => {
+    const desktop = await followed();
+    const search = { id: 'search', type: 'webSearch', query: 'release notes', action: { type: 'search', query: 'release notes' } };
+    const snapshot = { fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [
+      search,
+      { id: 'running', type: 'commandExecution', status: 'inProgress', command: 'sleep 15' },
+      { id: 'unknown', type: 'commandExecution', command: 'pwd' },
+    ] }], requests: [] } };
+    desktop.emit('snapshot', threadId, snapshot);
+    expect(updates.filter(u => u.type === 'tool_call').map(u => u.toolCallId)).toEqual(['search', 'running', 'unknown']);
+    const terminal = [expect.objectContaining({ type: 'tool_call_update', toolCallId: 'search', status: 'success' }),
+      expect.objectContaining({ type: 'tool_call_update', toolCallId: 'unknown', status: 'unknown' })];
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual(terminal);
+    desktop.emit('snapshot', threadId, snapshot);
+    const history = await request('chat.history', { sessionKey: key });
+    expect(history.hasActiveRun).toBe(true);
+    expect(history.messages.filter((message: any) => message.role === 'tool').map((message: any) => [message.id, message.tool.status]))
+      .toEqual([['toolcall_search', 'success'], ['toolcall_running', 'running'], ['toolcall_unknown', 'unknown']]);
+    expect(updates.filter(u => u.type === 'tool_call')).toHaveLength(3);
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual(terminal);
+    expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
+    expect(desktop.request).not.toHaveBeenCalled();
+    expect(mock.request.mock.calls.some(([method]) => ['thread/resume', 'turn/start'].includes(method))).toBe(false);
+  });
+  it('recovers ten completed image views and one running command without inventing execution for unknown items', async () => {
+    const desktop = await followed();
+    const images = Array.from({ length: 10 }, (_, i) => ({ id: `image-${i}`, type: 'imageView', path: `file:///image-${i}.png` }));
+    const publish = (status?: string) => desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [
+      ...images, { id: 'running', type: 'commandExecution', status: 'inProgress', command: 'sleep 15' },
+      { id: 'unknown', type: 'mcpToolCall', tool: 'read', ...(status ? { status } : {}) },
+    ] }], requests: [] } });
+    publish(); publish();
+    expect(updates.filter(u => u.type === 'tool_call').map(u => [u.toolCallId, u.status]))
+      .toEqual([...images.map(item => [item.id, 'success']), ['running', 'running'], ['unknown', 'unknown']]);
+    expect(updates.filter(u => u.type === 'tool_call_update')).toHaveLength(11);
+    const active = await request('chat.history', { sessionKey: key });
+    expect(active.hasActiveRun).toBe(true);
+    expect(active.messages.filter((message: any) => message.tool?.status === 'running').map((message: any) => message.id)).toEqual(['toolcall_running']);
+    expect(active.messages.at(-1).tool).toMatchObject({ status: 'unknown', statusReported: true });
+    publish('inProgress'); publish('inProgress'); publish(); publish();
+    expect(updates.filter(u => u.type === 'tool_call_update' && u.toolCallId === 'unknown').map(u => u.status)).toEqual(['unknown', 'running', 'unknown']);
+    expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
+    expect(desktop.request).not.toHaveBeenCalled();
+  });
+  it('finishes an explicitly running Desktop search when a canonical status-less result arrives', async () => {
+    const desktop = await followed();
+    const snapshot = (item: any) => ({ fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [item] }], requests: [] } });
+    const search = { id: 'search', type: 'webSearch', query: 'release notes', action: { type: 'search', query: 'release notes' } };
+    desktop.emit('snapshot', threadId, snapshot({ ...search, status: 'inProgress' }));
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual([]);
+    expect((await request('chat.history', { sessionKey: key })).messages.at(-1).tool.status).toBe('running');
+    desktop.emit('snapshot', threadId, snapshot(search));
+    desktop.emit('snapshot', threadId, snapshot(search));
+    expect(updates.filter(u => u.type === 'tool_call')).toHaveLength(1);
+    expect(updates.filter(u => u.type === 'tool_call_update')).toEqual([
+      expect.objectContaining({ toolCallId: 'search', status: 'success' }),
+    ]);
+    expect((await request('chat.history', { sessionKey: key })).messages.at(-1).tool.status).toBe('success');
+  });
+  it('keeps a canonical search Begin unknown, then completes its same row with End results and later output corrections', async () => {
+    const desktop = await followed();
+    const begin = { id: 'search', type: 'webSearch', query: '', action: null, results: null };
+    const firstResults = [{ type: 'text_result', title: 'Result', snippet: 'First', future_field: { preserved: true } }];
+    const end = { ...begin, query: 'search', action: { type: 'search', query: 'search' }, results: firstResults };
+    const corrected = { ...end, results: [{ ...firstResults[0], snippet: 'Corrected' }] };
+    const publish = (item: any, status = 'inProgress') => desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'turn-1', status, items: [item] }], requests: [] } });
+    publish(begin); publish(begin);
+    expect(updates.filter(u => u.type.startsWith('tool_call')).map(u => u.status)).toEqual(['unknown', 'unknown']);
+    expect((await request('chat.history', { sessionKey: key })).messages.at(-1).tool).toMatchObject({ status: 'unknown', output: '' });
+    publish(end); publish(end); publish(corrected); publish(corrected);
+    expect(updates.filter(u => u.type === 'tool_call')).toHaveLength(1);
+    expect(updates.filter(u => u.type === 'tool_call_update').map(u => [u.status, u.rawOutput]))
+      .toEqual([['unknown', ''], ['success', JSON.stringify(firstResults)], ['success', JSON.stringify(corrected.results)]]);
+    expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
+    const activeRow = (await request('chat.history', { sessionKey: key })).messages.at(-1);
+    expect(activeRow.tool).toMatchObject({ status: 'success', output: JSON.stringify(corrected.results) });
+    publish(corrected, 'completed');
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/items/list'
+      ? Promise.resolve({ data: [{ turnId: 'turn-1', item: corrected }] }) : original(method, params));
+    const cold = await request('chat.history', { sessionKey: key });
+    expect(cold.hasActiveRun).toBe(false);
+    expect(cold.messages.at(-1)).toEqual(activeRow);
+    expect(updates.filter(u => u.type === 'run_finished')).toHaveLength(1);
+    expect(desktop.request).not.toHaveBeenCalled();
+  });
+  it('does not turn a start-only canonical search into a completed tool during terminal/cold recovery', async () => {
+    const desktop = await followed();
+    const begin = { id: 'search', type: 'webSearch', query: '', action: null, results: null };
+    const publish = (status: string) => desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'turn-1', status, items: [begin] }], requests: [] } });
+    publish('inProgress'); publish('interrupted');
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/items/list'
+      ? Promise.resolve({ data: [{ turnId: 'turn-1', item: begin }] }) : original(method, params));
+    const cold = await request('chat.history', { sessionKey: key });
+    expect(cold.hasActiveRun).toBe(false);
+    expect(cold.messages.at(-1).tool).toMatchObject({ status: 'unknown', output: '' });
+    expect(updates.filter(u => u.type === 'tool_call_update').map(u => u.status)).toEqual(['unknown']);
+    expect(updates.filter(u => u.type === 'run_finished')).toHaveLength(1);
+  });
+  it('applies completed Desktop tool output and exit-code corrections even when native status stays unchanged', async () => {
+    const desktop = await followed();
+    const command = { id: 'command', type: 'commandExecution', command: 'printf result', status: 'completed', exitCode: 0, aggregatedOutput: 'partial' };
+    const publish = (item: any) => desktop.emit('snapshot', threadId, { fresh: true, state: { turns: [{ id: 'turn-1', status: 'inProgress', items: [item] }], requests: [] } });
+    publish(command);
+    publish({ ...command, aggregatedOutput: 'full result' });
+    publish({ ...command, aggregatedOutput: 'full result', exitCode: 1 });
+    publish({ ...command, aggregatedOutput: 'full result', exitCode: 1, durationMs: 10 });
+    expect(updates.filter(u => u.type === 'tool_call')).toHaveLength(1);
+    expect(updates.filter(u => u.type === 'tool_call_update').map(u => [u.status, u.rawOutput]))
+      .toEqual([['success', 'partial'], ['success', 'full result'], ['error', 'full result']]);
+    expect((await request('chat.history', { sessionKey: key })).messages.at(-1))
+      .toMatchObject({ id: 'toolcall_command', tool: { status: 'error', output: 'full result' } });
+  });
   it('uses the last visible native message instead of the first prompt and caches the tail', async () => {
     await device();
     const original = mock.request.getMockImplementation()!;
@@ -710,6 +1817,23 @@ describe('device project discovery and desktop routing', () => {
     accept({ turn: { id: 'native-turn', status: 'inProgress', items: [] } });
     expect(await response).toEqual({ result: { turn: { id: 'native-turn', status: 'inProgress', items: [] } } });
   });
+  it.each(['full', 'summary', undefined])('proves the desktop original input only from an authoritative full item window (%s)', async itemsView => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list' ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    await request('sessions.list'); await request('chat.history', { sessionKey: `native:${threadId}` });
+    desktop.emit('snapshot', threadId, { fresh: true, state: { requests: [], turns: [{ id: 'active', status: 'inProgress', itemsView,
+      items: [{ id: 'main', type: 'userMessage', content: [] }, { id: 'a', type: 'agentMessage', text: 'A' },
+        { id: 'guide', type: 'userMessage', content: [] }, { id: 'b', type: 'agentMessage', text: 'B' }] }] } });
+    const pair = updates.find(update => update.type === 'run_started' && update.inputMessageId);
+    if (itemsView === 'full') expect(pair).toMatchObject({ turnId: 'active', inputMessageId: 'main' });
+    else expect(pair).toBeUndefined();
+    expect(updates.find(update => update.type === 'agent_message_chunk')).toMatchObject({ turnId: 'active',
+      ...(itemsView === 'full' ? { inputMessageId: 'main' } : {}) });
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start' || method === 'thread/resume')).toBe(false);
+  });
+
   it('restores desktop active questions and answers the exact original request', async () => {
     const desktop = await device();
     const original = mock.request.getMockImplementation()!;
@@ -727,13 +1851,148 @@ describe('device project discovery and desktop routing', () => {
     const original = mock.request.getMockImplementation()!;
     mock.request.mockImplementation((method, params) => method === 'thread/list' ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
     await request('sessions.list');
-    desktop.request.mockRejectedValueOnce(new Error('connection interrupted'));
+    desktop.request.mockImplementation(async (method: string) => {
+      if (method === 'thread-owner-discovery') return {};
+      throw new Error('connection interrupted');
+    });
     await request('chat.send', { sessionKey: `native:${threadId}`, text: 'Continue', idempotencyKey: 'native-send' });
     await new Promise(r => setTimeout(r, 0));
     expect(desktop.request).toHaveBeenCalledWith('thread-follower-start-turn', expect.objectContaining({ conversationId: threadId }));
     expect(mock.request.mock.calls.filter(c => ['thread/resume', 'turn/start'].includes(c[0]))).toEqual([]);
     await request('chat.send', { sessionKey: `native:${threadId}`, text: 'Continue', idempotencyKey: 'native-send' });
-    expect(desktop.request).toHaveBeenCalledTimes(1);
+    expect(desktop.request).toHaveBeenCalledTimes(2);
+  });
+  it.each(['unknown-speed', 'unknown-profile', 'writer-busy', 'unsupported-settings'])('rejects a released native %s preparation before accepting a cold send', async reason => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation(async (method, params) => {
+      if (method === 'thread/list') return { data: [{ id: threadId, cwd: project, updatedAt: 1 }] };
+      if (method === 'thread/resume' && reason === 'writer-busy') throw new Error('Conversation already has a native writer');
+      const result = await original(method, params);
+      if (method === 'thread/resume' && reason === 'unsupported-settings') delete result.approvalsReviewer;
+      return result;
+    });
+    desktop.request.mockRejectedValue(new DesktopIpcError('no-owner', 'No owner'));
+    if (reason === 'unknown-speed') mock.resumeSpeed.mockResolvedValue({ kind: 'unknown' });
+    if (reason === 'unknown-profile') mock.resumeSpeed.mockResolvedValue({ kind: 'native', serviceTier: null });
+    await request('sessions.list'); key = `native:${threadId}`;
+    await expect(request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'released-preflight' })).rejects.toThrow();
+    expect(desktop.request).toHaveBeenCalledWith('thread-owner-discovery', { conversationId: threadId });
+    expect(desktop.request.mock.calls.some(([method]) => method === 'thread-follower-start-turn')).toBe(false);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+    expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'released-preflight' })).toEqual({ status: 'unknown' });
+    expect((service as any).runs.has(key)).toBe(false);
+    expect(updates.some(update => update.type === 'run_started')).toBe(false);
+    expect((await request('chat.history', { sessionKey: key })).hasActiveRun).toBe(false);
+  });
+  it('preserves a live Desktop turn discovered while a cold send is being prepared', async () => {
+    const desktop = await device();
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    desktop.request.mockImplementation(async (method: string) => {
+      if (method === 'thread-owner-discovery') {
+        const snapshot = { fresh: true, state: { latestThreadSettings: settings,
+          turns: [{ id: 'already-active', status: 'inProgress', items: [] }], requests: [] } };
+        desktop.snapshots.set(threadId, snapshot); desktop.emit('snapshot', threadId, snapshot);
+      }
+      return {};
+    });
+    await request('sessions.list'); key = `native:${threadId}`;
+    await expect(request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'discovery-became-active' })).rejects.toThrow('busy');
+    expect((service as any).runs.get(key)).toMatchObject({ id: 'desktop:already-active', turnId: 'already-active', desktop: true });
+    expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'discovery-became-active' })).toEqual({ status: 'unknown' });
+    expect(desktop.request.mock.calls.some(([method]) => method === 'thread-follower-start-turn')).toBe(false);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+  });
+  it.each(['unknown-speed', 'unknown-profile', 'writer-busy', 'unsupported-settings'])('settles an accepted prompt when its owner disappears and %s fails before dispatch', async reason => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    let blocked = true;
+    mock.request.mockImplementation(async (method, params) => {
+      if (method === 'thread/list') return { data: [{ id: threadId, cwd: project, updatedAt: 1 }] };
+      if (method === 'thread/resume' && blocked && reason === 'writer-busy') throw new Error('Conversation already has a native writer');
+      const result = await original(method, params);
+      if (method === 'thread/resume' && blocked && reason === 'unsupported-settings') delete result.approvalsReviewer;
+      return result;
+    });
+    desktop.request.mockImplementation(async (method: string) => {
+      if (method === 'thread-owner-discovery') return {};
+      throw new DesktopIpcError('no-owner', 'No owner');
+    });
+    if (reason === 'unknown-speed') mock.resumeSpeed.mockResolvedValue({ kind: 'unknown' });
+    if (reason === 'unknown-profile') mock.resumeSpeed.mockResolvedValue({ kind: 'native', serviceTier: null });
+    await request('sessions.list'); key = `native:${threadId}`;
+    const sent = await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'owner-race' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+    expect((service as any).runs.has(key)).toBe(false);
+    expect(updates.filter(update => update.type === 'run_finished')).toEqual([
+      expect.objectContaining({ runId: sent.runId, stopReason: 'error' }),
+    ]);
+    expect((await request('chat.history', { sessionKey: key })).hasActiveRun).toBe(false);
+    expect(await request('chat.abort', { sessionKey: key, runId: sent.runId })).toEqual({ ok: true });
+    expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'owner-race' })).toEqual({ status: 'recorded', runId: sent.runId });
+    const desktopCalls = desktop.request.mock.calls.length;
+    expect(await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'owner-race' })).toEqual(sent);
+    expect(desktop.request).toHaveBeenCalledTimes(desktopCalls);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+
+    // Only a new explicit user send follows repaired ownership/settings; the
+    // rejected prompt fingerprint never becomes an automatic replay.
+    blocked = false; mock.resumeSpeed.mockResolvedValue({ kind: 'absent' });
+    if (reason === 'unknown-profile') await request('models.permissions', { sessionKey: key, mode: 'workspace' });
+    if (reason === 'unsupported-settings') await request('models.list', { sessionKey: key });
+    await request('chat.send', { sessionKey: key, text: 'Try after repair', idempotencyKey: 'explicit-after-repair' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toEqual([
+      ['turn/start', expect.objectContaining({ clientUserMessageId: 'explicit-after-repair' })],
+    ]);
+  });
+  it.each(['uncertain', 'generic-handler-failure'])('retains unknown dispatch when an owner disappears through %s', async reason => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/list'
+      ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
+    desktop.request.mockImplementation(async (method: string) => {
+      if (method === 'thread-owner-discovery') return {};
+      throw reason === 'uncertain' ? new DesktopIpcError('uncertain', 'Acknowledgement lost') : new Error('Handler did not confirm');
+    });
+    await request('sessions.list'); key = `native:${threadId}`;
+    const sent = await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'uncertain-owner-race' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect((service as any).runs.get(key)).toMatchObject({ id: sent.runId, desktop: true });
+    expect(updates.some(update => update.type === 'run_finished')).toBe(false);
+    expect(mock.request.mock.calls.some(([method]) => ['thread/resume', 'turn/start'].includes(method))).toBe(false);
+    expect(await request('chat.promptStatus', { sessionKey: key, idempotencyKey: 'uncertain-owner-race' })).toEqual({ status: 'recorded', runId: sent.runId });
+    await expect(request('chat.send', { sessionKey: key, text: 'Must not replay', idempotencyKey: 'uncertain-new-key' })).rejects.toThrow('busy');
+    expect(desktop.request).toHaveBeenCalledTimes(2);
+  });
+  it('preserves uncertain native dispatch after a proven owner release and safe local preparation', async () => {
+    const desktop = await device();
+    service.on('update', update => updates.push(update));
+    const original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/list') return Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] });
+      if (method === 'turn/start') return Promise.reject(Object.assign(new Error('Native acknowledgement lost'), { outcome: 'uncertain' }));
+      return original(method, params);
+    });
+    desktop.request.mockImplementation(async (method: string) => {
+      if (method === 'thread-owner-discovery') return {};
+      throw new DesktopIpcError('no-owner', 'No owner');
+    });
+    await request('sessions.list'); key = `native:${threadId}`;
+    const sent = await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'native-uncertain-after-release' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect((service as any).runs.get(key)).toMatchObject({ id: sent.runId, desktop: false });
+    expect(updates.some(update => update.type === 'run_finished')).toBe(false);
+    expect((await request('chat.history', { sessionKey: key })).hasActiveRun).toBe(true);
+    expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+    expect(await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'native-uncertain-after-release' })).toEqual(sent);
+    expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
   });
   it.each(['failed', 'completed', 'interrupted'])('reconciles a fast Desktop %s snapshot received before its start acknowledgement', async status => {
     const desktop = await device();
@@ -742,7 +2001,8 @@ describe('device project discovery and desktop routing', () => {
     mock.request.mockImplementation((method, params) => method === 'thread/list' ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
     await request('sessions.list'); key = `native:${threadId}`;
     let accept!: (value: unknown) => void;
-    desktop.request.mockImplementationOnce(() => new Promise(resolve => { accept = resolve; }));
+    desktop.request.mockImplementation((method: string) => method === 'thread-owner-discovery'
+      ? Promise.resolve({}) : new Promise(resolve => { accept = resolve; }));
     const sent = await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'fast-native-send' });
     const turn = { id: 'fast-turn', status, startedAt: 10, completedAt: 12,
       ...(status === 'failed' ? { error: { codexErrorInfo: 'unauthorized', message: 'private provider detail' } } : {}),
@@ -757,11 +2017,11 @@ describe('device project discovery and desktop routing', () => {
       stopReason: status === 'failed' ? 'error' : status === 'interrupted' ? 'cancelled' : 'end_turn' })]);
     if (status === 'failed') expect(finished[0].terminalMessage).toMatchObject({ id: 'codex-turn-error:fast-turn',
       text: 'Model authentication failed. Sign in again on your computer.' });
-    if (status === 'completed') expect(finished[0].message.content).toBe('Done');
+    if (status === 'completed') expect(finished[0].message).toMatchObject({ content: 'Done', timestampMs: 12000 });
     expect((service as any).runs.has(key)).toBe(false);
     desktop.emit('snapshot', threadId, snapshot);
     expect(updates.filter(u => u.type === 'run_finished')).toHaveLength(1);
-    expect(desktop.request).toHaveBeenCalledTimes(1);
+    expect(desktop.request).toHaveBeenCalledTimes(2);
     expect(mock.request.mock.calls.filter(([method]) => ['thread/resume', 'turn/start'].includes(method))).toEqual([]);
     expect(JSON.stringify(finished)).not.toContain('private');
   });
@@ -772,7 +2032,8 @@ describe('device project discovery and desktop routing', () => {
     mock.request.mockImplementation((method, params) => method === 'thread/list' ? Promise.resolve({ data: [{ id: threadId, cwd: project, updatedAt: 1 }] }) : original(method, params));
     await request('sessions.list'); key = `native:${threadId}`;
     let accept!: (value: unknown) => void;
-    desktop.request.mockImplementationOnce(() => new Promise(resolve => { accept = resolve; }));
+    desktop.request.mockImplementation((method: string) => method === 'thread-owner-discovery'
+      ? Promise.resolve({}) : new Promise(resolve => { accept = resolve; }));
     await request('chat.send', { sessionKey: key, text: 'Continue', idempotencyKey: 'unknown-native-send' });
     const snapshot = { fresh: reason !== 'stale', state: { requests: [], turns: [{
       id: reason === 'another-turn' ? 'old-turn' : 'current-turn',
@@ -783,7 +2044,7 @@ describe('device project discovery and desktop routing', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(updates.filter(u => u.type === 'run_finished')).toEqual([]);
     expect((service as any).runs.get(key)).toMatchObject({ desktop: true, turnId: 'current-turn' });
-    expect(desktop.request).toHaveBeenCalledTimes(1);
+    expect(desktop.request).toHaveBeenCalledTimes(2);
     expect(mock.request.mock.calls.filter(([method]) => ['thread/resume', 'turn/start'].includes(method))).toEqual([]);
   });
   it('keeps a released native thread locally owned for subsequent mobile and follower turns', async () => {
@@ -1507,4 +2768,404 @@ it('reports package version and protects active work before fencing update admis
   expect(subject.prepareForUpdate()).toBe(true);
   await expect(subject.request({ type: 'req', id: 'after', method: 'sessions.list' })).rejects.toThrow('restarting');
   await expect((subject as any).desktopRequest('thread-owner-discovery', { conversationId: threadId })).rejects.toThrow('restarting');
+});
+
+
+describe('Desktop owner acquisition following status', () => {
+  it('does not announce a cold stranger or a thread whose owner discovery remains uncertain', async () => {
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    Object.assign((service as any).records[0], { threadId, activity: 1000 });
+    desktop.emit('follow', randomUUID(), true, 'desktop-a'); desktop.emit('follow', threadId, true, 'desktop-a');
+    vi.spyOn(desktop, 'request').mockRejectedValue(new DesktopIpcError('uncertain', 'Unknown owner'));
+    await request('models.list', { sessionKey: key });
+    expect((service as any).desktopFollowers.size).toBe(0); expect(broadcast).not.toHaveBeenCalled();
+    expect(mock.request.mock.calls.some(([method]) => ['thread/start', 'thread/resume', 'thread/fork', 'turn/start'].includes(method))).toBe(false);
+  });
+  it('keeps a successful native acquisition when its subscription control cannot be sent', async () => {
+    const broadcast = vi.spyOn((service as any).desktop, 'broadcast').mockImplementation(() => { throw new Error('IPC closed'); });
+    await expect(request('models.list', { sessionKey: key })).resolves.toMatchObject({ currentModel: 'native-model' });
+    await request('models.list', { sessionKey: key });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(mock.request.mock.calls.filter(([method]) => method === 'thread/start')).toHaveLength(1);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+  });
+  it('renews an early subscriber through actual IPC frames after a legal delayed resume, then publishes the active and terminal turn', async () => {
+    await service.stop();
+    const { DesktopIpc } = await vi.importActual<typeof import('./desktop-ipc.js')>('./desktop-ipc.js');
+    const path = process.platform === 'win32' ? String.raw`\\.\pipe\clawket-owner-follow-${randomUUID()}` : join(root, 'owner-follow.sock');
+    const peers = new Set<Socket>(), received: any[] = [];
+    let remote!: Socket;
+    const send = (value: object) => {
+      const body = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4); header.writeUInt32LE(body.length);
+      remote.write(Buffer.concat([header, body]));
+    };
+    const following = (source: string, following = true, id = threadId) => send({ type: 'broadcast', version: 1,
+      method: 'thread-stream-following-changed', sourceClientId: source,
+      params: { hostId: 'local', conversationId: id, following } });
+    const server = createServer(socket => {
+      remote = socket; peers.add(socket); socket.on('close', () => peers.delete(socket));
+      let buffer = Buffer.alloc(0);
+      socket.on('data', chunk => {
+        buffer = Buffer.concat([buffer, chunk]);
+        while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32LE()) {
+          const size = buffer.readUInt32LE(), frame = JSON.parse(buffer.subarray(4, 4 + size).toString());
+          buffer = buffer.subarray(4 + size); received.push(frame);
+          if (frame.method === 'initialize') send({ type: 'response', requestId: frame.requestId, resultType: 'success', result: { clientId: 'bridge' } });
+          if (frame.type === 'request' && frame.method === 'thread-owner-discovery') send({ type: 'response', method: frame.method,
+            requestId: frame.requestId, resultType: 'error', error: 'no-client-found' });
+          // The already-following Desktop responds to the new owner's status request.
+          if (frame.method === 'thread-stream-following-status-requested') following('desktop-a');
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(path, resolve); });
+    const desktop = new DesktopIpc([path]);
+    service = new CodexService({ project, directory: join(root, 'state'), desktop });
+    const record = (service as any).records[0]; Object.assign(record, { threadId, activity: 1000 }); (service as any).save();
+    const original = mock.request.getMockImplementation()!;
+    let resolveResume!: () => void, terminal = false;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/resume') return new Promise(resolve => { resolveResume = () => resolve(original(method, params)); });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: terminal
+        ? [{ id: 'turn-1', status: 'completed', items: [{ id: 'reply', type: 'agentMessage', text: 'Done' }] }]
+        : [{ id: 'old-turn', status: 'completed', items: [] }] });
+      return original(method, params);
+    });
+    const snapshots = () => received.filter(frame => frame.method === 'thread-stream-state-changed');
+    try {
+      await desktop.connect(); following('desktop-a'); following('desktop-a', true, 'unrelated');
+      await vi.waitFor(() => expect((service as any).desktopFollowers.size).toBe(0));
+      const picker = request('models.list', { sessionKey: key });
+      await vi.waitFor(() => expect(resolveResume).toBeTypeOf('function'));
+      expect(received.some(frame => frame.method === 'thread-stream-following-status-requested')).toBe(false);
+      expect(snapshots()).toHaveLength(0);
+      resolveResume(); await picker;
+      await vi.waitFor(() => expect(snapshots()).toHaveLength(1));
+      expect(received.filter(frame => frame.method === 'thread-stream-following-status-requested')).toEqual([
+        { type: 'broadcast', method: 'thread-stream-following-status-requested', version: 1, sourceClientId: 'bridge',
+          params: { hostId: 'local', conversationId: threadId } },
+      ]);
+      expect((service as any).desktopFollowers.get(threadId)).toEqual(new Set(['desktop-a']));
+      expect(snapshots()[0]).toMatchObject({ version: 11, params: { change: { conversationState: {
+        source: 'appServer', originator: 'clawket', latestThreadSettings: settings,
+      } } } });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'thread/resume')).toHaveLength(1);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/settings/update'].includes(method))).toBe(false);
+      await request('models.list', { sessionKey: key });
+      expect(received.filter(frame => frame.method === 'thread-stream-following-status-requested')).toHaveLength(1);
+      await request('chat.send', { sessionKey: key, text: 'hello', idempotencyKey: 'owner-follow-send' });
+      notify('turn/started', { turn: { id: 'turn-1' } });
+      await vi.waitFor(() => expect(desktopTurns(snapshots().at(-1)?.params.change.conversationState).some(turn => turn.id === 'turn-1' && turn.status === 'inProgress')).toBe(true), { timeout: 2000 });
+      terminal = true; notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      await vi.waitFor(() => expect(desktopTurns(snapshots().at(-1)?.params.change.conversationState).some(turn => turn.id === 'turn-1' && turn.status === 'completed')).toBe(true), { timeout: 2000 });
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+    } finally {
+      await service.stop(); for (const peer of peers) peer.destroy();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+  it.each(['failed', 'closed', 'replaced', 'retired'])('does not announce a %s acquisition completion', async outcome => {
+    Object.assign((service as any).records[0], { threadId, activity: 1000 });
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    const original = mock.request.getMockImplementation()!;
+    let resume!: () => void, rejectResume!: () => void;
+    mock.request.mockImplementation((method, params) => method === 'thread/resume' ? new Promise((resolve, reject) => {
+      resume = () => resolve(original(method, params)); rejectResume = () => reject(new Error('Resume failed'));
+    }) : original(method, params));
+    const picker = request('models.list', { sessionKey: key }); void picker.catch(() => {});
+    await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+    if (outcome === 'failed') rejectResume();
+    else {
+      if (outcome === 'closed' || outcome === 'replaced') mock.instances.at(-1).emit('closed');
+      if (outcome === 'replaced') { (service as any).nextRecoveryAt = 0; await request('health'); }
+      if (outcome === 'retired') (service as any).records = [];
+      resume();
+    }
+    await picker.catch(() => {});
+    expect(broadcast.mock.calls.filter(([method]) => method === 'thread-stream-following-status-requested')).toHaveLength(0);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+  });
+  it('announces a newly started owner once and its distinct fork owner after successful native confirmation', async () => {
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    await request('models.list', { sessionKey: key }); await request('models.list', { sessionKey: key });
+    const sourceId = threadId, branchId = randomUUID(), original = mock.request.getMockImplementation()!;
+    mock.request.mockImplementation((method, params) => method === 'thread/fork'
+      ? Promise.resolve({ ...response(), thread: { id: branchId, cwd: project } }) : original(method, params));
+    await request('sessions.create', { fromSession: key, title: 'QA branch' });
+    expect(broadcast.mock.calls.filter(([method]) => method === 'thread-stream-following-status-requested')).toEqual([
+      ['thread-stream-following-status-requested', { hostId: 'local', conversationId: sourceId }],
+      ['thread-stream-following-status-requested', { hostId: 'local', conversationId: branchId }],
+    ]);
+    expect(mock.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+  });
+});
+
+describe('Desktop follower membership for owned conversations', () => {
+  async function settlePublications() {
+    await Promise.all([...(service as any).publishing.values()].map((entry: any) => entry.promise ?? entry));
+  }
+  async function owned() {
+    await request('models.list', { sessionKey: key });
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    return { desktop, broadcast };
+  }
+  async function changeNativeSettings() {
+    settings = { ...settings, effort: 'high', collaborationMode: { ...settings.collaborationMode,
+      settings: { ...settings.collaborationMode.settings, reasoning_effort: 'high' } } };
+    notify('thread/settings/updated', { threadSettings: settings });
+    await vi.advanceTimersByTimeAsync(500); await settlePublications();
+  }
+  it.each(['unfollow', 'disconnect'])('continues native snapshots for the other subscribed client after one client %s', async action => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications();
+      desktop.emit('follow', threadId, true, 'desktop-b'); await settlePublications();
+      broadcast.mockClear(); mock.request.mockClear();
+      if (action === 'unfollow') desktop.emit('follow', threadId, false, 'desktop-a');
+      else desktop.emit('client-offline', 'desktop-a');
+      await changeNativeSettings();
+      expect(broadcast).toHaveBeenCalledTimes(1);
+      expect(broadcast.mock.calls[0]).toEqual(['thread-stream-state-changed', expect.objectContaining({ conversationId: threadId,
+        change: expect.objectContaining({ conversationState: expect.objectContaining({ latestThreadSettings: expect.objectContaining({ effort: 'high' }) }) }) })]);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume', 'thread/settings/update'].includes(method))).toBe(false);
+      broadcast.mockClear(); desktop.emit('follow', threadId, false, 'desktop-b'); await changeNativeSettings();
+      expect(broadcast).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it('retires the final disconnected client without ending the native task or dispatching another turn', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications(); broadcast.mockClear(); mock.request.mockClear();
+      desktop.emit('client-offline', 'desktop-a'); await changeNativeSettings();
+      expect(broadcast).not.toHaveBeenCalled();
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'turn/interrupt', 'thread/resume'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('retains the explicit complete-history requester independently from another follower', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications();
+      await desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'desktop-b');
+      desktop.emit('follow', threadId, false, 'desktop-a'); broadcast.mockClear(); mock.request.mockClear();
+      await changeNativeSettings(); expect(broadcast).toHaveBeenCalledTimes(1);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume', 'thread/settings/update'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not retire existing followers for malformed or unknown source identities', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications(); broadcast.mockClear();
+      desktop.emit('follow', threadId, false); desktop.emit('follow', threadId, false, '');
+      desktop.emit('follow', threadId, false, 'unknown-client');
+      await changeNativeSettings(); expect(broadcast).toHaveBeenCalledTimes(1);
+      await expect(desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId, clientId: 'desktop-a' })).rejects.toThrow('Invalid Desktop follower');
+    } finally { vi.useRealTimers(); }
+  });
+  it('retires all old memberships after the broker connection is lost', async () => {
+    const { desktop, broadcast } = await owned(); vi.useFakeTimers();
+    try {
+      desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications(); broadcast.mockClear();
+      desktop.emit('offline'); await changeNativeSettings(); expect(broadcast).not.toHaveBeenCalled();
+      desktop.emit('follow', threadId, true, 'desktop-b'); await settlePublications(); broadcast.mockClear();
+      await changeNativeSettings(); expect(broadcast).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+  it('discards an in-flight history snapshot after its final follower leaves', async () => {
+    const { desktop, broadcast } = await owned();
+    const original = mock.request.getMockImplementation()!;
+    let resume!: () => void;
+    mock.request.mockImplementation((method, params) => method === 'thread/turns/list'
+      ? new Promise(resolve => { resume = () => resolve(original(method, params)); }) : original(method, params));
+    desktop.emit('follow', threadId, true, 'desktop-a');
+    const slot = [...(service as any).publishing.values()][0] as any;
+    const pending = slot.promise ?? slot;
+    await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+    desktop.emit('follow', threadId, false, 'desktop-a'); resume();
+    await expect(pending).rejects.toThrow('Desktop subscription changed');
+    expect(broadcast).not.toHaveBeenCalled();
+    expect((service as any).desktopHistory.has(threadId)).toBe(false);
+    expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+  });
+  it('prepares a renewed client snapshot after retiring an in-flight old broker subscription', async () => {
+    const { desktop, broadcast } = await owned();
+    const original = mock.request.getMockImplementation()!;
+    let resume!: () => void, first = true;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'thread/turns/list' && first) {
+        first = false; return new Promise(resolve => { resume = () => resolve(original(method, params)); });
+      }
+      return original(method, params);
+    });
+    desktop.emit('follow', threadId, true, 'desktop-a');
+    const slot = [...(service as any).publishing.values()][0] as any;
+    const old = slot.promise ?? slot;
+    await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+    desktop.emit('offline');
+    const next = desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'desktop-b');
+    void next.catch(() => {});
+    await Promise.resolve(); await Promise.resolve();
+    resume(); await expect(old).rejects.toThrow('Desktop subscription changed');
+    await expect(next).resolves.toMatchObject({ revision: 1 });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(mock.request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(2);
+    expect(mock.request).not.toHaveBeenCalledWith('turn/start', expect.anything());
+  });
+  it('bounds each owned conversation to 128 subscribers and admits a new one only after retirement', async () => {
+    const { desktop } = await owned();
+    for (let i = 0; i < 128; i++) desktop.emit('follow', threadId, true, `desktop-${i}`);
+    await settlePublications();
+    await expect(desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'overflow')).rejects.toThrow('Too many Desktop followers');
+    desktop.emit('client-offline', 'desktop-0');
+    await expect(desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'replacement')).resolves.toMatchObject({ revision: expect.any(Number) });
+  });
+  it('retires native-thread memberships on reset and does not revive them for its next native identity', async () => {
+    const { desktop, broadcast } = await owned();
+    desktop.emit('follow', threadId, true, 'desktop-a'); await settlePublications();
+    const oldThread = threadId;
+    await request('sessions.reset', { sessionKey: key });
+    threadId = randomUUID(); await request('models.list', { sessionKey: key });
+    vi.useFakeTimers();
+    try {
+      broadcast.mockClear(); await changeNativeSettings(); expect(broadcast).not.toHaveBeenCalled();
+      desktop.emit('follow', oldThread, true, 'desktop-b'); await settlePublications();
+      expect(broadcast).not.toHaveBeenCalled();
+      expect((service as any).desktopFollowers.size).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('Desktop history publication generations', () => {
+  async function setup(active = true) {
+    if (active) await start(); else await request('models.list', { sessionKey: key });
+    const nativeTurns = [{ id: 'turn-1', status: active ? 'inProgress' : 'completed', items: [
+      { type: 'userMessage', id: 'original-input', content: [{ type: 'text', text: 'hello' }] },
+    ] }] as any[];
+    const original = mock.request.getMockImplementation()!;
+    let nextTurn = 'turn-1';
+    const itemReads: Array<{ captured: any; release: () => void }> = [];
+    let pause = 0;
+    let entered: (() => void) | undefined;
+    mock.request.mockImplementation((method, params) => {
+      if (method === 'turn/start') return Promise.resolve({ turn: { id: nextTurn } });
+      if (method === 'thread/turns/list') return Promise.resolve({ data: nativeTurns.map(turn => ({ ...turn, items: [...turn.items] })).reverse() });
+      if (method === 'thread/items/list') {
+        const captured = { data: nativeTurns.find(turn => turn.id === params.turnId).items.map((item: any) => ({ turnId: params.turnId, item })).reverse() };
+        if (pause > 0) {
+          pause -= 1;
+          return new Promise(resolve => { itemReads.push({ captured, release: () => resolve(captured) }); entered?.(); });
+        }
+        return Promise.resolve(captured);
+      }
+      return original(method, params);
+    });
+    const desktop = (service as any).desktop, broadcast = vi.spyOn(desktop, 'broadcast');
+    desktop.emit('follow', threadId, true, 'desktop-reader');
+    await Promise.all([...(service as any).publishing.values()].map((slot: any) => slot.promise));
+    broadcast.mockClear(); mock.request.mockClear();
+    return {
+      nativeTurns, desktop, broadcast, itemReads,
+      nextTurn: (id: string) => { nextTurn = id; },
+      pause: () => { pause += 1; return new Promise<void>(resolve => { entered = resolve; }); },
+      full: () => desktop.handler.request('thread-follower-load-complete-history', { conversationId: threadId }, 'desktop-reader') as Promise<any>,
+    };
+  }
+  function states(broadcast: any) {
+    return broadcast.mock.calls.filter(([method]: any[]) => method === 'thread-stream-state-changed')
+      .map(([, params]: any[]) => params.change.conversationState);
+  }
+  function historyReads() { return mock.request.mock.calls.filter(([method, params]) => method === 'thread/turns/list' && params.itemsView === 'notLoaded'); }
+  it('cannot recache or broadcast an active turn after its terminal notification consumes the scheduled publication', async () => {
+    const f = await setup(); vi.useFakeTimers();
+    try {
+      const entered = f.pause(), pending = f.full(); await entered;
+      f.nativeTurns[0].status = 'completed';
+      notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[0].release();
+      await expect(pending).resolves.toMatchObject({ revision: expect.any(Number) });
+      expect(states(f.broadcast).map((state: any) => desktopTurns(state).map(turn => turn.status))).toEqual([['completed']]);
+      expect((service as any).desktopHistory.get(threadId)).toMatchObject({ complete: true, thread: { turns: [{ status: 'completed' }] } });
+      expect(historyReads()).toHaveLength(2);
+      await f.full(); expect(historyReads()).toHaveLength(2);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not keep the completed predecessor active when the next explicit turn starts during the read', async () => {
+    const f = await setup(); vi.useFakeTimers();
+    try {
+      const entered = f.pause(), pending = f.full(); await entered;
+      f.nativeTurns[0].status = 'completed'; notify('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+      f.nextTurn('turn-2');
+      await request('chat.send', { sessionKey: key, text: 'next explicit input', idempotencyKey: 'send-2' });
+      f.nativeTurns.push({ id: 'turn-2', status: 'inProgress', items: [{ type: 'userMessage', id: 'next-input', content: [{ type: 'text', text: 'next explicit input' }] }] });
+      notify('turn/started', { turn: { id: 'turn-2' } });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[0].release(); await pending;
+      expect(desktopTurns(states(f.broadcast).at(-1)).map(turn => [turn.id, turn.status])).toEqual([['turn-1', 'completed'], ['turn-2', 'inProgress']]);
+      expect(mock.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+      expect(mock.request).not.toHaveBeenCalledWith('thread/resume', expect.anything());
+    } finally { vi.useRealTimers(); }
+  });
+  it('publishes settings confirmed during history preparation instead of the earlier captured settings', async () => {
+    const f = await setup(false); vi.useFakeTimers();
+    try {
+      const entered = f.pause(), pending = f.full(); await entered;
+      settings = { ...settings, effort: 'high', collaborationMode: { ...settings.collaborationMode,
+        settings: { ...settings.collaborationMode.settings, reasoning_effort: 'high' } } };
+      notify('thread/settings/updated', { threadSettings: settings });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[0].release(); await pending;
+      expect(states(f.broadcast)).toEqual([expect.objectContaining({ latestThreadSettings: expect.objectContaining({ effort: 'high' }) })]);
+      expect(historyReads()).toHaveLength(1);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume', 'thread/settings/update'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it('bounds re-preparation and preserves a new scheduled publication after both reads become obsolete', async () => {
+    const f = await setup(); vi.useFakeTimers();
+    try {
+      const firstEntered = f.pause(), pending = f.full(); void pending.catch(() => {}); await firstEntered;
+      notify('item/completed', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'reply-a', text: 'first stage' } });
+      await vi.advanceTimersByTimeAsync(500);
+      const secondEntered = f.pause(); f.itemReads[0].release();
+      await vi.advanceTimersByTimeAsync(0); expect(f.itemReads).toHaveLength(2); await secondEntered;
+      notify('item/completed', { turnId: 'turn-1', item: { type: 'agentMessage', id: 'reply-b', text: 'second stage' } });
+      await vi.advanceTimersByTimeAsync(500); f.itemReads[1].release();
+      await expect(pending).rejects.toThrow('Conversation changed while its history was loading');
+      expect(historyReads()).toHaveLength(2); expect(f.broadcast).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.all([...(service as any).publishing.values()].map((slot: any) => slot.promise));
+      expect(f.broadcast).toHaveBeenCalledTimes(1);
+      expect((service as any).desktopHistory.get(threadId).complete).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['rpc', 'record-id', 'cwd'])('rejects a history result from a changed %s context before caching or publishing', async changed => {
+    const f = await setup(false), entered = f.pause(), pending = f.full(); void pending.catch(() => {}); await entered;
+    const r = (service as any).records[0];
+    if (changed === 'rpc') (service as any).rpc = (service as any).createRpc();
+    if (changed === 'record-id') r.id = randomUUID();
+    if (changed === 'cwd') r.cwd = join(root, 'other-project');
+    f.itemReads[0].release();
+    await expect(pending).rejects.toThrow('Conversation ownership changed');
+    expect(f.broadcast).not.toHaveBeenCalled();
+    expect((service as any).desktopHistory.get(threadId)?.complete).not.toBe(true);
+    expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume'].includes(method))).toBe(false);
+  });
+  it('does not restart history preparation for text deltas and overlays the latest active item', async () => {
+    const f = await setup(), entered = f.pause(), pending = f.full(); await entered;
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'reply', delta: 'one' });
+    notify('item/agentMessage/delta', { turnId: 'turn-1', itemId: 'reply', delta: ' two' });
+    f.itemReads[0].release(); await pending;
+    expect(historyReads()).toHaveLength(1);
+    expect(desktopTurns(states(f.broadcast).at(-1))[0].items).toContainEqual(expect.objectContaining({ id: 'reply', text: 'one two' }));
+  });
+  it('retires a completed cache for a late native item without reviving its run', async () => {
+    const f = await setup(false); await f.full(); f.broadcast.mockClear(); mock.request.mockClear(); vi.useFakeTimers();
+    try {
+      const late = { type: 'commandExecution', id: 'late-tool', command: 'qa-command', cwd: project, status: 'completed', exitCode: 0 };
+      f.nativeTurns[0].items.push(late);
+      notify('item/completed', { turnId: 'turn-1', item: late });
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.all([...(service as any).publishing.values()].map((slot: any) => slot.promise));
+      expect(desktopTurns(states(f.broadcast).at(-1))[0]).toMatchObject({ status: 'completed', items: expect.arrayContaining([late]) });
+      expect((service as any).runs.size).toBe(0);
+      expect(mock.request.mock.calls.some(([method]) => ['turn/start', 'thread/resume'].includes(method))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
 });

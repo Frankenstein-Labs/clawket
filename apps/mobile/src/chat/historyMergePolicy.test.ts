@@ -1,5 +1,68 @@
+import { finishLiveRunPresentation, liveReplyRenderKey } from './liveRunThread';
 import { UiMessage } from '../types/chat';
-import { preserveApprovalRows, preserveHydratedMessageKeys, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, prependOlderCachedMessages, retireAliasedTools } from './historyMergePolicy';
+import { preserveCompletedRunPresentation, preserveApprovalRows, preserveHydratedMessageKeys, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, prependOlderCachedMessages, reconcileAcceptedSteeringMessage, retireAliasedTools } from './historyMergePolicy';
+
+describe('reconcileAcceptedSteeringMessage', () => {
+  const prompt: UiMessage = { id: 'prompt', historyMessageId: 'prompt-native', role: 'user', text: 'Initial task', timestampMs: 1_000 };
+  const accepted: UiMessage = { id: 'usr_121000_steer_active', renderKey: 'usr_121000_steer_active', role: 'user', sentLocally: true, text: 'Change course', timestampMs: 121_000 };
+  const echo: UiMessage = { id: 'echo', historyMessageId: 'steer-native', role: 'user', text: accepted.text, timestampMs: 1_000 };
+
+  it('keeps a native echo with the original turn clock, including a renamed dispatch anchor', () => {
+    const current = [{ ...prompt, id: 'history-prompt' }, echo];
+    expect(reconcileAcceptedSteeringMessage([prompt], current, accepted)).toBe(current);
+  });
+
+  it.each([false, true])('finds accepted input persisted before an already visible assistant row (%s)', alias => {
+    const assistant: UiMessage = { id: 'live-assistant', renderKey: 'stable-assistant', role: 'assistant', text: 'Working' };
+    const current = [prompt, echo, { ...assistant, id: alias ? 'native-assistant' : assistant.id }];
+    expect(reconcileAcceptedSteeringMessage([prompt, assistant], current, accepted)).toBe(current);
+  });
+
+  it('keeps intentional repeated guidance after a previous canonical echo', () => {
+    const second = { ...echo, id: 'second', historyMessageId: 'second-native' };
+    const current = [prompt, echo, second];
+    expect(reconcileAcceptedSteeringMessage([prompt, echo], current, accepted)).toBe(current);
+    expect(current.filter(message => message.text === accepted.text)).toHaveLength(2);
+  });
+
+  it('inserts missing accepted input at dispatch position, before a later final and same-text queued send', () => {
+    const final: UiMessage = { id: 'old-final', role: 'assistant', text: 'Done' };
+    const next: UiMessage = { id: 'next-send', historyMessageId: 'next-native', idempotencyKey: 'next-send-key', role: 'user', text: accepted.text, timestampMs: 121_100 };
+    expect(reconcileAcceptedSteeringMessage([prompt], [prompt, final, next], accepted)).toEqual([prompt, accepted, final, next]);
+    // A later stale reload cannot let that independent send adopt the steering row.
+    expect(preserveOptimisticAssistantMessage([prompt, accepted], [prompt, next]).filter(message => message.text === accepted.text)).toHaveLength(2);
+  });
+
+  it('does not use older prepended input, different authors or attachments as steering evidence', () => {
+    const tool: UiMessage = { id: 'tool', role: 'tool', text: 'Working' };
+    const attachment = { ...echo, imageUris: ['file://different.png'] };
+    const inbound = { ...echo, id: 'inbound', historyMessageId: 'inbound-native', attribution: { channel: 'slack', sender: { id: 'other' } } };
+    const current = [echo, prompt, tool, attachment, inbound];
+    expect(reconcileAcceptedSteeringMessage([prompt, tool], current, accepted)).toEqual([echo, prompt, tool, accepted, attachment, inbound]);
+  });
+
+  it('does not treat locally queued or accepted rows as new native steering echoes', () => {
+    const queued: UiMessage = { ...echo, historyMessageId: undefined, delivery: 'queued' };
+    const local: UiMessage = { ...echo, id: 'usr_120000', historyMessageId: undefined };
+    const current = [prompt, queued, local];
+    expect(reconcileAcceptedSteeringMessage([prompt], current, accepted)).toEqual([prompt, accepted, queued, local]);
+  });
+
+  it('keeps all repeated native echoes without adding an ACK copy and does not guess placement in a replaced window', () => {
+    const duplicate = { ...echo, id: 'other-echo', historyMessageId: 'other-native' };
+    const repeated = [prompt, echo, duplicate];
+    expect(reconcileAcceptedSteeringMessage([prompt], repeated, accepted)).toBe(repeated);
+    const next: UiMessage = { id: 'new-turn', historyMessageId: 'new-native', role: 'user', text: 'Next task' };
+    const current = [next];
+    expect(reconcileAcceptedSteeringMessage([prompt], current, accepted)).toBe(current);
+  });
+
+  it('appends once in an empty window and keeps an already accepted row idempotently', () => {
+    expect(reconcileAcceptedSteeringMessage([], [], accepted)).toEqual([accepted]);
+    const current = [prompt, accepted];
+    expect(reconcileAcceptedSteeringMessage([prompt], current, accepted)).toBe(current);
+  });
+});
 
 describe('preserveHydratedMessageKeys', () => {
   const cached: UiMessage = { id: 'cached-row', historyMessageId: 'server-row', renderKey: 'stable-row', role: 'assistant', text: 'Outdated text', timestampMs: 1000 };
@@ -55,6 +118,63 @@ describe('prependOlderCachedMessages', () => {
 });
 
 describe('preserveOptimisticAssistantMessage', () => {
+  describe('steering echo identity', () => {
+    const main: UiMessage = { id: 'native-main', historyMessageId: 'native-main', role: 'user', text: 'Wait', timestampMs: 1_000 };
+    const first: UiMessage = { id: 'usr_10000_steer_run_1', renderKey: 'usr_10000_steer_run_1', role: 'user', sentLocally: true, text: 'Keep waiting', timestampMs: 10_000 };
+    const firstEcho: UiMessage = { id: 'native-guide-1', historyMessageId: 'native-guide-1', role: 'user', text: first.text, timestampMs: first.timestampMs };
+    const reconcile = (previous: UiMessage[], next: UiMessage[]) => preserveMessagePresentation(previous,
+      preserveOptimisticAssistantMessage(previous, next));
+
+    it.each([62_000, 125_000])('does not give a %i ms older native guide a newer steering identity when the send key is missing', (difference) => {
+      const second: UiMessage = { ...first, id: `usr_${10_000 + difference}_steer_run_2`, renderKey: `usr_${10_000 + difference}_steer_run_2`, timestampMs: 10_000 + difference };
+      // A read immediately after the second ACK can still contain only the first native guide.
+      const merged = reconcile([main, first, second], [main, firstEcho]);
+      expect(merged).toEqual([main, firstEcho, second]);
+      expect(merged.find(message => message.id === firstEcho.id)?.renderKey).not.toBe(second.renderKey);
+    });
+
+    it('adopts the later exact native guide without carrying the wrong key through a completed or cold canonical snapshot', () => {
+      const second: UiMessage = { ...first, id: 'usr_135000_steer_run_2', renderKey: 'usr_135000_steer_run_2', timestampMs: 135_000 };
+      const secondEcho: UiMessage = { ...firstEcho, id: 'native-guide-2', historyMessageId: 'native-guide-2', timestampMs: 135_010 };
+      const stale = reconcile([main, first, second], [main, firstEcho]);
+      const completed = reconcile(stale, [main, firstEcho, secondEcho]);
+      expect(completed.filter(message => message.role === 'user').map(message => message.id)).toEqual([main.id, firstEcho.id, secondEcho.id]);
+      expect(completed.find(message => message.id === firstEcho.id)?.renderKey).toBeUndefined();
+      expect(completed.find(message => message.id === secondEcho.id)?.renderKey).toBe(second.renderKey);
+      expect(new Set(completed.map(message => message.renderKey ?? message.id)).size).toBe(completed.length);
+      const confirmed = reconcile(completed, [main, firstEcho, secondEcho]);
+      // A later exact history alias owns the canonical clock, while keys stay stable.
+      expect(confirmed).toEqual([main, firstEcho, { ...completed[2], timestampMs: secondEcho.timestampMs }]);
+      expect(reconcile(confirmed, [main, firstEcho, secondEcho])).toEqual(confirmed);
+      expect(preserveHydratedMessageKeys(completed, [main, firstEcho, secondEcho]))
+        .toEqual([main, firstEcho, { ...secondEcho, renderKey: second.renderKey, sentLocally: true }]);
+    });
+
+    it('keeps an already confirmed exact history identity even when its authoritative clock changes', () => {
+      const confirmed = { ...first, historyMessageId: firstEcho.id, timestampMs: 135_000 };
+      const merged = reconcile([main, confirmed], [main, firstEcho]);
+      expect(merged).toHaveLength(2);
+      expect(merged[1]).toMatchObject({ id: firstEcho.id, renderKey: first.renderKey, historyMessageId: firstEcho.id, timestampMs: firstEcho.timestampMs });
+      const exactId = { ...firstEcho, renderKey: first.renderKey, sentLocally: true as const };
+      expect(reconcile([main, exactId], [main, { ...firstEcho, timestampMs: 135_000 }])[1])
+        .toMatchObject({ id: firstEcho.id, renderKey: first.renderKey, timestampMs: 135_000 });
+    });
+
+    it('keeps legacy timestamp-free steering echoes and ordinary non-steering fallback behavior', () => {
+      const steering = { ...first, timestampMs: 135_000 };
+      const untimed = { ...firstEcho, timestampMs: undefined };
+      expect(reconcile([main, steering], [main, untimed])[1]).toMatchObject({ id: firstEcho.id, renderKey: first.renderKey });
+      const ordinary = { ...steering, id: 'usr_135000', renderKey: 'usr_135000' };
+      expect(reconcile([main, ordinary], [main, firstEcho])[1]).toMatchObject({ id: firstEcho.id, renderKey: ordinary.renderKey });
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 8_640_000_000_000_001])('does not treat an invalid native clock (%s) as contradictory steering evidence', (timestampMs) => {
+      const steering = { ...first, timestampMs: 135_000 };
+      expect(reconcile([main, steering], [main, { ...firstEcho, timestampMs }])[1])
+        .toMatchObject({ id: firstEcho.id, renderKey: first.renderKey });
+    });
+  });
+
   it('does not move the previous final reply past a newer user while recovering timestamp-free history', () => {
     const old: UiMessage = { id: 'final_old', role: 'assistant', text: 'Old answer', timestampMs: 1000, historyMessageId: 'old-native' };
     const user: UiMessage = { id: 'usr_2000', role: 'user', text: 'New question', timestampMs: 2000, idempotencyKey: 'send-2' };
@@ -591,6 +711,12 @@ describe('preserveToolTiming', () => {
   const reloaded: UiMessage = { id: 'toolresult_call_1', role: 'tool', text: '', toolName: 'bash', toolStatus: 'success', toolFinishedAt: 7_000 };
   const reply: UiMessage = { id: 'reply', role: 'assistant', text: 'done' };
 
+  it.each(['unknown', 'running'] as const)('does not restore old completion clocks to explicitly reported %s history', toolStatus => {
+    const next = [{ ...reloaded, toolStatus, toolStatusReported: true as const, toolFinishedAt: undefined }];
+    expect(preserveToolTiming([live], next)).toBe(next);
+    expect(next[0].toolFinishedAt).toBeUndefined();
+  });
+
   it('keeps the times the phone measured when history has none of its own', () => {
     expect(preserveToolTiming([live], [reply, reloaded])).toEqual([
       reply,
@@ -613,5 +739,254 @@ describe('preserveToolTiming', () => {
     const aliased = { ...live, id: 'toolcall_live_7' };
     expect(preserveToolTiming([aliased], [{ ...reloaded, id: 'toolcall_item_7' }], { live_7: 'item_7' })[0])
       .toMatchObject({ id: 'toolcall_item_7', toolStartedAt: 10_000, toolFinishedAt: 35_000 });
+  });
+});
+
+describe('native same-run completed presentation', () => {
+  it('keeps two canonical guides interleaved while adopting completed live tool identities', () => {
+    const main: UiMessage = { id: 'main', role: 'user', text: 'Task', turnId: 'turn', idempotencyKey: 'send' };
+    const a: UiMessage = { id: 'live-a', role: 'assistant', text: 'A', turnId: 'turn', presentationRunId: 'run', renderKey: 'stable-a' };
+    const tool: UiMessage = { id: 'toolcall_exec', role: 'tool', text: '', toolName: 'exec', toolStatus: 'running', turnId: 'turn', presentationRunId: 'run' };
+    const b: UiMessage = { id: 'live-b', role: 'assistant', text: 'B', turnId: 'turn', presentationRunId: 'run', renderKey: 'stable-b' };
+    const guide1: UiMessage = { id: 'guide1', role: 'user', text: 'Same guide', turnId: 'turn' };
+    const guide2: UiMessage = { ...guide1, id: 'guide2' };
+    const next: UiMessage = { ...guide1, id: 'next', idempotencyKey: 'next-send', turnId: 'next-turn' };
+    const remote: UiMessage[] = [main, { ...a, id: 'native-a', presentationRunId: undefined },
+      { ...tool, toolStatus: 'success', presentationRunId: undefined }, guide1,
+      { ...b, id: 'native-b', presentationRunId: undefined }, guide2, next];
+    const rows = preserveCompletedRunPresentation([main, a, tool, guide1, b, guide2], remote);
+    expect(rows.map(row => row.text)).toEqual(['Task', 'A', '', 'Same guide', 'B', 'Same guide', 'Same guide']);
+    expect(rows.filter(row => row.role === 'user').map(row => row.id)).toEqual(['main', 'guide1', 'guide2', 'next']);
+    expect(rows.filter(row => row.id === 'toolcall_exec')).toEqual([expect.objectContaining({ toolStatus: 'success' })]);
+    expect(rows.find(row => row.text === 'A')?.renderKey).toBe('stable-a');
+    expect(rows.at(-1)).toEqual(next);
+  });
+});
+
+
+
+describe('interrupted cumulative commentary across a canonical same-turn guide', () => {
+  const setup = () => {
+    const main: UiMessage = { id: 'native-main', role: 'user', text: 'Synthetic main', turnId: 'native-turn', idempotencyKey: 'main-send' };
+    const s: UiMessage = { id: 'native-s', role: 'assistant', text: 'Before tool.', turnId: 'native-turn', timestampMs: 1_000 };
+    const tool: UiMessage = { id: 'toolcall_synthetic', role: 'tool', text: '', toolName: 'exec', toolStatus: 'running', turnId: 'native-turn' };
+    const a: UiMessage = { id: 'native-a', role: 'assistant', text: 'Commentary A.', turnId: 'native-turn', timestampMs: 10_000 };
+    const guide: UiMessage = { id: 'native-guide', role: 'user', text: 'Synthetic guide', turnId: 'native-turn', timestampMs: 20_000 };
+    const b: UiMessage = { id: 'native-b', role: 'assistant', text: 'Commentary B.', turnId: 'native-turn', timestampMs: 30_000 };
+    const history = [main, s, tool, a, guide, b];
+    // This is the actual controller terminal composition; the cumulative tail
+    // has never met another tool boundary. No synthetic ACK cuts the text.
+    const rows = finishLiveRunPresentation({
+      segments: [{ id: 'local-s', renderKey: 'stable-s', text: s.text, timestampMs: 1_000, afterToolCount: 0 }],
+      tools: [tool], tail: a.text + '\n\n' + b.text, runId: 'synthetic-run',
+      startedAt: 1_000, turnId: 'native-turn', cancelled: true,
+    });
+    const merge = (incoming: UiMessage[]) => preserveOptimisticAssistantMessage([
+      ...incoming.filter(message => !rows.some(row => row.id === message.id)), ...rows,
+    ], incoming);
+    return { main, s, tool, a, guide, b, history, rows, merge };
+  };
+
+  it('keeps canonical A / guide / B once after abort instead of retaining a second A+B bubble', () => {
+    const { history, a, b, merge } = setup();
+    const result = merge(history);
+    expect(result.map(row => row.text)).toEqual(['Synthetic main', 'Before tool.', '', a.text, 'Synthetic guide', b.text]);
+    expect(result.filter(row => row.role === 'assistant').map(row => row.timestampMs)).toEqual([1_000, 10_000, 30_000]);
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.filter(row => row.id === b.id)).toHaveLength(1);
+    expect(result.find(row => row.text === 'Before tool.')?.renderKey).toBe('stable-s');
+    expect(result.find(row => row.id === a.id)?.renderKey).toBe(liveReplyRenderKey(1_000, 'synthetic-run', 1));
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+    // Repeated reconciliation cannot recreate the aborted aggregate.
+    expect(preserveOptimisticAssistantMessage(result, history).map(row => row.text)).toEqual(result.map(row => row.text));
+  });
+
+  it.each(['missing-b', 'no-guide', 'foreign-guide', 'local-ack', 'no-turn', 'missing-clock', 'changed-tail'] as const)
+  ('retains unproven text instead of guessing a split for %s', variant => {
+    const { history, a, b, rows, merge } = setup();
+    const incoming = history.flatMap(row => {
+      if (variant === 'missing-b' && row.id === b.id) return [];
+      if (variant === 'no-guide' && row.role === 'user' && row.id !== 'native-main') return [];
+      if (variant === 'foreign-guide' && row.id === 'native-guide') return [{ ...row, turnId: 'foreign-turn' }];
+      if (variant === 'local-ack' && row.id === 'native-guide') return [{ ...row, id: 'usr_20000_steer_synthetic-run', sentLocally: true as const }];
+      if (variant === 'no-turn') return [{ ...row, turnId: undefined }];
+      if (variant === 'missing-clock' && row.id === b.id) return [{ ...row, timestampMs: undefined }];
+      if (variant === 'changed-tail' && row.id === b.id) return [{ ...row, text: b.text + ' Changed.' }];
+      return [row];
+    });
+    const result = merge(incoming);
+    expect(result.some(row => row.id === 'abort_synthetic-run' && row.text === a.text + '\n\n' + b.text)).toBe(true);
+    expect(rows.find(row => row.id === 'abort_synthetic-run')?.text).toBe(a.text + '\n\n' + b.text);
+  });
+  it.each([undefined, 0, Number.NaN])('does not split across an unreported or invalid guide clock (%s)', timestampMs => {
+    const { history, a, b, merge } = setup();
+    const incoming = history.map(row => row.id === 'native-guide' ? { ...row, timestampMs } : row);
+    expect(merge(incoming).some(row => row.id === 'abort_synthetic-run' && row.text === a.text + '\n\n' + b.text)).toBe(true);
+  });
+
+  it('preserves canonical row order even when individually valid clocks are nonmonotonic', () => {
+    const { history, a, b, merge } = setup();
+    const incoming = history.map(row => row.id === b.id ? { ...row, timestampMs: 5_000 } : row);
+    const result = merge(incoming);
+    expect(result.map(row => row.text)).toEqual(['Synthetic main', 'Before tool.', '', a.text, 'Synthetic guide', b.text]);
+    expect(result.filter(row => row.role === 'assistant').map(row => row.timestampMs)).toEqual([1_000, 10_000, 5_000]);
+  });
+
+  it('keeps an already displayed canonical A render identity instead of claiming it for the aborted rollup', () => {
+    const { history, a, b, merge } = setup();
+    const incoming = history.map(row => row.id === a.id ? { ...row, renderKey: 'old-stable-canonical-a' } : row);
+    const result = merge(incoming);
+    expect(result.find(row => row.id === a.id)?.renderKey).toBe('old-stable-canonical-a');
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.filter(row => row.id === b.id)).toHaveLength(1);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('does not give canonical A a render key already owned by canonical B', () => {
+    const { history, a, b, merge } = setup();
+    const tailKey = liveReplyRenderKey(1_000, 'synthetic-run', 1);
+    const incoming = history.map(row => row.id === b.id ? { ...row, renderKey: tailKey } : row);
+    const result = merge(incoming);
+    // A adopts its own canonical identity rather than stealing B's existing cell.
+    expect(result.find(row => row.id === a.id)?.renderKey ?? a.id).toBe(a.id);
+    expect(result.find(row => row.id === b.id)?.renderKey).toBe(tailKey);
+    expect(result.some(row => row.id === 'abort_synthetic-run')).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('preserves a distinct earlier identical paragraph when the latest exact native identity is known', () => {
+    const { history, a, b, guide, merge } = setup();
+    const earlyA = { ...a, id: 'native-earlier-a', timestampMs: 5_000 };
+    const earlyGuide = { ...guide, id: 'native-earlier-guide', timestampMs: 6_000 };
+    const intervening = { ...a, id: 'native-intervening', text: 'An independent paragraph.', timestampMs: 7_000 };
+    const incoming = [...history.slice(0, 3), earlyA, earlyGuide, intervening, ...history.slice(3)];
+    const result = merge(incoming);
+    expect(result.map(row => row.text)).toEqual(incoming.map(row => row.text));
+    expect(result.filter(row => row.id === earlyA.id)).toHaveLength(1);
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.findIndex(row => row.id === a.id)).toBeLessThan(result.findIndex(row => row.id === guide.id));
+    expect(result.findIndex(row => row.id === guide.id)).toBeLessThan(result.findIndex(row => row.id === b.id));
+    expect(result.some(row => row.id === 'abort_synthetic-run')).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('retains an aggregate when an exact local prefix has changed content', () => {
+    const { history, a, b, rows } = setup();
+    const ownedA: UiMessage = { ...a, text: 'Unconfirmed changed paragraph.', presentationRunId: 'synthetic-run', renderKey: 'old-stable-canonical-a' };
+    const prior = [...history.filter(row => !rows.some(local => local.id === row.id) && row.id !== a.id), ...rows.filter(row => row.id !== 'abort_synthetic-run'), ownedA, rows.find(row => row.id === 'abort_synthetic-run')!];
+    const result = preserveOptimisticAssistantMessage(prior, history);
+    expect(result.some(row => row.id === 'abort_synthetic-run' && row.text === a.text + '\n\n' + b.text)).toBe(true);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('does not clone A when an independent local presentation segment already owns its exact canonical identity', () => {
+    const { history, a, b, rows } = setup();
+    const ownedA: UiMessage = { ...a, presentationRunId: 'synthetic-run', renderKey: 'old-stable-canonical-a' };
+    const prior = [...history.filter(row => !rows.some(local => local.id === row.id) && row.id !== a.id), ...rows.filter(row => row.id !== 'abort_synthetic-run'), ownedA, rows.find(row => row.id === 'abort_synthetic-run')!];
+    const result = preserveOptimisticAssistantMessage(prior, history);
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.find(row => row.id === a.id)?.renderKey).toBe('old-stable-canonical-a');
+    expect(result.some(row => row.id === 'abort_synthetic-run')).toBe(false);
+    expect(result.map(row => row.text)).toEqual(['Synthetic main', 'Before tool.', '', a.text, 'Synthetic guide', b.text]);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+});
+
+describe('interrupted commentary with independently owned canonical prefix', () => {
+  const fixture = () => {
+    const turnId = 'synthetic-prefix-turn';
+    const runId = 'synthetic-prefix-run';
+    const repeated = 'Synthetic repeated commentary A.';
+    const after = 'Synthetic commentary B.';
+    const main: UiMessage = { id: 'synthetic-main', role: 'user', text: 'Synthetic task',
+      turnId, idempotencyKey: 'synthetic-main-send' };
+    const assistant = (ordinal: number, text: string): UiMessage => ({
+      id: `synthetic-native-assistant-${ordinal}`, role: 'assistant', text,
+      turnId, timestampMs: ordinal * 10_000,
+    });
+    const a1 = assistant(1, 'Synthetic introduction.');
+    const earlierA = assistant(3, repeated);
+    const latestA = assistant(10, repeated);
+    const b = assistant(11, after);
+    const tool: UiMessage = { id: 'toolcall_synthetic-prefix', role: 'tool', text: '',
+      toolName: 'exec', toolStatus: 'success', turnId, timestampMs: 15_000 };
+    // Native wire ID survives an ACK-first echo; sentLocally is its origin only.
+    const guide1: UiMessage = { id: 'synthetic-native-guide-1', role: 'user', text: 'Synthetic guide',
+      turnId, timestampMs: 95_000, sentLocally: true, renderKey: 'usr_95000_steer_synthetic-prefix-run' };
+    const guide2: UiMessage = { id: 'synthetic-native-guide-2', role: 'user', text: guide1.text,
+      turnId, timestampMs: 105_000, sentLocally: true, renderKey: 'usr_105000_steer_synthetic-prefix-run' };
+    // Exactly 16 canonical rows, 12 assistants, two same-turn guides. The early
+    // ordinal-3 A has the same text as ordinal-10 A but a distinct wire identity.
+    // This is synthetic ordering, not copied private Native text or wire data.
+    const canonical: UiMessage[] = [main, a1, tool,
+      assistant(2, 'Synthetic commentary two.'), earlierA,
+      assistant(4, 'Synthetic commentary four.'), assistant(5, 'Synthetic commentary five.'),
+      assistant(6, 'Synthetic commentary six.'), assistant(7, 'Synthetic commentary seven.'),
+      assistant(8, 'Synthetic commentary eight.'), assistant(9, 'Synthetic commentary nine.'),
+      guide1, latestA, guide2, b, assistant(12, 'Synthetic later paragraph.')];
+    const finished = finishLiveRunPresentation({
+      segments: [{ id: 'synthetic-local-intro', renderKey: 'synthetic-stable-intro',
+        text: a1.text, timestampMs: a1.timestampMs!, afterToolCount: 0 }],
+      tools: [tool], tail: repeated + '\n\n' + after, runId,
+      startedAt: 10_000, turnId, cancelled: true,
+    });
+    const aborted = finished.find(row => row.id === `abort_${runId}`)!;
+    const previous = (owners: UiMessage[] = []): UiMessage[] => [
+      main, ...finished.filter(row => row !== aborted), guide1, ...owners, guide2, aborted,
+    ];
+    const merge = (owners: UiMessage[] = []) => preserveOptimisticAssistantMessage(previous(owners), canonical);
+    return { canonical, latestA, earlierA, b, aborted, repeated, runId, merge };
+  };
+
+  it('keeps the earlier equal-text Native row when the unique latest A/guide/B tail is reconciled', () => {
+    const { canonical, latestA, earlierA, b, aborted, repeated, merge } = fixture();
+    expect(canonical).toHaveLength(16);
+    expect(canonical.filter(row => row.role === 'assistant')).toHaveLength(12);
+    const result = merge();
+    // A text fallback must not win before an available exact wire identity.
+    expect(result.map(row => row.id)).toEqual(canonical.map(row => row.id));
+    expect(result.filter(row => row.text === repeated).map(row => row.id)).toEqual([earlierA.id, latestA.id]);
+    expect(result.find(row => row.id === latestA.id)?.renderKey).toBe(aborted.renderKey);
+    expect(result.find(row => row.id === earlierA.id)?.renderKey ?? earlierA.id).toBe(earlierA.id);
+    expect(result.find(row => row.id === b.id)?.timestampMs).toBe(b.timestampMs);
+    expect(result.some(row => row.id === aborted.id)).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+    expect(preserveOptimisticAssistantMessage(result, canonical)).toEqual(result);
+  });
+
+  it('keeps an exact independently owned latest A cell and replaces only the interrupted suffix with B', () => {
+    const { canonical, latestA, earlierA, b, aborted, runId, merge } = fixture();
+    const owner: UiMessage = { ...latestA, presentationRunId: runId, renderKey: 'synthetic-owned-latest-a' };
+    const result = merge([owner]);
+    expect(result.map(row => row.id)).toEqual(canonical.map(row => row.id));
+    expect(result.filter(row => row.id === latestA.id)).toHaveLength(1);
+    expect(result.find(row => row.id === latestA.id)).toMatchObject({
+      text: latestA.text, turnId: latestA.turnId, timestampMs: latestA.timestampMs,
+      renderKey: owner.renderKey,
+    });
+    expect(result.find(row => row.id === earlierA.id)?.renderKey ?? earlierA.id).toBe(earlierA.id);
+    expect(result.find(row => row.id === b.id)).toMatchObject({
+      text: b.text, timestampMs: b.timestampMs, renderKey: aborted.renderKey,
+    });
+    expect(result.some(row => row.id === aborted.id)).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+    expect(preserveOptimisticAssistantMessage(result, canonical)).toEqual(result);
+  });
+
+  it('retains the aggregate when exact prefix ownership has changed text or is ambiguous', () => {
+    const { latestA, aborted, runId, merge } = fixture();
+    const owner: UiMessage = { ...latestA, presentationRunId: runId, renderKey: 'synthetic-owned-latest-a' };
+    const cases: UiMessage[][] = [
+      [{ ...owner, text: 'Synthetic changed ownership text.' }],
+      [owner, { ...owner, id: 'synthetic-local-alias-a', historyMessageId: latestA.id,
+        renderKey: 'synthetic-second-owner-a' }],
+    ];
+    for (const owners of cases) {
+      const result = merge(owners);
+      expect(result.filter(row => row.id === aborted.id)).toEqual([expect.objectContaining({
+        text: aborted.text, turnId: aborted.turnId, renderKey: aborted.renderKey,
+      })]);
+    }
   });
 });

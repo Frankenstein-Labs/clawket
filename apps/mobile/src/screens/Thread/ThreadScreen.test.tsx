@@ -7,12 +7,14 @@ jest.mock('./components/SessionFilesSheet', () => ({ SessionFilesSheet: () => nu
 import { createReplyConversation } from '../../services/reply-conversation';
 jest.mock('../../services/reply-conversation', () => ({ createReplyConversation: jest.fn(), replyConversationDraft: (message: any) => message.role === 'assistant' && !message.streaming ? message.text : null }));
 jest.mock('./components/DraftRecoverySheet', () => ({ DraftRecoverySheet: () => null }));
-jest.mock('./components/RunInputSheet', () => ({ RunInputSheet: () => null }));
+let mockRunInputSheetProps: Record<string, any> | null = null;
+jest.mock('./components/RunInputSheet', () => ({ RunInputSheet: (props: any) => { mockRunInputSheetProps = props; return null; } }));
 let mockSkillPickerProps: { sessionKey?: string; onSelect: (skill: any) => void } | null = null;
 jest.mock('./components/SkillPickerSheet', () => ({ SkillPickerSheet: (props: any) => { mockSkillPickerProps = props; return null; } }));
 jest.mock('./components/SelectedSkill', () => ({ SelectedSkill: () => null }));
 jest.mock('../../services/incoming-share', () => ({ IncomingShareStore: { list: jest.fn(async () => []), remove: jest.fn(async () => undefined) } }));
 import React from 'react';
+import { Keyboard } from 'react-native';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { CAPABILITY_MATRIX } from '@clawket/agent-protocol';
 import type { ComposerHandle } from '../../components/ui/Composer';
@@ -306,6 +308,41 @@ function createApp(): Record<string, unknown> {
 }
 
 describe('ThreadScreen connection container', () => {
+  it('keeps the Current/Next chooser while a Current acknowledgement is pending instead of silently queuing Next', () => {
+    mockController.canChooseRunInput = true;
+    mockController.canSteer = false;
+    mockController.steeringPending = true;
+    mockController.activeRunId = 'active';
+    mockController.onSteer = jest.fn();
+    render(<ThreadScreen {...createNavigationProps()} />);
+    act(() => mockThreadViewProps?.onSend?.());
+    expect(mockRunInputSheetProps?.visible).toBe(true);
+    expect(mockRunInputSheetProps?.canSteer).toBe(false);
+    expect(mockRunInputSheetProps?.steeringPending).toBe(true);
+    expect(mockController.onSend).not.toHaveBeenCalled();
+    act(() => mockRunInputSheetProps?.onNext());
+    expect(mockController.onSend).toHaveBeenCalledTimes(1);
+    expect(mockController.onSteer).not.toHaveBeenCalled();
+  });
+
+  it('dismisses the editing keyboard before presenting the current-or-next chooser without sending', () => {
+    const props = createNavigationProps();
+    const blur = jest.fn();
+    mockController.composerRef = { current: { blur, focus: jest.fn(), clear: jest.fn() } };
+    mockController.canChooseRunInput = true;
+    mockController.canSteer = true;
+    mockController.onSteer = jest.fn();
+    mockController.activeRunId = 'current-run';
+    (Keyboard.dismiss as jest.Mock).mockClear();
+    render(<ThreadScreen {...props} />);
+    act(() => mockThreadViewProps?.onSend());
+    expect(blur).toHaveBeenCalledTimes(1);
+    expect(Keyboard.dismiss).toHaveBeenCalledTimes(1);
+    expect(mockRunInputSheetProps?.visible).toBe(true);
+    expect(mockController.onSend).not.toHaveBeenCalled();
+    expect(mockController.onSteer).not.toHaveBeenCalled();
+  });
+
   it('routes a required native permission confirmation directly to permission selection', () => {
     const props = createNavigationProps();
     mockController.runtimeSettingsUnconfirmed = true;
@@ -314,6 +351,7 @@ describe('ThreadScreen connection container', () => {
     const setPermissionPickerVisible = jest.fn();
     mockController.setPermissionPickerVisible = setPermissionPickerVisible;
     render(<ThreadScreen {...props} />);
+    expect(mockThreadViewProps?.permissionsNeedConfirmation).toBe(true);
     act(() => mockThreadViewProps?.onReviewRuntimeSettings?.());
     expect(setPermissionPickerVisible).toHaveBeenCalledWith(true);
     expect(mockController.setModelPickerVisible).toHaveBeenCalledWith(false);
@@ -1548,7 +1586,7 @@ test('voice widget waits for focus, capability, restored draft and the matching 
     mockRuntime.getSnapshot.mockReturnValue({ activeConnectionId: 'connection-1', activeAdapter: adapter } as any);
     const view = render(<ThreadScreen {...props} />);
     await act(async () => mockThreadViewProps?.messageActions?.onBranch?.(reply));
-    expect(createReplyConversation).toHaveBeenCalledWith(adapter, 'atlas', 'agent:atlas:main', reply);
+    expect(createReplyConversation).toHaveBeenCalledWith(adapter, 'atlas', 'agent:atlas:main', reply, undefined);
     expect(props.navigation.push).toHaveBeenCalledWith('Thread', expect.objectContaining({ sessionKey: 'new-chat' }));
     jest.mocked(props.navigation.push).mockClear();
     let finish!: (value: any) => void;
@@ -1557,6 +1595,31 @@ test('voice widget waits for focus, capability, restored draft and the matching 
     view.unmount();
     await act(async () => finish({ key: 'late-chat' }));
     expect(props.navigation.push).not.toHaveBeenCalled();
+  });
+
+  test.each(['codex', 'pi', 'claude-code'] as const)('quotes a reply using only the current scoped %s project', async backend => {
+    const props = createNavigationProps();
+    const reply = { id: 'project-reply', role: 'assistant' as const, text: 'Selected project answer' };
+    const currentAdapter = { ...adapter, connection: { ...adapter.connection, backendKind: backend }, capabilities: { ...CAPABILITY_MATRIX[backend] } };
+    mockConnections.activeAdapter = currentAdapter;
+    mockConnections.roster = [
+      { connection: { id: 'other-connection' }, agents: [{ agent: { agentId: 'atlas' }, sessions: [{ key: props.route.params.sessionKey, project: { id: 'foreign-project' } }] }] },
+      { connection: currentAdapter.connection, agents: [
+        { agent: { agentId: 'other-agent' }, sessions: [{ key: props.route.params.sessionKey, project: { id: 'other-agent-project' } }] },
+        { agent: { agentId: 'atlas' }, sessions: [
+          { key: 'other-session', project: { id: 'other-session-project' } },
+          { key: props.route.params.sessionKey, project: { id: 'opaque-selected-project', name: 'QA', path: '/qa/selected' } },
+        ] },
+      ] },
+    ];
+    jest.mocked(createReplyConversation).mockResolvedValueOnce({ key: 'project-quote-chat' } as any);
+    mockRuntime.getSnapshot.mockReturnValue({ activeConnectionId: 'connection-1', activeAdapter: currentAdapter } as any);
+    const view = render(<ThreadScreen {...props} />);
+    await act(async () => mockThreadViewProps?.messageActions?.onBranch?.(reply));
+    expect(createReplyConversation).toHaveBeenLastCalledWith(currentAdapter, 'atlas', props.route.params.sessionKey, reply, 'opaque-selected-project');
+    expect(props.navigation.push).toHaveBeenCalledWith('Thread', expect.objectContaining({ sessionKey: 'project-quote-chat' }));
+    expect(mockController.onSend).not.toHaveBeenCalled();
+    view.unmount();
   });
 
   test.each(['camera', 'photos'] as const)('%s widget waits for a restored draft and opens its native picker once', async (shortcut) => {

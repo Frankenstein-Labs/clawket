@@ -2,7 +2,8 @@ import type { UiMessage } from '../../types/chat';
 import { unwrapShellCommand } from '../../utils/tool-display';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
-import { opensTurn, type TurnWork } from './turn-work';
+import { liveTurnMessages, type TurnWork } from './turn-work';
+import type { RunWorkIdentity } from '../../chat/turnIdentity';
 
 /**
  * What the work dock says (tool process design C, owner decision
@@ -25,18 +26,13 @@ export type WorkDockPhase =
 export const WORK_DOCK_GRACE_MS = 1_000;
 
 /** The newest turn has said something so far. `messages` is newest-first. */
-export function liveTurnHasWords(messages: ReadonlyArray<UiMessage>): boolean {
-  for (const message of messages) {
-    if (opensTurn(message)) return false;
-    if (message.role === 'assistant' && message.text.trim()) return true;
-  }
-  return false;
+export function liveTurnHasWords(messages: ReadonlyArray<UiMessage>, active?: RunWorkIdentity): boolean {
+  return liveTurnMessages(messages, active).some(message => message.role === 'assistant' && message.text.trim().length > 0);
 }
 
 /** The newest turn's reply is streaming words. `messages` is newest-first. */
-function isReplying(messages: ReadonlyArray<UiMessage>): boolean {
-  for (const message of messages) {
-    if (opensTurn(message)) return false;
+function isReplying(messages: ReadonlyArray<UiMessage>, active?: RunWorkIdentity): boolean {
+  for (const message of liveTurnMessages(messages, active)) {
     if (message.role === 'tool' && !message.approval) return false;
     if (message.role === 'assistant' && message.text.trim()) return message.streaming === true;
   }
@@ -51,16 +47,18 @@ export function resolveWorkDockPhase({
   work,
   messages,
   offline,
+  active,
 }: Readonly<{
   work: TurnWork;
   /** Newest-first, as the controller keeps them. */
   messages: ReadonlyArray<UiMessage>;
   offline: boolean;
+  active?: RunWorkIdentity;
 }>): WorkDockPhase {
   if (offline) return { kind: 'offline' };
   if (work.pendingApproval) return { kind: 'approval', request: work.pendingApproval };
   if (work.current) return { kind: 'step', step: work.current };
-  if (isReplying(messages)) return { kind: 'replying' };
+  if (isReplying(messages, active)) return { kind: 'replying' };
   return { kind: 'thinking' };
 }
 

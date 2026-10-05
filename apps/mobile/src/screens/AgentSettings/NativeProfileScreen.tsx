@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useIsFocused } from '@react-navigation/native';
@@ -79,14 +79,27 @@ function ProfilePage({ adapter, profile, section, online, navigation, params }: 
   }, [profile, section, selectedId]);
   const read = useProfileRead<ProfileDefaults | ProfileUsage | ProfileSkills | ProfileInstruction[] | ProfileMcp[] | ProfilePlugin[]>(load, online && focused && (!scoped || !!selectedId), refresh);
   const context = useRef({ profile, selectedId, section, online, focused }); context.current = { profile, selectedId, section, online, focused };
+  const mutationGeneration = useRef(0);
+  useLayoutEffect(() => {
+    mutationGeneration.current++;
+    return () => { mutationGeneration.current++; };
+  }, [profile, selectedId, section, online, focused]);
+  const refreshProfile = () => {
+    mutationGeneration.current++;
+    setWriteError(false);
+    setRefresh(value => value + 1);
+  };
   const mutate = async (operation: () => Promise<unknown>, confirmed?: (value: unknown) => void) => {
     if (lock.current || !online || !focused) return;
-    const before = context.current; lock.current = true; setBusy(true); setWriteError(false);
+    const before = context.current, generation = mutationGeneration.current;
+    const current = () => live.current && mutationGeneration.current === generation
+      && context.current.profile === before.profile && context.current.selectedId === before.selectedId
+      && context.current.section === before.section && context.current.online && context.current.focused;
+    lock.current = true; setBusy(true); setWriteError(false);
     try {
       const value = await operation();
-      const now = context.current;
-      if (live.current && now.profile === before.profile && now.selectedId === before.selectedId && now.section === before.section && now.online && now.focused) confirmed?.(value);
-    } catch { if (live.current && context.current.profile === before.profile && context.current.selectedId === before.selectedId && context.current.focused) setWriteError(true); }
+      if (current()) confirmed?.(value);
+    } catch { if (current()) setWriteError(true); }
     finally { lock.current = false; if (live.current) setBusy(false); }
   };
   const levelLabel = (level: string) => ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra'].includes(level) ? t(`profile.level.${level}`) : level;
@@ -111,12 +124,12 @@ function ProfilePage({ adapter, profile, section, online, navigation, params }: 
   const titles: Record<NativeProfileSection, string> = { models: t('profile.defaults'), usage: t('profile.usage'), skills: t('Skills', { ns: 'common' }), files: 'AGENTS.md', tools: 'MCP', plugins: t('profile.plugins') };
   const empty = read.value && (Array.isArray(read.value) ? read.value.length === 0 : section === 'skills' && skills?.skills.length === 0);
   return <View style={styles.screen} testID={`native-profile-${section}`}>
-    <ScreenHeader title={titles[section]} topInset={insets.top} onBack={() => navigation.goBack()} rightContent={<FloatingButton icon={RefreshCw} appearance="plain" accessibilityLabel={t('Refresh', { ns: 'common' })} disabled={busy} onPress={() => { setWriteError(false); setRefresh(value => value + 1); }} />} />
+    <ScreenHeader title={titles[section]} topInset={insets.top} onBack={() => navigation.goBack()} rightContent={<FloatingButton icon={RefreshCw} appearance="plain" accessibilityLabel={t('Refresh', { ns: 'common' })} disabled={busy} onPress={refreshProfile} />} />
     <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Space.xl }]} showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={read.pending && !!read.value} onRefresh={() => setRefresh(value => value + 1)} tintColor={theme.colors.inkSecondary} />}>
+      refreshControl={<RefreshControl refreshing={read.pending && !!read.value} onRefresh={refreshProfile} tintColor={theme.colors.inkSecondary} />}>
       {scoped ? <SettingsGroup><SettingsRow title={t('profile.project')} value={selectedProject?.name ?? '—'} tailWidth="wide" showChevron disabled={busy || !online} onPress={() => setDetail({ kind: 'project' })} /></SettingsGroup> : null}
       {section === 'models' ? <Text style={styles.note}>{t('profile.newChats')}</Text> : section === 'tools' || section === 'plugins' ? <Text style={styles.note}>{t('profile.desktopManage')}</Text> : section === 'files' ? <Text style={styles.note}>{t('profile.instructionsHint')}</Text> : null}
-      {writeError || read.failed || projects.failed ? <Banner message={t('profile.loadError')} actionLabel={t('Retry', { ns: 'common' })} onAction={() => { setWriteError(false); setRefresh(value => value + 1); }} /> : null}
+      {writeError || read.failed || projects.failed ? <Banner message={t('profile.loadError')} actionLabel={t('Retry', { ns: 'common' })} onAction={refreshProfile} /> : null}
       {!online ? <Text style={styles.note}>{t('profile.offline')}</Text> : null}
       {(!read.value && (read.pending || scoped && projects.pending)) ? <SettingsGroup><Skeleton style={styles.loading} /><Skeleton style={styles.loading} /></SettingsGroup> : null}
       {scoped && !projects.pending && !projects.failed && !selectedId ? <Text style={styles.note}>{t('profile.noProjects')}</Text> : null}

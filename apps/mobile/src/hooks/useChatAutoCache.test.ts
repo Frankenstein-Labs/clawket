@@ -1,3 +1,4 @@
+import { resetSessionHistory } from '../connection/session-reset';
 import { act, renderHook } from '@testing-library/react-native';
 import { useChatAutoCache } from './useChatAutoCache';
 import { ChatCacheService } from '../services/chat-cache';
@@ -5,6 +6,7 @@ import { ChatCacheService } from '../services/chat-cache';
 jest.mock('../services/chat-cache', () => ({
   ChatCacheService: {
     saveMessages: jest.fn(),
+    deleteMessages: jest.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -78,4 +80,24 @@ describe('useChatAutoCache', () => {
       sessionLabel: 'Main session',
     }), messages);
   });
+  it('cancels the old debounce at Reset ACK before cache deletion even without a React render', async () => {
+    const adapter = { connection: { id: 'gw-1' }, resetSession: jest.fn().mockResolvedValue(undefined) };
+    const messages = [{ id: 'old', role: 'assistant', text: 'old reply' }] as any;
+    renderHook(() => useChatAutoCache({ adapter: adapter as any, gatewayConfigId: 'gw-1', agentId: 'main',
+      sessionKey: 'same-key', messages, historyLoaded: true }));
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', 'same-key'); jest.advanceTimersByTime(2000); });
+    expect(ChatCacheService.deleteMessages).toHaveBeenCalledWith('gw-1', 'main', 'same-key');
+    expect(ChatCacheService.saveMessages).not.toHaveBeenCalled();
+  });
+
+  it('keeps normal debounce after a rejected Reset', async () => {
+    const adapter = { connection: { id: 'gw-1' }, resetSession: jest.fn().mockRejectedValue(new Error('denied')) };
+    const messages = [{ id: 'old', role: 'assistant', text: 'old reply' }] as any;
+    renderHook(() => useChatAutoCache({ adapter: adapter as any, gatewayConfigId: 'gw-1', agentId: 'main',
+      sessionKey: 'same-key', messages, historyLoaded: true }));
+    await act(async () => { await expect(resetSessionHistory(adapter as any, 'main', 'same-key')).rejects.toThrow('denied'); jest.advanceTimersByTime(2000); });
+    expect(ChatCacheService.deleteMessages).not.toHaveBeenCalled();
+    expect(ChatCacheService.saveMessages).toHaveBeenCalledWith(expect.objectContaining({ sessionKey: 'same-key' }), messages);
+  });
+
 });

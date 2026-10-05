@@ -1,8 +1,9 @@
+import { originalRunUserIndex } from './turnIdentity';
 import { sameLiveToolCall, withToolMessage } from './liveToolMessages';
 import { hasBackendEcho, rememberUncertainSend, recoverUncertainSends, reconcilePromptReceipts, useUncertainSends } from './sendRecovery';
 import { describeReplyFailure, sanitizeReplyFailure } from './reply-failure';
 import { triggerSendHaptic, triggerSuccessHaptic, triggerWarningHaptic } from '../services/haptics';
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import {
   AppState,
   AppStateStatus,
@@ -15,9 +16,11 @@ import * as Haptics from "expo-haptics";
 import * as Network from "expo-network";
 import { useTranslation } from "react-i18next";
 import {
+  AdapterError,
   isImageAttachmentMimeType,
   normalizeAttachmentMimeType,
   supportsFileAttachments,
+  LocalSendRejectedError,
   type AgentAdapter,
   type AgentDescriptor,
   type ConnectionState as AdapterConnectionState,
@@ -52,6 +55,7 @@ import { APPROVE_COMMAND, HISTORY_PAGE_SIZE, MAX_IMAGES } from "./constants";
 import type { ChatControllerOptions } from "./types";
 import { useAppContext } from "../contexts/AppContext";
 import { onAdapterPathRecovered, recoverAdapterConnection } from '../connection/adapter-recovery';
+import { onSessionReset } from '../connection/session-reset';
 import {
   AgentActivity,
   agentIdFromSessionKey,
@@ -86,10 +90,12 @@ import {
   clearSessionRunState,
   markSessionRunDelta,
   markSessionRunStarted,
+  rememberSessionRunIdentity,
   SessionRunState,
 } from "./sessionRunState";
 import { shouldAdoptPendingOptimisticRunId } from "./pendingOptimisticRun";
-import { preserveApprovalRows, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, retireAliasedTools } from "./historyMergePolicy";
+import { validTurnIdentity, type RunWorkIdentity } from './turnIdentity';
+import { preserveApprovalRows, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, reconcileAcceptedSteeringMessage, retireAliasedTools } from "./historyMergePolicy";
 import {
   FOREGROUND_REFRESH_AFTER_RECONNECT_TIMEOUT_MS,
   getForegroundRefreshDelayMs,
@@ -189,6 +195,10 @@ function mapAdapterAgent(agent: AgentDescriptor) {
   };
 }
 
+function validStreamTimestamp(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15 ? value : undefined;
+}
+
 function latestVisibleAssistant(history: SessionHistory): {
   text: string;
   timestampMs: number;
@@ -247,16 +257,14 @@ function shouldMergeFinalMessage(
 export function useChatController({
   readOnly = false,
   adapter,
+  routeConnectionId,
+  routeAgentId,
   routeSessionKey,
   debugMode,
   showAgentAvatar,
   chatSessionRequest,
   clearChatSessionRequest,
 }: ChatControllerOptions) {
-  const attachmentScope = `${adapter?.connection.id ?? ''}:${routeSessionKey ?? ''}`;
-  const attachmentScopeRef = useRef<string | null>(attachmentScope);
-  attachmentScopeRef.current = attachmentScope;
-  useEffect(() => { attachmentScopeRef.current = attachmentScope; return () => { attachmentScopeRef.current = null; }; }, [attachmentScope]);
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   const appContext = useAppContext();
@@ -264,7 +272,12 @@ export function useChatController({
   const [connectionState, setConnectionState] = useState<ConnectionState>(
     adapter ? mapAdapterConnectionState(adapter.state) : "idle",
   );
-  const [input, setInput] = useState("");
+  const [input, setInputState] = useState("");
+  const inputRevisionRef = useRef(0);
+  const setInput = useCallback((next: SetStateAction<string>) => {
+    inputRevisionRef.current += 1;
+    setInputState(next);
+  }, []);
   const [sendFailure, setSendFailureMessage] = useState<string | null>(null);
   const [sendFailureDetails, setSendFailureDetails] = useState<string | null>(null);
   const uncertainFailureRef = useRef<{ scope: string | null; message: UiMessage } | null>(null);
@@ -294,88 +307,6 @@ export function useChatController({
     useState(false);
   const [staticThinkPickerVisible, setStaticThinkPickerVisible] =
     useState(false);
-  const {
-    pendingImages,
-    setPendingImages,
-    pickImage,
-    attachLocalImages,
-    clearPendingImages,
-    removePendingImage,
-    canAddMoreImages,
-  } = useChatImagePicker(MAX_IMAGES, attachmentScope);
-  const {
-    onPasteFiles,
-    onPasteFailed,
-  } = useChatPasteAttachments({
-    pendingAttachments: pendingImages,
-    setPendingAttachments: setPendingImages,
-    maxAttachments: MAX_IMAGES,
-    capabilities: adapter?.capabilities,
-  });
-
-  const pickFile = useCallback(async () => {
-    if (!supportsFileAttachments(adapter?.capabilities)) return;
-    const result = await DocumentPicker.getDocumentAsync({
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    if (!asset.uri) return;
-    try {
-      const b64 = await readFileAsBase64(asset.uri);
-      const img = {
-        uri: asset.uri,
-        base64: b64,
-        mimeType: normalizeAttachmentMimeType(asset.mimeType),
-        fileName: asset.name,
-      };
-      setPendingImages((prev: PendingImage[]) =>
-        [...prev, img].slice(0, MAX_IMAGES),
-      );
-    } catch {
-      /* skip */
-    }
-  }, [adapter?.capabilities, setPendingImages]);
-
-  const takePhoto = useCallback(async () => {
-    const IP = await import("expo-image-picker");
-    if (attachmentScopeRef.current !== attachmentScope || !canAddMoreImages) return;
-    const res = isMacCatalyst
-      ? await IP.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsMultipleSelection: false,
-        quality: 0.8,
-        base64: true,
-        exif: false,
-      })
-      : await (async () => {
-        const perm = await IP.requestCameraPermissionsAsync();
-        if (!perm.granted || attachmentScopeRef.current !== attachmentScope) return { canceled: true, assets: [] };
-        return IP.launchCameraAsync({
-          quality: 0.8,
-          base64: true,
-          exif: false,
-        });
-      })();
-    if (attachmentScopeRef.current !== attachmentScope) return;
-    if (!res.canceled && res.assets?.[0]?.base64) {
-      const a = res.assets[0];
-      setPendingImages((prev: PendingImage[]) =>
-        [
-          ...prev,
-          {
-            uri: a.uri,
-            base64: a.base64!,
-            mimeType: normalizeAttachmentMimeType(a.mimeType, "image/jpeg"),
-            width: a.width,
-            height: a.height,
-          },
-        ].slice(0, MAX_IMAGES),
-      );
-    }
-  }, [setPendingImages, attachmentScope, canAddMoreImages]);
-
   const preview = useChatImagePreview();
   const showDebug = debugMode ?? false;
   const { logs: debugLog, appendDebugLog: dbg } = useBufferedDebugLog(showDebug);
@@ -389,7 +320,10 @@ export function useChatController({
   const sendPreflightInFlightRef = useRef(false);
   const sendTriggerGuardRef = useRef(false);
 
+  const [nativeRunIdentityEpoch, setNativeRunIdentityEpoch] = useState(0);
   const [chatStream, setChatStream] = useState<string | null>(null);
+  const [chatStreamTimestampMs, setChatStreamTimestampMs] = useState<number | null>(null);
+  const chatStreamTimestampRef = useRef<number | null>(null);
   const [chatStreamSegments, setChatStreamSegments] = useState<StreamSegment[]>(
     [],
   );
@@ -507,6 +441,8 @@ export function useChatController({
       }
       chatStreamRef.current = null;
       setChatStream(null);
+      chatStreamTimestampRef.current = null;
+      setChatStreamTimestampMs(null);
     },
     [],
   );
@@ -516,7 +452,7 @@ export function useChatController({
     if (!currentText.trim()) {
       return;
     }
-    const ts = timestampMs ?? Date.now();
+    const ts = timestampMs ?? chatStreamTimestampRef.current ?? Date.now();
     const startedAt = streamStartedAtRef.current;
     const runId = currentRunIdRef.current;
     const previous = chatStreamSegmentsRef.current;
@@ -530,6 +466,11 @@ export function useChatController({
     setChatStreamSegments(next);
     chatStreamRef.current = null;
     setChatStream(null);
+    chatStreamTimestampRef.current = null;
+    setChatStreamTimestampMs(null);
+    const key = sessionKeyRef.current;
+    const remembered = key ? sessionRunStateRef.current.get(key) : undefined;
+    if (remembered?.runId === runId) remembered.streamTimestampMs = undefined;
   }, []);
 
   const armPendingRunTimeout = useCallback(() => {
@@ -583,6 +524,97 @@ export function useChatController({
     routeSessionKey,
     measuredToolsRef,
   });
+
+  const attachmentScope = JSON.stringify([
+    routeConnectionId ?? gatewayConfigId ?? '',
+    routeAgentId ?? currentAgentId,
+    routeSessionKey ?? history.sessionKey ?? '',
+  ]);
+  const {
+    pendingImages,
+    setPendingImages,
+    pickImage,
+    attachLocalImages,
+    clearPendingImages,
+    removePendingImage,
+    canAddMoreImages,
+    isCurrentAttachmentScope,
+  } = useChatImagePicker(MAX_IMAGES, attachmentScope);
+  const {
+    onPasteFiles,
+    onPasteFailed,
+  } = useChatPasteAttachments({
+    pendingAttachments: pendingImages,
+    setPendingAttachments: setPendingImages,
+    maxAttachments: MAX_IMAGES,
+    capabilities: adapter?.capabilities,
+    isCurrentAttachmentScope,
+  });
+
+  const pickFile = useCallback(async () => {
+    if (!isCurrentAttachmentScope() || !supportsFileAttachments(adapter?.capabilities)) return;
+    const result = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (!isCurrentAttachmentScope() || result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    if (!asset.uri) return;
+    try {
+      const b64 = await readFileAsBase64(asset.uri);
+      if (!isCurrentAttachmentScope()) return;
+      const img = {
+        uri: asset.uri,
+        base64: b64,
+        mimeType: normalizeAttachmentMimeType(asset.mimeType),
+        fileName: asset.name,
+      };
+      setPendingImages((prev: PendingImage[]) =>
+        [...prev, img].slice(0, MAX_IMAGES),
+      );
+    } catch {
+      /* skip */
+    }
+  }, [adapter?.capabilities, isCurrentAttachmentScope, setPendingImages]);
+
+  const takePhoto = useCallback(async () => {
+    if (!isCurrentAttachmentScope() || !canAddMoreImages) return;
+    const IP = await import("expo-image-picker");
+    if (!isCurrentAttachmentScope() || !canAddMoreImages) return;
+    const res = isMacCatalyst
+      ? await IP.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: false,
+        quality: 0.8,
+        base64: true,
+        exif: false,
+      })
+      : await (async () => {
+        const perm = await IP.requestCameraPermissionsAsync();
+        if (!perm.granted || !isCurrentAttachmentScope()) return { canceled: true, assets: [] };
+        return IP.launchCameraAsync({
+          quality: 0.8,
+          base64: true,
+          exif: false,
+        });
+      })();
+    if (!isCurrentAttachmentScope()) return;
+    if (!res.canceled && res.assets?.[0]?.base64) {
+      const a = res.assets[0];
+      setPendingImages((prev: PendingImage[]) =>
+        [
+          ...prev,
+          {
+            uri: a.uri,
+            base64: a.base64!,
+            mimeType: normalizeAttachmentMimeType(a.mimeType, "image/jpeg"),
+            width: a.width,
+            height: a.height,
+          },
+        ].slice(0, MAX_IMAGES),
+      );
+    }
+  }, [setPendingImages, isCurrentAttachmentScope, canAddMoreImages]);
 
   const isFocused = useIsFocused();
   // Conversation haptics (A+) play only for the conversation in front of the user.
@@ -724,6 +756,7 @@ export function useChatController({
     [history.messages, uncertainSends],
   );
   useChatAutoCache({
+    adapter,
     gatewayConfigId,
     agentId: cacheAgentIdentity.agentId,
     agentName: cacheAgentIdentity.agentName,
@@ -748,9 +781,11 @@ export function useChatController({
         return;
       }
       sessionRunStateRef.current.set(key, {
+        ...(sessionRunStateRef.current.get(key)?.runId === runId ? sessionRunStateRef.current.get(key) : {}),
         runId,
         streamText: chatStreamRef.current,
         startedAt: streamStartedAtRef.current ?? Date.now(),
+        streamTimestampMs: chatStreamTimestampRef.current ?? undefined,
       });
     },
     [],
@@ -864,6 +899,8 @@ export function useChatController({
       if (!currentRunIdRef.current && remembered) {
         currentRunIdRef.current = remembered.runId;
         streamStartedAtRef.current = remembered.startedAt;
+        chatStreamTimestampRef.current = remembered.streamTimestampMs ?? null;
+        setChatStreamTimestampMs(chatStreamTimestampRef.current);
         const streamText = sanitizeVisibleStreamText(remembered.streamText);
         chatStreamRef.current = streamText;
         setChatStream(streamText);
@@ -1057,13 +1094,22 @@ export function useChatController({
 
   const requestVisibleHistoryReload = useCallback(
     async (sessionKey: string, reason: string) => {
+      const scope = sendScopeRef.current;
+      const afterNativeWrite = reason === 'post-stream' || reason === 'steer-accepted';
       const inFlight = historyReloadInFlightRef.current;
       if (inFlight && inFlight.sessionKey === sessionKey) {
-        if (reason === "post-stream") {
-          // A tool-result read can precede native persistence. Completion must
-          // read again after it settles, even inside the normal refresh cooldown.
+        if (afterNativeWrite) {
+          // A tool-result read can precede a completed turn or accepted input.
+          // Both require a read after it settles, inside the normal cooldown.
           await inFlight.promise.catch(() => 0);
-          if (sessionKeyRef.current !== sessionKey || currentRunIdRef.current) return 0;
+          if (sessionKeyRef.current !== sessionKey
+            || (reason === 'post-stream' && currentRunIdRef.current)
+            || (reason === 'steer-accepted' && (!scope.active || sendScopeRef.current !== scope))) return 0;
+          // Multiple accepted inputs may have waited for this same older read.
+          // The first fresh read already follows all of those native writes.
+          const following = historyReloadInFlightRef.current;
+          if (reason === 'steer-accepted' && following?.sessionKey === sessionKey
+            && following.promise !== inFlight.promise) return following.promise;
         } else {
           if (showDebug) dbg(`historyReload:reuse session=${sessionKey} reason=${reason}`);
           return inFlight.promise;
@@ -1072,7 +1118,7 @@ export function useChatController({
 
       const recent = recentHistoryReloadRef.current;
       if (
-        reason !== "post-stream" && recent &&
+        !afterNativeWrite && recent &&
         recent.sessionKey === sessionKey &&
         Date.now() - recent.at < HISTORY_RELOAD_MIN_INTERVAL_MS
       ) {
@@ -1132,6 +1178,8 @@ export function useChatController({
         );
       currentRunIdRef.current = remembered.runId;
       streamStartedAtRef.current = remembered.startedAt;
+      chatStreamTimestampRef.current = remembered.streamTimestampMs ?? null;
+      setChatStreamTimestampMs(chatStreamTimestampRef.current);
       lastRunSignalAtRef.current = Date.now();
       lastRunRecoveryProbeAtRef.current = 0;
       const streamText = sanitizeVisibleStreamText(remembered.streamText);
@@ -1385,6 +1433,35 @@ export function useChatController({
     recoverForegroundRunIfStuck, sessionKey: history.sessionKey,
   };
 
+  useEffect(() => {
+    if (!adapter) return;
+    let subscribed = true;
+    const unsubscribe = onSessionReset(adapter, target => {
+      const capturedScope = sendScope;
+      const historyCurrent = history.captureSessionScope(target.key);
+      const isCurrent = () => subscribed && historyCurrent() && capturedScope.active && sendScopeRef.current === capturedScope
+        && target.agentId === currentAgentId && sessionKeyRef.current === target.key;
+      if (!isCurrent()) return null;
+      return { isCurrent, retire() {
+        // Keep all unsent input. Clearing run presentation must not release the outbox.
+        messageQueueRef.current.hold();
+        clearActiveRunState(target.key, 'session-reset');
+        measuredToolsRef.current = [];
+        sessionAbortableRunRef.current = null;
+        lastLiveRunEventRef.current = null;
+        runRecoveryInFlightRef.current = null;
+        recentRunRecoveryRef.current = null;
+        historyReloadInFlightRef.current = null;
+        recentHistoryReloadRef.current = null;
+        clearPendingRunTimeout();
+        clearPostStreamHistoryRefreshTimer();
+        clearForegroundRunRecoveryTimer();
+      } };
+    });
+    return () => { subscribed = false; unsubscribe(); };
+  }, [adapter, currentAgentId, sendScope, history.captureSessionScope, clearActiveRunState, clearPendingRunTimeout,
+    clearPostStreamHistoryRefreshTimer, clearForegroundRunRecoveryTimer]);
+
   const pathRecoveryRef = useRef(history.refreshCurrentSessionHistory);
   pathRecoveryRef.current = history.refreshCurrentSessionHistory;
   useEffect(() => {
@@ -1573,26 +1650,39 @@ export function useChatController({
         ?? (previous?.runId === run.runId ? previous.startedAt : null)
         ?? run.startedAtMs ?? Date.now();
       sessionRunStateRef.current.set(snapshot.key, {
-        runId: run.runId, streamText: text,
-        startedAt,
+        ...(previous?.runId === run.runId ? previous : {}),
+        runId: run.runId, streamText: text, startedAt,
+        streamTimestampMs: previous?.runId === run.runId ? previous.streamTimestampMs : undefined,
       });
+      if (rememberSessionRunIdentity(sessionRunStateRef.current, snapshot.key, run.runId, run.turnId, run.inputMessageId, run.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
+      const identity = sessionRunStateRef.current.get(snapshot.key);
       currentRunIdRef.current = run.runId;
       streamStartedAtRef.current = startedAt;
       sessionAbortableRunRef.current = run.sessionAbortable ? run.runId : null;
+      let recoveredTailTimestamp: number | undefined;
       if (!chatStreamSegmentsRef.current.length && !chatToolMessagesRef.current.length) {
-        const recovered = recoverLiveRunPresentation(text ?? '', history.messages);
+        const recovered = recoverLiveRunPresentation(text ?? '', history.messages, identity?.turnId, identity?.inputMessageId, identity?.inputMessageKey);
         chatStreamSegmentsRef.current = recovered.segments;
         setChatStreamSegments(recovered.segments);
         chatToolMessagesRef.current = recovered.tools;
         setChatToolMessages(recovered.tools);
+        recoveredTailTimestamp = recovered.tailTimestampMs;
       }
       const tail = text === null ? null : finalReplyTail(text, chatStreamSegmentsRef.current);
+      if (adapter?.connection.backendKind === 'codex') {
+        const clock = validStreamTimestamp(recoveredTailTimestamp) ?? validStreamTimestamp(run.messageTimestampMs)
+          ?? (previous?.runId === run.runId ? validStreamTimestamp(previous.streamTimestampMs) : undefined);
+        chatStreamTimestampRef.current = tail?.trim() ? chatStreamTimestampRef.current ?? clock ?? Date.now() : null;
+        setChatStreamTimestampMs(chatStreamTimestampRef.current);
+      }
       chatStreamRef.current = tail;
       setChatStream(tail);
+      const remembered = sessionRunStateRef.current.get(snapshot.key);
+      if (remembered) remembered.streamTimestampMs = chatStreamTimestampRef.current ?? undefined;
       lastRunSignalAtRef.current = Date.now();
     }
     setIsSending(true);
-  }, [history.activitySnapshot, history.sessionKey, clearActiveRunState]);
+  }, [adapter, history.activitySnapshot, history.sessionKey, clearActiveRunState]);
 
   useEffect(() => {
     syncDerivedSessionActivity("messages-or-session");
@@ -1810,9 +1900,11 @@ export function useChatController({
     const sessionKey = sessionKeyRef.current;
     if (sessionKey && currentRunIdRef.current) {
       sessionRunStateRef.current.set(sessionKey, {
+        ...(sessionRunStateRef.current.get(sessionKey)?.runId === currentRunIdRef.current ? sessionRunStateRef.current.get(sessionKey) : {}),
         runId: currentRunIdRef.current,
         streamText: chatStreamRef.current,
         startedAt: streamStartedAtRef.current ?? Date.now(),
+        streamTimestampMs: chatStreamTimestampRef.current ?? undefined,
       });
     }
     agentActivityRef.current.clear();
@@ -1854,6 +1946,8 @@ export function useChatController({
 
     const markActivityStarted = (sessionKey: string, runId: string) => {
       markSessionRunStarted(sessionRunStateRef.current, sessionKey, runId);
+      if ('turnId' in update && 'inputMessageId' in update
+        && rememberSessionRunIdentity(sessionRunStateRef.current, sessionKey, runId, update.turnId, update.inputMessageId, update.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
       const agentId = agentIdFromSessionKey(sessionKey);
       if (agentId && agentId !== currentAgentId) {
         if (applyRunStart(agentActivityRef.current, agentId)) {
@@ -1894,6 +1988,8 @@ export function useChatController({
       if (!currentRunIdRef.current) {
         currentRunIdRef.current = runId;
         streamStartedAtRef.current = Date.now();
+        chatStreamTimestampRef.current = null;
+        setChatStreamTimestampMs(null);
       }
       setIsSending(true);
       setRunAcknowledged(true);
@@ -1962,7 +2058,11 @@ export function useChatController({
           mergedText,
           undefined,
           update.textMode !== undefined,
+          adapter?.connection.backendKind === 'codex' && update.text.trim()
+            ? (remembered?.runId === update.runId ? validStreamTimestamp(remembered.streamTimestampMs) : undefined)
+              ?? validStreamTimestamp(update.timestampMs) ?? Date.now() : undefined,
         );
+        if (rememberSessionRunIdentity(sessionRunStateRef.current, update.sessionKey, update.runId, update.turnId, update.inputMessageId, update.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
         const agentId = agentIdFromSessionKey(update.sessionKey);
         if (agentId && agentId !== currentAgentId) {
           applyActivityDelta(agentActivityRef.current, agentId, mergedText);
@@ -1978,6 +2078,11 @@ export function useChatController({
         const nextText = update.textMode === 'snapshot'
           ? finalReplyTail(update.text, chatStreamSegmentsRef.current)
           : mergeStreamText(chatStreamRef.current, update.text, update.textMode);
+        if (adapter?.connection.backendKind === 'codex' && nextText.trim() && chatStreamTimestampRef.current === null) {
+          chatStreamTimestampRef.current = validStreamTimestamp(update.timestampMs) ?? Date.now();
+          setChatStreamTimestampMs(chatStreamTimestampRef.current);
+        }
+        if (adapter?.connection.backendKind === 'codex') sessionRunStateRef.current.get(update.sessionKey)!.streamTimestampMs = chatStreamTimestampRef.current ?? undefined;
         chatStreamRef.current = nextText;
         setChatStream(nextText);
         setActivityLabel(null);
@@ -1997,18 +2102,22 @@ export function useChatController({
         markActivityStarted(update.sessionKey, update.runId);
         const agentId = agentIdFromSessionKey(update.sessionKey);
         const toolName = update.message.toolName ?? "tool";
-        if (agentId && agentId !== currentAgentId) {
+        const running = update.message.toolStatus === "running";
+        if (running && agentId && agentId !== currentAgentId) {
           applyActivityToolStart(agentActivityRef.current, agentId, toolName);
         }
-        if (update.sessionKey.includes(":subagent:")) {
+        if (running && update.sessionKey.includes(":subagent:")) {
           applyChildToolStart(childSessionActivityRef.current, update.sessionKey, toolName);
           onChildSessionActivityChange();
         }
-        if (!matchesCurrentSession(update.sessionKey)) return;
+        if (!matchesCurrentSession(update.sessionKey)) {
+          if (adapter?.connection.backendKind === 'codex') sessionRunStateRef.current.get(update.sessionKey)!.streamTimestampMs = undefined;
+          return;
+        }
         if (!acceptRun(update.sessionKey, update.runId)) return;
         if (chatToolMessagesRef.current.some(message => sameLiveToolCall(message, update.message))) return;
         commitCurrentStreamSegment();
-        setActivityLabel(formatToolActivity(unwrapToolCall(toolName, update.message.toolArgs).name, t));
+        if (running) setActivityLabel(formatToolActivity(unwrapToolCall(toolName, update.message.toolArgs).name, t));
         const message = {
           ...update.message,
           toolSummary: formatToolOneLinerLocalized(toolName, update.message.toolArgs, t),
@@ -2021,6 +2130,7 @@ export function useChatController({
         if (lastAdapterStateRef.current !== "ready") return;
         markRunSignal();
         markSessionRunStarted(sessionRunStateRef.current, update.sessionKey, update.runId);
+        if (rememberSessionRunIdentity(sessionRunStateRef.current, update.sessionKey, update.runId, update.turnId, update.inputMessageId, update.inputMessageKey)) setNativeRunIdentityEpoch(epoch => epoch + 1);
         if (!matchesCurrentSession(update.sessionKey)) return;
         if (!acceptRun(update.sessionKey, update.runId)) return;
         const previousMessage = chatToolMessagesRef.current.find(
@@ -2049,15 +2159,16 @@ export function useChatController({
         };
         chatToolMessagesRef.current = withToolMessage(chatToolMessagesRef.current, message);
         setChatToolMessages(chatToolMessagesRef.current);
-        if (update.message.toolStatus === "running") return;
-        if (durationMs !== undefined) {
-          measuredToolsRef.current = [
-            ...measuredToolsRef.current.filter((measured) => !sameLiveToolCall(measured, message)),
-            message,
-          ].slice(-MEASURED_TOOL_LIMIT);
+        if (update.message.toolStatus === "running" || update.message.toolStatus === "unknown") {
+          measuredToolsRef.current = measuredToolsRef.current.filter((measured) => !sameLiveToolCall(measured, message));
+          clearToolSettledRecoveryTimer();
         }
-        // A settled step stops describing the turn: a step still running takes
-        // over, else the header and working pill fall back to "Thinking…".
+        if (update.message.toolStatus === "running") {
+          setActivityLabel(formatToolActivity(unwrapToolCall(toolName, previousMessage?.toolArgs).name, t));
+          return;
+        }
+        // Only confirmed running steps describe execution. Unknown clears an
+        // obsolete label but does not produce completion timing or recovery.
         const settledLabel = formatToolActivity(unwrapToolCall(toolName, previousMessage?.toolArgs).name, t);
         const stillRunning = chatToolMessagesRef.current.findLast(
           (candidate) => candidate.toolStatus === "running" && !candidate.approval,
@@ -2066,6 +2177,13 @@ export function useChatController({
           : stillRunning
             ? formatToolActivity(unwrapToolCall(stillRunning.toolName ?? "tool", stillRunning.toolArgs).name, t)
             : null);
+        if (update.message.toolStatus === "unknown") return;
+        if (durationMs !== undefined) {
+          measuredToolsRef.current = [
+            ...measuredToolsRef.current.filter((measured) => !sameLiveToolCall(measured, message)),
+            message,
+          ].slice(-MEASURED_TOOL_LIMIT);
+        }
         clearToolSettledRecoveryTimer();
         requestVisibleHistoryReload(update.sessionKey, "tool-result").catch(() => {});
         toolSettledRecoveryTimerRef.current = setTimeout(() => {
@@ -2081,6 +2199,9 @@ export function useChatController({
       case "run_finished": {
         if (recoveredActiveSessionRef.current === update.sessionKey) recoveredActiveSessionRef.current = null;
         markRunSignal();
+        const finishedIdentity = sessionRunStateRef.current.get(update.sessionKey)?.runId === update.runId
+          ? sessionRunStateRef.current.get(update.sessionKey) : undefined;
+        const finishedTurnId = finishedIdentity?.turnId;
         markActivityFinished(update.sessionKey, update.runId, {
           text: update.finalMessage?.text ?? update.systemMessage?.text,
           failed: update.stopReason === "error" || update.stopReason === "cancelled",
@@ -2115,20 +2236,24 @@ export function useChatController({
             ? completedText : streamText;
           const rows = finishLiveRunPresentation({
             segments, tools, tail: finalReplyTail(finalText, segments, streamText),
-            runId: update.runId, startedAt: activeRunStartedAt,
+            runId: update.runId, startedAt: activeRunStartedAt, turnId: finishedTurnId,
             finalMessage: completed ? update.finalMessage : undefined,
             cancelled: update.stopReason === "cancelled",
           });
           // Any history fetched during tools is reconciled inside this turn,
           // then all live rows move into history together before clearing them.
-          history.setMessages((previous) => preserveOptimisticAssistantMessage(
-            [...previous.filter(message => !rows.some(row => row.id === message.id)), ...rows], previous,
-          ));
+          history.setMessages((previous) => {
+            const original = originalRunUserIndex(previous, finishedIdentity?.turnId, finishedIdentity?.inputMessageId, finishedIdentity?.inputMessageKey);
+            const anchored = previous.map((message, index) => index === original ? { ...message, turnId: finishedTurnId } : message);
+            return preserveOptimisticAssistantMessage([
+              ...anchored.filter(message => !rows.some(row => row.id === message.id)), ...rows,
+            ], anchored);
+          });
         } else if (update.stopReason === "cancelled") {
           if (streamText.trim()) history.setMessages((previous) => appendUniqueMessage(previous, {
             id: `abort_${update.runId}`,
             renderKey: liveReplyRenderKey(activeRunStartedAt, update.runId, 0),
-            role: "assistant", text: streamText, timestampMs: Date.now(),
+            role: "assistant", text: streamText, timestampMs: Date.now(), ...(finishedTurnId ? { turnId: finishedTurnId } : {}),
           }));
         } else if (update.stopReason !== "error") {
           const finalText = completedText;
@@ -2136,10 +2261,12 @@ export function useChatController({
             const finalMessage: UiMessage = {
               ...(update.finalMessage ?? { id: `final_${update.runId}`, role: "assistant" as const, timestampMs: Date.now() }),
               text: finalText, renderKey: liveReplyRenderKey(activeRunStartedAt, update.runId, 0),
+              ...(finishedTurnId ? { turnId: finishedTurnId } : {}),
             };
             history.setMessages((previous) => {
               if (previous.some((message) => message.id === finalMessage.id)) return previous;
               for (let index = previous.length - 1; index >= 0; index -= 1) {
+                if (previous[index].role === "user") break;
                 if (!shouldMergeFinalMessage(previous[index], finalText, activeRunStartedAt)) continue;
                 const next = [...previous];
                 next[index] = { ...previous[index], ...finalMessage };
@@ -2476,6 +2603,38 @@ export function useChatController({
     releaseSendTriggerGuard();
   }, [isPreparingSend, isSending, releaseSendTriggerGuard]);
 
+  const {
+    recentModels, modelScope,
+    hasRuntimeSettings, runtimeSettingsBusy, runtimeSettingsPendingRef, runtimeSettingsUnconfirmed, runtimeSettingsUnconfirmedRef,
+    fastMode, permissions, permissionPickerVisible, setPermissionPickerVisible,
+    onSelectFastMode, onSelectPermissions, openPermissionPicker, requirePermissionsConfirmation,
+    availableModels,
+    availableProviders,
+    configuredDefaultModel,
+    currentModel,
+    currentModelHeaderLabel,
+    currentModelDisplayName,
+    currentModelSupportsImages,
+    selectNativeThinkingLevel,
+    nativeThinkingLevel,
+    nativeThinkingLevels,
+    currentModelProvider,
+    modelPickerError,
+    modelPickerLoading,
+    modelPickerVisible,
+    onSelectModel,
+    openModelPicker,
+    retryModelPickerLoad,
+    setModelPickerVisible,
+  } = useChatModelPicker({
+    connectionState,
+    adapter,
+    sessionKey: history.sessionKey,
+    sessionMetadata: history.sessions.find((session) => session.key === history.sessionKey),
+    setInput,
+    setSessions: history.setSessions,
+    setThinkingLevel: history.setThinkingLevel,
+  });
   const getUserMessageText = useCallback((text: string, images: readonly PendingImage[]) => {
       const fallbackKey = resolveAttachmentOnlyFallbackKey(images);
       const attachmentFallbackCopy = {
@@ -2497,12 +2656,15 @@ export function useChatController({
       const submittedAt = Date.now();
       const submissionScope = sendScopeRef.current;
       const localTimestamp = queued?.createdAt ?? submittedAt;
+      const idempotencyKey = `${submittedAt}_${Math.random().toString(36).slice(2, 10)}`;
+      const effectiveText = getUserMessageText(text, images);
+      const prompt = { text: effectiveText || " ", attachments: buildPromptAttachments(images), idempotencyKey };
+      // Validate the prepared payload while its original outbox item still owns every attachment.
+      adapter.validatePrompt?.(sessionKey, prompt);
       setMessageSubmittedAt(submittedAt);
       if (!queued) setScrollToBottomRequestAt(submittedAt);
       setSendFailure(null);
-      const idempotencyKey = `${submittedAt}_${Math.random().toString(36).slice(2, 10)}`;
       const realImages = images.filter((image) => isImageAttachmentMimeType(image.mimeType));
-      const effectiveText = getUserMessageText(text, images);
       const uiMsg = buildUserUiMessage({
         // A queued message keeps its id so its bubble settles in place once sent.
         id: options?.messageId ?? `usr_${localTimestamp}`,
@@ -2513,7 +2675,11 @@ export function useChatController({
       });
       uiMsg.renderKey = uiMsg.id;
       if (!shouldHideMessage(uiMsg)) {
-        history.setMessages((prev) => [...prev, uiMsg]);
+        history.setMessages((prev) => {
+          const existing = prev.findIndex(message => message.id === uiMsg.id);
+          if (existing < 0) return [...prev, uiMsg];
+          const next = [...prev]; next[existing] = uiMsg; return next;
+        });
         setUnconfirmedMessageIds((previous) => new Set(previous).add(uiMsg.id));
       }
 
@@ -2558,10 +2724,8 @@ export function useChatController({
           .catch((err) => dbg(`cache write failed: ${String(err)}`));
       }
 
-      const attachments = buildPromptAttachments(images);
-
       adapter
-        .prompt(sessionKey, { text: effectiveText || " ", attachments, idempotencyKey })
+        .prompt(sessionKey, prompt)
         .then(({ runId: serverRunId }) => {
           if (submissionScope.active && sendScopeRef.current === submissionScope && sessionKeyRef.current === sessionKey) {
             setMessageAcceptedAt(submittedAt);
@@ -2618,6 +2782,36 @@ export function useChatController({
             sessionRunStateRef.current.delete(sessionKey);
           }
           sourceQueue.store.update(sourceQueue.scopeKey, holdMessageQueue);
+          if (adapter.capabilities.sessionPermissions && error instanceof AdapterError
+            && error.recoveryAction === 'confirm_permissions') {
+            requirePermissionsConfirmation(adapter, sessionKey);
+            // This fixed native guard rejects before dispatch. Keep the original
+            // input reviewable and paused, without labelling it uncertain or replaying it.
+            const restoredQueue = queued ? sourceQueue.store.update(sourceQueue.scopeKey, current => holdMessageQueue(
+              !current.items.some(item => item.id === queued.id) && canEnqueueMessage(current)
+                ? { ...current, items: [queued, ...current.items] } : current,
+            )) : null;
+            if (submissionScope.active && sendScopeRef.current === submissionScope && sessionKeyRef.current === sessionKey) {
+              history.setMessages(previous => previous.map(message => message.id === uiMsg.id
+                ? { ...message, delivery: restoredQueue?.items.some(item => item.id === uiMsg.id) ? 'held' : undefined } : message));
+              setSendFailure(null);
+              setSendFailureDetails(null);
+            }
+            return;
+          }
+          if (error instanceof LocalSendRejectedError) {
+            const item = queued ?? { id: uiMsg.id, text, images, createdAt: localTimestamp };
+            const held = sourceQueue.store.update(sourceQueue.scopeKey, current => holdMessageQueue(
+              current.items.some(row => row.id === item.id) || !canEnqueueMessage(current)
+                ? current : { ...current, items: [item, ...current.items] },
+            ));
+            if (submissionScope.active && sendScopeRef.current === submissionScope && sessionKeyRef.current === sessionKey) {
+              if (held.items.some(row => row.id === item.id)) history.setMessages(previous => previous.filter(message => message.id !== uiMsg.id));
+              setSendFailure(t('Message too large to send'));
+              setSendFailureDetails(null);
+            }
+            return;
+          }
           rememberUncertainSend(sourceQueue.scopeKey, uiMsg);
           if (messageQueueRef.current.scopeKey !== sourceQueue.scopeKey) return;
           setSendFailure(t('Sending failed. Check the conversation before trying again.'));
@@ -2627,7 +2821,7 @@ export function useChatController({
           // Preserve one recoverable bubble; refilling the composer invites duplicate sends.
         });
     },
-    [adapter, dbg, getUserMessageText, history, messageQueue.store, messageQueue.scopeKey, markTransportConfirmed, t],
+    [adapter, dbg, getUserMessageText, history, messageQueue.store, messageQueue.scopeKey, markTransportConfirmed, requirePermissionsConfirmation, setSendFailure, t],
   );
 
   const submitMessageWithConnectionCheck = useCallback(
@@ -2683,8 +2877,8 @@ export function useChatController({
         return true;
       } catch (error) {
         if (isCurrent()) {
-          setSendFailure(t('Sending failed. Check the conversation before trying again.'));
-          setSendFailureDetails(sanitizeReplyFailure(error instanceof Error ? error.message : String(error)) || null);
+          setSendFailure(t(error instanceof LocalSendRejectedError ? 'Message too large to send' : 'Sending failed. Check the conversation before trying again.'));
+          setSendFailureDetails(error instanceof LocalSendRejectedError ? null : sanitizeReplyFailure(error instanceof Error ? error.message : String(error)) || null);
         }
         return false;
       } finally {
@@ -2708,38 +2902,6 @@ export function useChatController({
     ],
   );
 
-  const {
-    recentModels, modelScope,
-    hasRuntimeSettings, runtimeSettingsBusy, runtimeSettingsPendingRef, runtimeSettingsUnconfirmed, runtimeSettingsUnconfirmedRef,
-    fastMode, permissions, permissionPickerVisible, setPermissionPickerVisible,
-    onSelectFastMode, onSelectPermissions, openPermissionPicker,
-    availableModels,
-    availableProviders,
-    configuredDefaultModel,
-    currentModel,
-    currentModelHeaderLabel,
-    currentModelDisplayName,
-    currentModelSupportsImages,
-    selectNativeThinkingLevel,
-    nativeThinkingLevel,
-    nativeThinkingLevels,
-    currentModelProvider,
-    modelPickerError,
-    modelPickerLoading,
-    modelPickerVisible,
-    onSelectModel,
-    openModelPicker,
-    retryModelPickerLoad,
-    setModelPickerVisible,
-  } = useChatModelPicker({
-    connectionState,
-    adapter,
-    sessionKey: history.sessionKey,
-    sessionMetadata: history.sessions.find((session) => session.key === history.sessionKey),
-    setInput,
-    setSessions: history.setSessions,
-    setThinkingLevel: history.setThinkingLevel,
-  });
   // The levels the backend reports for the session's current model come first
   // (OpenClaw 2026.x); a static list would offer levels the model refuses.
   const thinkingLevelOptions = useMemo(
@@ -2976,6 +3138,8 @@ export function useChatController({
   // the post-reply history refresh; the sending marker keeps its bubble in
   // place until history adopts the optimistic message with the same id.
   const steeringBusyRef = useRef(false);
+  const steeringSequenceRef = useRef(0);
+  const [steeringPending, setSteeringPending] = useState(false);
   const onSteer = useCallback((expectedRunId?: string) => {
     const key = history.sessionKey;
     const runId = currentRunIdRef.current;
@@ -2987,22 +3151,42 @@ export function useChatController({
     if (readOnly || steeringBusyRef.current || !key || !runId || !text || pendingImages.length
       || !adapter?.capabilities.steer || !adapter.steer || connectionState !== 'ready') return;
     const scope = sendScopeRef.current;
+    const dispatchedMessages = [...history.messages];
+    const dispatchedAt = Date.now();
+    const codex = adapter.connection.backendKind === 'codex';
+    const steeringSequence = codex ? ++steeringSequenceRef.current : undefined;
+    const draftRevision = inputRevisionRef.current;
+    const rememberedRun = sessionRunStateRef.current.get(key);
+    const steeredTurnId = adapter.connection.backendKind === 'codex' && rememberedRun?.runId === runId ? rememberedRun.turnId : undefined;
     steeringBusyRef.current = true;
+    setSteeringPending(true);
     setSendFailure(null);
     void adapter.steer(key, runId, text).then(() => {
       if (!scope.active || sendScopeRef.current !== scope || sessionKeyRef.current !== key) return;
-      const timestampMs = Date.now();
-      history.setMessages((messages) => [...messages, { id: `usr_${timestampMs}_steer_${runId}`, role: 'user', sentLocally: true, text, timestampMs }]);
-      setInput((current) => current === input ? '' : current);
-      setMessageSubmittedAt(timestampMs);
-      setMessageAcceptedAt(timestampMs);
-      setAcceptedSubmission({ at: timestampMs, text, attachmentUris: [] });
+      const timestampMs = codex ? dispatchedAt : Date.now();
+      const accepted: UiMessage = { id: `usr_${timestampMs}_steer_${runId}${codex ? `_${steeringSequence}` : ''}`, role: 'user', sentLocally: true, text, timestampMs, ...(steeredTurnId ? { turnId: steeredTurnId } : {}) };
+      if (codex) accepted.renderKey = accepted.id;
+      history.setMessages((messages) => codex
+        ? reconcileAcceptedSteeringMessage(dispatchedMessages, messages, accepted)
+        : [...messages, accepted]);
+      if (inputRevisionRef.current === draftRevision) {
+        setInput((current) => current === input ? '' : current);
+      }
+      if (!codex || currentRunIdRef.current === runId) {
+        setMessageSubmittedAt(timestampMs);
+        setMessageAcceptedAt(timestampMs);
+        setAcceptedSubmission({ at: timestampMs, text, attachmentUris: [] });
+      }
+      if (codex) void requestVisibleHistoryReload(key, 'steer-accepted').catch(() => undefined);
     }).catch((error: unknown) => {
       if (!scope.active || sendScopeRef.current !== scope) return;
       setSendFailure(t('Sending failed. Check the conversation before trying again.'));
       setSendFailureDetails(sanitizeReplyFailure(error instanceof Error ? error.message : String(error)) || null);
-    }).finally(() => { steeringBusyRef.current = false; });
-  }, [adapter, connectionState, history.sessionKey, history.setMessages, input, pendingImages.length, readOnly, t]);
+    }).finally(() => {
+      steeringBusyRef.current = false;
+      if (sendScopeRef.current.active) setSteeringPending(false);
+    });
+  }, [adapter, connectionState, history.messages, history.sessionKey, history.setMessages, input, pendingImages.length, readOnly, requestVisibleHistoryReload, t]);
 
   const queueDeliveryReady = !readOnly && !runtimeSettingsBusy && !runtimeSettingsUnconfirmed
     && history.historyLoaded
@@ -3354,6 +3538,15 @@ export function useChatController({
   // are unchanged, otherwise an empty streaming row survives the final reply.
   const presentationRunId = currentRunIdRef.current;
   const presentationStartedAt = streamStartedAtRef.current;
+  const rememberedPresentationRun = history.sessionKey ? sessionRunStateRef.current.get(history.sessionKey) : undefined;
+  const runWorkIdentity: RunWorkIdentity | undefined = adapter?.connection.backendKind === 'codex'
+    && lastAdapterRef.current === adapter && sendScope.active && history.sessionKey
+    && sessionKeyRef.current === history.sessionKey && (!routeSessionKey || routeSessionKey === history.sessionKey) && rememberedPresentationRun?.runId === presentationRunId
+    && validTurnIdentity(rememberedPresentationRun.turnId) && validTurnIdentity(rememberedPresentationRun.inputMessageId)
+    ? { scope: sendScope, sessionKey: history.sessionKey, runId: rememberedPresentationRun.runId,
+      turnId: rememberedPresentationRun.turnId!, inputMessageId: rememberedPresentationRun.inputMessageId!,
+      inputMessageKey: rememberedPresentationRun.inputMessageKey, startedAt: rememberedPresentationRun.startedAt }
+    : undefined;
   const listData = useMemo((): UiMessage[] => {
     const sessionMessages = buildLiveRunListData({
       historyMessages: recoverableMessages,
@@ -3361,7 +3554,14 @@ export function useChatController({
       toolMessages: chatToolMessages,
       liveStreamText: chatStream,
       liveStreamStartedAt: presentationStartedAt,
+      liveMessageTimestampMs: chatStreamTimestampMs,
       activeRunId: presentationRunId,
+      ...(adapter?.connection.backendKind === 'codex' && history.sessionKey
+        && sessionRunStateRef.current.get(history.sessionKey)?.runId === presentationRunId ? {
+          activeTurnId: sessionRunStateRef.current.get(history.sessionKey)?.turnId,
+          inputMessageId: sessionRunStateRef.current.get(history.sessionKey)?.inputMessageId,
+          inputMessageKey: sessionRunStateRef.current.get(history.sessionKey)?.inputMessageKey,
+        } : {}),
       includePlaceholder: true,
     });
     const pairApprovals = pairApprovalProjection.adapter === adapter
@@ -3376,6 +3576,9 @@ export function useChatController({
     }));
     const merged = mergeNewestFirstMessages(sessionMessages, pairMessages);
     if (messageQueue.state.items.length === 0) return merged;
+    const queuedIds = new Set(messageQueue.state.items.map(item => item.id));
+    const withDelivery = merged.map(message => queuedIds.has(message.id) && !message.sendUncertain
+      ? { ...message, delivery: queuedMessageDelivery(messageQueue.state, message.id) } : message);
     // Queued bubbles sit below everything else; an item whose
     // optimistic message already entered history is rendered from history.
     const known = new Set(history.messages.map((message) => message.id));
@@ -3389,8 +3592,8 @@ export function useChatController({
         delivery: queuedMessageDelivery(messageQueue.state, item.id),
       }), renderKey: item.id }))
       .reverse();
-    return queued.length > 0 ? [...queued, ...merged] : merged;
-  }, [adapter, chatStream, chatStreamSegments, chatToolMessages, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, presentationRunId, presentationStartedAt, recoverableMessages]);
+    return queued.length > 0 ? [...queued, ...withDelivery] : withDelivery;
+  }, [adapter, chatStream, chatStreamTimestampMs, chatStreamSegments, chatToolMessages, nativeRunIdentityEpoch, getUserMessageText, history.messages, messageQueue.state, pairApprovalProjection, presentationRunId, presentationStartedAt, recoverableMessages]);
 
   useEffect(() => {
     const list = adapter?.management?.approvals?.listExec;
@@ -3507,6 +3710,9 @@ export function useChatController({
     await history.onRefresh();
   }, [adapter, connectionState, history]);
 
+  const canChooseRunInput = Boolean(adapter?.capabilities.steer && adapter.steer && isSending
+    && currentRunIdRef.current && !pendingImages.length && input.trim());
+
   return {
     draftReady,
     recoverableDraft,
@@ -3560,7 +3766,10 @@ export function useChatController({
     onSend,
     onSteer,
     activeRunId: currentRunIdRef.current,
-    canSteer: Boolean(adapter?.capabilities.steer && adapter.steer && isSending && currentRunIdRef.current && !pendingImages.length && input.trim()),
+    runWorkIdentity,
+    canChooseRunInput,
+    canSteer: canChooseRunInput && !steeringPending,
+    steeringPending,
     startVoiceInput, stopVoiceInput, cancelVoiceInput,
     voiceInputSupported,
     recoverVoiceInput, voiceRecoveryCount, voiceRecordingSaved,

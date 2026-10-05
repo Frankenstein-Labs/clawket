@@ -2,9 +2,25 @@ import {
   clearSessionRunState,
   markSessionRunDelta,
   markSessionRunStarted,
+  rememberSessionRunIdentity,
 } from './sessionRunState';
 
 describe('sessionRunState', () => {
+  it('enriches only the original run and retains its text and clock across repeated starts', () => {
+    const map = new Map();
+    markSessionRunDelta(map, 'chat', 'run', 'A before the tool', 1000);
+    rememberSessionRunIdentity(map, 'chat', 'run', 'native-turn', 'original-input');
+    markSessionRunStarted(map, 'chat', 'run', 2000);
+    markSessionRunDelta(map, 'chat', 'run', 'A before the tool. B after.', 3000);
+    rememberSessionRunIdentity(map, 'chat', 'run', undefined, undefined);
+    rememberSessionRunIdentity(map, 'chat', 'run', 'conflicting-turn', 'guide');
+    expect(map.get('chat')).toEqual({ runId: 'run', streamText: 'A before the tool. B after.', startedAt: 1000,
+      turnId: 'native-turn', inputMessageId: 'original-input' });
+    markSessionRunStarted(map, 'chat', 'next', 4000);
+    rememberSessionRunIdentity(map, 'chat', 'run', 'native-turn', 'original-input');
+    expect(map.get('chat')).toEqual({ runId: 'next', streamText: null, startedAt: 4000 });
+  });
+
   it('starts a run and keeps empty stream text by default', () => {
     const map = new Map();
     const state = markSessionRunStarted(map, 'agent:main', 'run_1', 1000);

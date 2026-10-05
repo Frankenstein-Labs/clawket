@@ -1,5 +1,180 @@
 import { describe, expect, it } from 'vitest';
-import { codexMessages, codexTurnFailure } from './history.js';
+import { codexMessages, codexTool, codexTurnFailure } from './history.js';
+
+describe('Codex tool execution evidence', () => {
+  it.each([
+    [{ type: 'imageView', path: 'file:///image.png' }, 'success'],
+    [{ type: 'imageView', status: 'inProgress' }, 'running'],
+    [{ type: 'imageView', status: 'failed' }, 'error'],
+    [{ type: 'imageView', error: { message: 'Cannot read image' } }, 'error'],
+    [{ type: 'imageView', status: 'future-native-state' }, 'unknown'],
+    [{ type: 'webSearch', query: 'release notes', action: { type: 'search', query: 'release notes' } }, 'success'],
+    [{ type: 'webSearch', status: 'future-native-state' }, 'unknown'],
+    [{ type: 'commandExecution', command: 'pwd' }, 'unknown'],
+    [{ type: 'mcpToolCall', tool: 'read' }, 'unknown'],
+  ])('preserves native completion, failure and missing-state boundaries for %j', (item, status) => {
+    // ImageViewThreadItem is {id, path, type}; the canonical history inserts it
+    // from the completed-only legacy ViewImageToolCall, not ItemStarted.
+    const tool = codexTool({ id: 'tool', ...item });
+    expect(tool).toMatchObject({ callId: 'tool', status, statusReported: true });
+    expect(codexMessages([{ id: 'turn', status: 'completed', items: [{ id: 'tool', ...item }] }])[0]?.tool).toEqual(tool);
+  });
+
+  it.each([
+    [{ query: '', action: null, results: null }, 'unknown'],
+    [{ query: 'search', results: [{ title: 'Result' }] }, 'unknown'],
+    [{ query: '', action: false }, 'unknown'],
+    [{ query: '', action: [] }, 'unknown'],
+    [{ query: '', action: 'search' }, 'unknown'],
+    [{ query: 1, action: { type: 'search' } }, 'unknown'],
+    [{ query: '', action: { type: 'search', query: 1 } }, 'unknown'],
+    [{ query: '', action: { type: 'search', queries: 'search' } }, 'unknown'],
+    [{ query: '', action: { type: 'search', queries: ['search', 1] } }, 'unknown'],
+    [{ query: '', action: { type: 'search', query: null, queries: null }, results: [] }, 'success'],
+    [{ query: '', action: { type: 'search', queries: ['one', 'two'] } }, 'success'],
+    [{ query: '', action: { type: 'openPage', url: null }, results: null }, 'success'],
+    [{ query: '', action: { type: 'openPage', url: 'https://example.com' } }, 'success'],
+    [{ query: '', action: { type: 'openPage', url: 1 } }, 'unknown'],
+    [{ query: '', action: { type: 'findInPage', url: null, pattern: 'text' } }, 'success'],
+    [{ query: '', action: { type: 'findInPage', pattern: false } }, 'unknown'],
+    [{ query: '', action: { type: 'other' } }, 'success'],
+    [{ query: '', action: { type: 'future-action' }, results: [{ title: 'Result' }] }, 'unknown'],
+    [{ query: '', action: { type: 'search' }, results: {} }, 'unknown'],
+    [{ query: '', action: { type: 'search' }, results: 'Result' }, 'unknown'],
+  ])('requires the supported native End shape, even in terminal history: %j', (fields, status) => {
+    const item = { id: 'search', type: 'webSearch', ...fields };
+    expect(codexTool(item)?.status).toBe(status);
+    for (const turnStatus of ['inProgress', 'completed', 'interrupted']) {
+      expect(codexMessages([{ id: 'turn', status: turnStatus, items: [item] }])[0]?.tool?.status).toBe(status);
+    }
+  });
+
+  it.each(['inProgress', 'completed', 'failed', 'future-native-state', null])('keeps explicit native %s ahead of an otherwise valid search End', status => {
+    expect(codexTool({ id: 'search', type: 'webSearch', query: '', action: { type: 'other' }, results: [{ title: 'Result' }], status })?.status)
+      .toBe(status === 'inProgress' ? 'running' : status === 'completed' ? 'success' : status === 'failed' ? 'error' : 'unknown');
+  });
+
+  it.each([undefined, null, []])('does not fabricate output for optional results %j', results => {
+    expect(codexTool({ id: 'search', type: 'webSearch', query: '', action: { type: 'other' }, results }))
+      .toMatchObject({ status: 'success', output: '' });
+  });
+
+  it('preserves opaque nonempty search results in the bounded tool output only', () => {
+    const results = [{ type: 'text_result', title: 'Result', url: 'https://example.com', future_field: { kept: true }, snippet: 'x'.repeat(40000) }];
+    const item = { id: 'search', type: 'webSearch', query: 'search', action: { type: 'search', query: 'search' }, results };
+    expect(codexTool(item)).toMatchObject({ status: 'success', output: JSON.stringify(results).slice(0, 32000) });
+    const messages = codexMessages([{ id: 'turn', status: 'completed', items: [item, { id: 'reply', type: 'agentMessage', text: 'Native reply' }] }]);
+    expect(messages[0].tool?.output).toHaveLength(32000);
+    expect(messages[1]).toMatchObject({ id: 'reply', role: 'assistant', text: 'Native reply' });
+  });
+});
+
+describe('Codex final reply clocks', () => {
+  const startedAt = 1727996280, completedAt = startedAt + 31 * 60;
+  const user = { id: 'user', type: 'userMessage', content: [{ type: 'text', text: 'Wait for my answer' }] };
+  it('uses terminal completion for the final answer while retaining user, commentary, plan and tool clocks', () => {
+    const messages = codexMessages([{ id: 'turn', status: 'completed', startedAt, completedAt, items: [
+      user, { id: 'progress', type: 'agentMessage', phase: 'commentary', text: 'Waiting' },
+      { id: 'plan', type: 'plan', text: 'Wait' }, { id: 'tool', type: 'commandExecution', status: 'completed' },
+      { id: 'final', type: 'agentMessage', phase: 'final_answer', text: 'Done' },
+    ] }]);
+    expect(messages.map(message => [message.id, message.timestampMs])).toEqual([
+      ['user', startedAt * 1000], ['progress', startedAt * 1000], ['plan', startedAt * 1000],
+      ['toolcall_tool', startedAt * 1000], ['final', completedAt * 1000],
+    ]);
+  });
+  it('keeps paragraph clocks while the confirmed final retains its completion clock', () => {
+    const progressClock = (startedAt + 60) * 1000, finalStartClock = (completedAt - 10) * 1000;
+    const messages = codexMessages([{ id: 'turn', status: 'completed', startedAt, completedAt,
+      itemTimestamps: new Map([['progress', progressClock], ['final', finalStartClock]]), items: [
+        user, { id: 'progress', type: 'agentMessage', phase: 'commentary', text: 'Still working' },
+        { id: 'final', type: 'agentMessage', phase: 'final_answer', text: 'Done' },
+      ] }]);
+    expect(messages.map(message => [message.id, message.timestampMs])).toEqual([
+      ['user', startedAt * 1000], ['progress', progressClock], ['final', completedAt * 1000],
+    ]);
+  });
+  it('retains the known paragraph clock for a partial legacy turn without borrowing completion', () => {
+    const paragraphClock = (startedAt + 60) * 1000;
+    const turn = { id: 'partial', status: 'completed', startedAt, completedAt,
+      itemTimestamps: new Map([['paragraph', paragraphClock]]),
+      items: [{ id: 'paragraph', type: 'agentMessage', text: 'Earlier progress' }] };
+    expect(codexMessages([turn], { unconfirmedLegacyTurnId: 'partial' })[0].timestampMs).toBe(paragraphClock);
+    expect(codexMessages([turn])[0].timestampMs).toBe(completedAt * 1000);
+  });
+  it.each([undefined, null])('retains native last-message compatibility for phase %j without retiming every legacy paragraph', phase => {
+    const messages = codexMessages([{ status: 'completed', startedAt, completedAt, items: [
+      { id: 'earlier', type: 'agentMessage', phase, text: 'Earlier paragraph' },
+      { id: 'final', type: 'agentMessage', phase, text: 'Done' },
+      { id: 'empty', type: 'agentMessage', phase, text: '  ' },
+      { id: 'future', type: 'agentMessage', phase: 'future-phase', text: 'Unclassified' },
+    ] }]);
+    expect(messages.map(message => [message.id, message.timestampMs])).toEqual([
+      ['earlier', startedAt * 1000], ['final', completedAt * 1000],
+      ['empty', startedAt * 1000], ['future', startedAt * 1000],
+    ]);
+  });
+  it('uses the same terminal clock for an image-only final attachment', () => {
+    const image = { id: 'image', type: 'imageGeneration', status: 'completed', result: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64') };
+    const messages = codexMessages([{ status: 'completed', startedAt, completedAt, items: [user, image] }]);
+    expect(messages.find(message => message.id === 'image:image')).toMatchObject({ role: 'assistant', timestampMs: completedAt * 1000 });
+    expect(messages.find(message => message.id === 'toolcall_image')?.timestampMs).toBe(startedAt * 1000);
+  });
+  it('does not date a phase-less paragraph from a partial older turn as its unseen final reply', () => {
+    const messages = codexMessages([{ id: 'partial', status: 'completed', startedAt, completedAt, items: [
+      { id: 'old-paragraph', type: 'agentMessage', text: 'Earlier progress' },
+    ] }, { id: 'confirmed', status: 'completed', startedAt, completedAt, items: [
+      { id: 'old-final', type: 'agentMessage', text: 'Older final answer' },
+    ] }], { unconfirmedLegacyTurnId: 'partial' });
+    expect(messages.map(message => [message.id, message.timestampMs])).toEqual([
+      ['old-paragraph', startedAt * 1000], ['old-final', completedAt * 1000],
+    ]);
+    expect(codexMessages([{ id: 'partial', status: 'completed', startedAt, completedAt, items: [
+      { id: 'known-final', type: 'agentMessage', phase: 'final_answer', text: 'Done' },
+    ] }], { unconfirmedLegacyTurnId: 'partial' })[0].timestampMs).toBe(completedAt * 1000);
+  });
+  it.each([
+    { status: 'inProgress', completedAt }, { status: 'future-status', completedAt }, { completedAt },
+    { status: 'completed' }, { status: 'completed', completedAt: null },
+    { status: 'completed', completedAt: Infinity }, { status: 'completed', completedAt: NaN },
+    { status: 'completed', completedAt: -1 }, { status: 'completed', completedAt: startedAt - 1 },
+    { status: 'completed', completedAt: 1e15 }, { status: 'completed', completedAt: completedAt + 0.5 },
+  ])('keeps the existing clock fallback without confirmed valid completion: %j', turn => {
+    expect(codexMessages([{ startedAt, ...turn, items: [{ id: 'final', type: 'agentMessage', phase: 'final_answer', text: 'Done' }] }])[0].timestampMs)
+      .toBe(startedAt * 1000);
+  });
+});
+
+describe('Codex user item clocks', () => {
+  const user = (id: string, clientId?: string) => ({ id, type: 'userMessage', content: [{ type: 'text', text: 'Keep waiting' }], ...(clientId ? { clientId } : {}) });
+
+  it('keeps two same-turn guides at their native times without changing their identities or order', () => {
+    const turn = Object.freeze({ id: 'original-turn', startedAt: 100,
+      itemTimestamps: new Map([['main', 100100], ['guide-1', 160100], ['guide-2', 220100]]),
+      items: [user('main', 'receipt-1'), { id: 'progress', type: 'agentMessage', text: 'Waiting' },
+        user('guide-1'), { id: 'tool', type: 'commandExecution', command: 'sleep', status: 'inProgress' }, user('guide-2')] });
+    const messages = codexMessages([turn]);
+    expect(messages.map(message => [message.id, message.role, message.timestampMs])).toEqual([
+      ['main', 'user', 100100], ['progress', 'assistant', 100000], ['guide-1', 'user', 160100],
+      ['toolcall_tool', 'tool', 100000], ['guide-2', 'user', 220100],
+    ]);
+    expect(messages[0].idempotencyKey).toBe('receipt-1');
+    expect(messages[2].text).toBe(messages[4].text);
+    expect(messages[2].idempotencyKey).toBeUndefined();
+    expect(messages[4].idempotencyKey).toBeUndefined();
+  });
+
+  it.each([undefined, null, 0, -1, NaN, Infinity, 100.5, '160100', 8.64e15 + 1])(
+    'keeps the legacy turn clock when the user item clock is invalid: %s', clock => {
+      const messages = codexMessages([{ startedAt: 100, itemTimestamps: new Map([['guide', clock]]), items: [user('guide')] }]);
+      expect(messages[0].timestampMs).toBe(100000);
+    });
+
+  it('keeps legacy history without item timing metadata unchanged', () => {
+    expect(codexMessages([{ startedAt: 100, items: [user('legacy')] }])[0].timestampMs).toBe(100000);
+    expect(codexMessages([{ items: [user('undated')] }])[0].timestampMs).toBeUndefined();
+  });
+});
 
 describe('Codex failed turn history', () => {
   const unsupported = "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";

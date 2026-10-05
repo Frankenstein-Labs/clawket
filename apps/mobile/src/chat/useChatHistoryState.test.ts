@@ -8,6 +8,7 @@ import { useChatHistoryState } from './useChatHistoryState';
 import { ChatCacheService } from '../services/chat-cache';
 import { StorageService } from '../services/storage';
 import { AdapterError } from '@clawket/agent-protocol';
+import { resetSessionHistory } from '../connection/session-reset';
 import { SessionCatalogSupersededError } from '../connection/adapters/session-catalog';
 
 jest.mock('../services/storage', () => ({
@@ -22,6 +23,7 @@ jest.mock('../services/storage', () => ({
 jest.mock('../services/chat-cache', () => ({
   ChatCacheService: {
     getMessages: jest.fn(),
+    deleteMessages: jest.fn().mockResolvedValue(undefined),
     getTimelinePage: jest.fn(),
     listSessions: jest.fn(),
   },
@@ -78,6 +80,28 @@ describe('useChatHistoryState', () => {
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
+  });
+
+  it('adopts late native execution identity on otherwise identical history rows', async () => {
+    const key = 'native-chat';
+    const rows = [{ id: 'main', role: 'user', text: 'Task', timestampMs: 1000 },
+      { id: 'tool', role: 'tool', text: '', tool: { callId: 'exec', name: 'exec', status: 'success' } },
+      { id: 'guide', role: 'user', text: 'Continue', timestampMs: 2000 },
+      { id: 'answer', role: 'assistant', text: 'Done', timestampMs: 3000 }];
+    const adapter = { connection: { backendKind: 'codex' }, state: 'ready',
+      loadSession: jest.fn().mockResolvedValueOnce({ messages: rows, hasActiveRun: false })
+        .mockResolvedValue({ messages: rows.map(row => ({ ...row, turnId: 'native-turn' })), hasActiveRun: false }) };
+    const { result, unmount } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, routeSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    await act(async () => { await result.current.loadHistory(key); });
+    expect(result.current.messages.every(row => !row.turnId)).toBe(true);
+    await act(async () => { await result.current.loadHistory(key); });
+    expect(result.current.messages).toHaveLength(4);
+    expect(result.current.messages.every(row => row.turnId === 'native-turn')).toBe(true);
+    unmount();
   });
 
   it('preserves image-only managed artifacts through history projection and refresh', async () => {
@@ -796,6 +820,30 @@ describe('useChatHistoryState', () => {
     expect(result.current.state.messages[0]?.modelLabel).toBe('openai/gpt-5');
   });
 
+  it('keeps reported Codex unknown/running history uncompleted while the turn remains active', async () => {
+    const key = 'agent:main:main';
+    const adapter = { connection: { backendKind: 'codex' }, state: 'ready', listSessions: jest.fn().mockResolvedValue([]),
+      loadSession: jest.fn().mockResolvedValue({ key, hasActiveRun: true, messages: [
+        { id: 'user', role: 'user', text: 'inspect', timestampMs: 1000 },
+        ...['unknown', 'running'].map(status => ({ id: `toolcall_${status}`, role: 'tool', text: '', timestampMs: 2000,
+          tool: { name: 'read', callId: status, status, statusReported: true, startedAtMs: 1500 } })),
+      ] }),
+    };
+    const { result } = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, gatewayConfigId: null, currentAgentId: 'main' });
+    });
+    await act(async () => { result.current.setSessionKey(key); await result.current.loadHistory(key, 12); });
+    for (const status of ['unknown', 'running']) {
+      const message = result.current.messages.find(message => message.id === `toolcall_${status}`)!;
+      expect(message).toMatchObject({ toolStatus: status, toolStatusReported: true });
+      expect(message.toolSummary).not.toContain('Completed');
+      expect(message.toolFinishedAt).toBeUndefined();
+      expect(message.toolDurationMs).toBeUndefined();
+    }
+  });
+
   it.each(['openclaw', 'hermes'])('keeps missing %s tool results unknown without inventing output', async backendKind => {
     const key = 'agent:main:main';
     const adapter = { connection: { backendKind }, state: 'ready',
@@ -1326,6 +1374,48 @@ describe('useChatHistoryState', () => {
         mainSessionKey: key, routeSessionKey: route, gatewayConfigId: null, currentAgentId: 'main' });
     }, { initialProps: { route: key, source: adapter } });
 
+    it.each([{ ids: [] }, { ids: ['new-user', 'first-reply'] }])('does not offer an older read for the complete first cursor page (%j)', async ({ ids }) => {
+      // The observed new Codex chat has two rows and no nextCursor. An unopened
+      // empty chat is also complete, without a previous window to identify it.
+      const head = { ...page(ids), messages: ids.map((id, index) => ({ ...message(id), role: index ? 'assistant' as const : 'user' as const })), pagination: 'cursor' as const };
+      const adapter = { connection: { backendKind: 'codex' }, state: 'ready',
+        loadSession: jest.fn().mockResolvedValue(head) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.hasMoreHistory).toBe(false);
+      expect(result.current.messages.map(row => row.text)).toEqual(ids);
+      await act(async () => { await result.current.onLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+      expect(ChatCacheService.getTimelinePage).not.toHaveBeenCalled();
+      await act(async () => { expect(result.current.applyReconciledHistory(head)).toBe(true); });
+      expect(result.current.hasMoreHistory).toBe(false);
+      expect(result.current.messages.map(row => row.text)).toEqual(ids);
+    });
+
+    it('keeps distinct native steering and reply items that share text and their turn timestamp', async () => {
+      // Codex stamps every item in one native turn with turn.startedAt.
+      const messages = [
+        { ...message('prompt-1'), text: 'Continue' },
+        { ...message('reply-1', 'assistant'), text: 'Checking.' },
+        { ...message('steering-1'), text: 'Continue' },
+        { ...message('reply-2', 'assistant'), text: 'Checking.' },
+        { ...message('steering-2'), text: 'Continue' },
+      ];
+      const adapter = { connection: { backendKind: 'codex' }, state: 'ready',
+        loadSession: jest.fn().mockResolvedValue({ ...page([]), messages }) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.messages.map(row => row.historyMessageId)).toEqual(messages.map(row => row.id));
+      expect(new Set(result.current.messages.map(row => row.id)).size).toBe(messages.length);
+      expect(result.current.messages.filter(row => row.role === 'user')).toHaveLength(3);
+      const identities = result.current.messages.map(row => row.id);
+      adapter.loadSession.mockResolvedValueOnce({ ...page([]), messages: messages.map(row => row.id === 'reply-2'
+        ? { ...row, text: 'Checking. Finished.' } : row) });
+      await act(async () => { await result.current.loadHistory(key); });
+      expect(result.current.messages.map(row => row.id)).toEqual(identities);
+      expect(result.current.messages[3].text).toBe('Checking. Finished.');
+    });
+
     it('recovers the real missing-page role structure: 18 users and 6 tools including the older 5 users and 3 tools', async () => {
       const roles = [...Array(5).fill('user'), ...Array(8).fill('assistant'), ...Array(3).fill('tool'),
         ...Array(13).fill('user'), ...Array(15).fill('assistant'), ...Array(3).fill('tool')];
@@ -1408,6 +1498,92 @@ describe('useChatHistoryState', () => {
       await act(async () => { expect(result.current.applyReconciledHistory(page(['d', 'e'], 'event-old') as any)).toBe(true); });
       expect(result.current.messages.map(row => row.text)).toEqual(['a', 'b', 'c', 'd', 'e']);
       expect(result.current.hasMoreHistory).toBe(false);
+    });
+
+    it.each(['codex', 'openclaw', 'hermes'])('finishes the %s reader page before a tool-result head refresh without losing either segment', async backendKind => {
+      const older = deferred<any>();
+      const adapter = { connection: { backendKind }, state: 'ready', loadSession: jest.fn().mockResolvedValueOnce(page(['c'], 'old'))
+        .mockReturnValueOnce(older.promise).mockResolvedValueOnce(page(['c', 'd'], 'head-old')) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      let paging!: Promise<void>, refresh!: Promise<number>;
+      act(() => { paging = result.current.onLoadMoreHistory(); });
+      act(() => { refresh = result.current.loadHistory(key); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+      expect(result.current.loadingMoreHistory).toBe(true);
+      await act(async () => { older.resolve(page(['a', 'b'])); await Promise.all([paging, refresh]); });
+      expect(result.current.messages.map(row => row.text)).toEqual(['a', 'b', 'c', 'd']);
+      expect(result.current.hasMoreHistory).toBe(false);
+      expect(result.current.loadingMoreHistory).toBe(false);
+      expect(result.current.historyLoadMoreError).toBe(false);
+    });
+
+    it('uses the updated cursor when the reader requests a page during a background head refresh', async () => {
+      const head = deferred<any>();
+      const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValueOnce(page(['c'], 'old'))
+        .mockReturnValueOnce(head.promise).mockResolvedValueOnce(page(['a', 'b', 'c'])) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      let paging!: Promise<void>, refresh!: Promise<number>;
+      act(() => { refresh = result.current.loadHistory(key); });
+      act(() => { paging = result.current.onLoadMoreHistory(); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+      await act(async () => { head.resolve(page(['d'], 'new-cursor')); await Promise.all([paging, refresh]); });
+      expect(adapter.loadSession).toHaveBeenLastCalledWith(key, { limit: 50, cursor: 'new-cursor' });
+      expect(result.current.messages.map(row => row.text)).toEqual(['a', 'b', 'c', 'd']);
+      expect(result.current.hasMoreHistory).toBe(false);
+      expect(result.current.loadingMoreHistory).toBe(false);
+    });
+
+    it('keeps a queued reconciliation head and its current activity after a pending earlier page', async () => {
+      const older = deferred<any>();
+      const adapter = { state: 'ready', loadSession: jest.fn().mockResolvedValueOnce(page(['c'], 'old'))
+        .mockReturnValueOnce(older.promise) };
+      const { result } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      let paging!: Promise<void>;
+      act(() => { paging = result.current.onLoadMoreHistory(); });
+      const currentHead = { ...page(['c', 'd'], 'event-old'), hasActiveRun: true, activeRunId: 'new-run' };
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+      try {
+        act(() => { expect(result.current.applyReconciledHistory(currentHead as any)).toBe(true); });
+        expect(result.current.messages.map(row => row.text)).toEqual(['c']);
+        clock.mockReturnValue(5000);
+        await act(async () => { older.resolve(page(['a', 'b'])); await paging; });
+        expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+        expect(result.current.messages.map(row => row.text)).toEqual(['a', 'b', 'c', 'd']);
+        expect(result.current.activitySnapshot).toMatchObject({ hasActiveRun: true, activeRunId: 'new-run', requestedAtMs: 1000 });
+        expect(result.current.hasMoreHistory).toBe(false);
+      } finally { clock.mockRestore(); }
+    });
+
+    it.each(['route', 'selection', 'retirement'])('discards a queued head before dispatch after %s changes without blocking the new read', async invalidation => {
+      const older = deferred<any>(); let stateListener: (state: string) => void = () => {};
+      const adapter = { state: 'ready', on: jest.fn((_event, listener) => { stateListener = listener; return () => {}; }),
+        loadSession: jest.fn().mockResolvedValueOnce(page(['b'], 'old')).mockReturnValueOnce(older.promise) };
+      const { result, rerender } = setup(adapter);
+      await act(async () => { await result.current.loadHistory(key); });
+      let paging!: Promise<void>, queued!: Promise<number>;
+      act(() => { paging = result.current.onLoadMoreHistory(); });
+      act(() => { queued = result.current.loadHistory(key); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+      let currentKey = key;
+      if (invalidation === 'route') {
+        currentKey = 'other';
+        rerender({ route: currentKey, source: adapter });
+        act(() => result.current.setSessionKey(currentKey));
+      } else if (invalidation === 'selection') {
+        act(() => result.current.setSessionKey('other'));
+        act(() => result.current.setSessionKey(key));
+      } else act(() => { stateListener('reconnecting'); stateListener('ready'); });
+      adapter.loadSession.mockResolvedValueOnce({ ...page(['current'], 'current-old'), key: currentKey });
+      await act(async () => { await result.current.loadHistory(currentKey); });
+      const expected = invalidation === 'retirement' ? ['b', 'current'] : ['current'];
+      expect(result.current.messages.map(row => row.text)).toEqual(expected);
+      await act(async () => { older.resolve(page(['stale'])); await Promise.all([paging, queued]); });
+      expect(adapter.loadSession).toHaveBeenCalledTimes(3);
+      expect(result.current.messages.map(row => row.text)).toEqual(expected);
+      expect(result.current.loadingMoreHistory).toBe(false);
     });
 
     it.each(['initial', 'older'])('advances through an empty %s native page', async when => {
@@ -2311,5 +2487,132 @@ describe('shouldRestoreCacheBeforeHistoryRefresh', () => {
         { id: 'u1', role: 'user', text: 'hello' },
       ],
     })).toBe(true);
+  });
+});
+
+
+describe('acknowledged session Reset history', () => {
+  const key = 'agent:main:reset-case';
+  const old = [
+    { id: 'old-user', role: 'user', text: 'old question', timestampMs: 1000 },
+    { id: 'old-reply', role: 'assistant', text: 'old reply', timestampMs: 2000 },
+  ];
+  function setup(backendKind = 'codex') {
+    const adapter = { connection: { id: 'reset-connection', backendKind }, state: 'ready',
+      resetSession: jest.fn().mockResolvedValue(undefined),
+      loadSession: jest.fn().mockResolvedValue({ key, messages: old, sessionId: 'old-native', nextCursor: 'old-cursor', hasActiveRun: false }),
+    };
+    const hook = renderHook(() => {
+      const sessionKeyRef = useRef<string | null>(key);
+      return useChatHistoryState({ adapter: adapter as any, dbg: jest.fn(), t: translate,
+        sessionKeyRef, mainSessionKey: key, routeSessionKey: key, gatewayConfigId: 'reset-connection', currentAgentId: 'main' });
+    });
+    return { adapter, ...hook };
+  }
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (ChatCacheService.getMessages as jest.Mock).mockResolvedValue([]);
+    (ChatCacheService.deleteMessages as jest.Mock).mockResolvedValue(undefined);
+    (ChatCacheService.getTimelinePage as jest.Mock).mockResolvedValue({ messages: [], hasMore: false });
+  });
+
+  it('clears the same key immediately after ACK, reads a new head, and preserves only new optimistic input', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const ack = deferred<void>();
+    const head = deferred<any>();
+    adapter.resetSession.mockReturnValueOnce(ack.promise);
+    adapter.loadSession.mockReturnValueOnce(head.promise);
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    expect(result.current.messages).toHaveLength(2);
+    await act(async () => { ack.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.activitySnapshot).toBeNull();
+    expect(result.current.sessions.find(item => item.key === key)?.sessionId).toBeUndefined();
+    expect(adapter.loadSession).toHaveBeenCalledTimes(2);
+    expect(adapter.loadSession).toHaveBeenLastCalledWith(key, { limit: 50 });
+    act(() => { result.current.setMessages([{ id: 'usr_123_fresh', role: 'user', text: 'new draft sent', sentLocally: true, timestampMs: Date.now() }]); });
+    await act(async () => { head.resolve({ key, messages: [], hasActiveRun: false }); await reset; });
+    expect(result.current.messages.map(item => item.id)).toEqual(['usr_123_fresh']);
+    expect(result.current.hasMoreHistory).toBe(false);
+    expect(ChatCacheService.deleteMessages).toHaveBeenCalledWith('reset-connection', 'main', key);
+  });
+
+  it('retires an old deferred history and cache hydration before their late results arrive', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const oldRead = deferred<any>();
+    const oldCache = deferred<any>();
+    adapter.loadSession.mockReturnValueOnce(oldRead.promise).mockResolvedValueOnce({ key, messages: [], hasActiveRun: false } as any);
+    (ChatCacheService.getMessages as jest.Mock).mockReturnValueOnce(oldCache.promise);
+    let read!: Promise<number>, cache!: Promise<boolean>;
+    act(() => { read = result.current.loadHistory(key); cache = result.current.restoreCachedMessages(key); });
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', key); });
+    await act(async () => {
+      oldRead.resolve({ key, messages: old, sessionId: 'old-native', nextCursor: 'old-cursor' });
+      oldCache.resolve(old); await read; await cache;
+    });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.hasMoreHistory).toBe(false);
+    expect(adapter.loadSession).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps the confirmed empty timeline if its new read fails', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    adapter.loadSession.mockRejectedValueOnce(new Error('read failed'));
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', key); });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.historyLoaded).toBe(true);
+  });
+
+  it('blocks old cache hydration when both ACK cache deletion and the fresh head read fail', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    (ChatCacheService.deleteMessages as jest.Mock).mockRejectedValueOnce(new Error('storage failed'));
+    (ChatCacheService.getMessages as jest.Mock).mockResolvedValue(old);
+    adapter.loadSession.mockRejectedValueOnce(new Error('read failed'));
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', key); });
+    let restored!: boolean;
+    await act(async () => { restored = await result.current.restoreCachedMessages(key); });
+    expect(restored).toBe(false);
+    expect(result.current.messages).toEqual([]);
+    expect(adapter.resetSession).toHaveBeenCalledTimes(1);
+    expect(ChatCacheService.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('leaves history and cache intact when Reset is rejected', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const before = result.current.messages;
+    adapter.resetSession.mockRejectedValueOnce(new Error('denied'));
+    await act(async () => { await expect(resetSessionHistory(adapter as any, 'main', key)).rejects.toThrow('denied'); });
+    expect(result.current.messages).toBe(before);
+    expect(ChatCacheService.deleteMessages).not.toHaveBeenCalled();
+    expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not clear a new selection after leaving and returning to the same key before ACK', async () => {
+    const { adapter, result } = setup();
+    await act(async () => { await result.current.loadHistory(key); });
+    const ack = deferred<void>();
+    adapter.resetSession.mockReturnValueOnce(ack.promise);
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    act(() => { result.current.setSessionKey('another'); });
+    act(() => { result.current.setSessionKey(key); result.current.setMessages([{ id: 'new-scope', role: 'assistant', text: 'current scope' }]); });
+    await act(async () => { ack.resolve(); await reset; });
+    expect(result.current.messages.map(item => item.id)).toEqual(['new-scope']);
+    expect(adapter.loadSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['openclaw', 'hermes'])('preserves %s normal refresh semantics without a Reset ACK', async backend => {
+    const { adapter, result } = setup(backend);
+    adapter.loadSession.mockResolvedValue({ key, messages: [], hasActiveRun: false } as any);
+    act(() => { result.current.setMessages([{ id: 'usr_123_optimistic', role: 'user', text: 'pending', sentLocally: true, timestampMs: Date.now() }]); });
+    await act(async () => { await result.current.loadHistory(key); });
+    expect(result.current.messages.map(item => item.id)).toEqual(['usr_123_optimistic']);
+    expect(ChatCacheService.deleteMessages).not.toHaveBeenCalled();
   });
 });

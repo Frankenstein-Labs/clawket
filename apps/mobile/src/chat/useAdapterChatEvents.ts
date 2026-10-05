@@ -1,3 +1,4 @@
+import { validTurnIdentity } from './turnIdentity';
 import { normalizeMessageAttribution } from './messageAttribution';
 import { localizeAgentSystemNotice } from './agentSystemNotice';
 import {
@@ -40,6 +41,9 @@ export type AdapterChatUpdate =
       type: 'run_started';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       activeRunId: string;
       isSending: true;
       startedAtMs: number;
@@ -48,8 +52,12 @@ export type AdapterChatUpdate =
       type: 'agent_message_chunk';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       text: string;
       textMode?: 'snapshot' | 'delta';
+      timestampMs?: number;
       activeRunId: string;
       isSending: true;
       visible: boolean;
@@ -67,6 +75,9 @@ export type AdapterChatUpdate =
       type: 'tool_call';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       toolCallId: string;
       message: UiMessage;
       merge: false;
@@ -77,6 +88,9 @@ export type AdapterChatUpdate =
       type: 'tool_call_update';
       sessionKey: string;
       runId: string;
+      turnId?: string;
+      inputMessageId?: string;
+      inputMessageKey?: string;
       toolCallId: string;
       message: UiMessage;
       merge: true;
@@ -224,10 +238,12 @@ export function mapAdapterChatMessage(
       };
     });
   const tool = message.tool;
+  const reportedUnsettled = tool?.statusReported && (tool.status === 'running' || tool.status === 'unknown');
 
   return {
     id: message.id,
     role: message.role,
+    turnId: validTurnIdentity(message.turnId),
     ...(message.attribution ? { attribution: normalizeMessageAttribution(message.attribution) } : {}),
     ...(message.sentLocally ? { sentLocally: true as const } : {}),
     text: message.role === 'system' ? localizeAgentSystemNotice(message.text, translate) : message.text,
@@ -243,12 +259,15 @@ export function mapAdapterChatMessage(
     usage: mapUsage(message.usage),
     toolName: tool?.name,
     toolStatus: tool?.status,
+    ...(tool?.statusReported ? { toolStatusReported: true as const } : {}),
     toolSummary: tool?.summary,
     toolArgs: stringifyUnknown(tool?.input),
     toolDetail: stringifyUnknown(tool?.output),
-    ...(tool?.durationMs !== undefined ? { toolDurationMs: tool.durationMs } : {}),
+    // Explicit clears survive active live/history object merges after a gap.
+    ...(reportedUnsettled ? { toolDurationMs: undefined, toolFinishedAt: undefined } : {}),
+    ...(!reportedUnsettled && tool?.durationMs !== undefined ? { toolDurationMs: tool.durationMs } : {}),
     ...(tool?.startedAtMs !== undefined ? { toolStartedAt: tool.startedAtMs } : {}),
-    ...(tool?.finishedAtMs !== undefined ? { toolFinishedAt: tool.finishedAtMs } : {}),
+    ...(!reportedUnsettled && tool?.finishedAtMs !== undefined ? { toolFinishedAt: tool.finishedAtMs } : {}),
   };
 }
 
@@ -366,13 +385,15 @@ export function mapAdapterSessionUpdate(
         ...update,
         message: {
           id: `toolcall_${update.toolCallId}`,
+          ...(validTurnIdentity(update.turnId) ? { turnId: update.turnId } : {}),
           role: 'tool',
           text: '',
           toolName: update.kind ?? update.title,
-          toolStatus: 'running',
+          toolStatus: update.status ?? 'running',
+          ...(update.status !== undefined ? { toolStatusReported: true as const } : {}),
           toolSummary: update.title,
           toolArgs: stringifyUnknown(update.rawInput),
-          toolStartedAt: now(),
+          ...(update.status === undefined || update.status === 'running' ? { toolStartedAt: now() } : {}),
         },
         merge: false,
         activeRunId: update.runId,
@@ -384,11 +405,13 @@ export function mapAdapterSessionUpdate(
         ...update,
         message: {
           id: `toolcall_${update.toolCallId}`,
+          ...(validTurnIdentity(update.turnId) ? { turnId: update.turnId } : {}),
           role: 'tool',
           text: '',
           toolStatus: update.status,
+          toolStatusReported: true,
           toolDetail: stringifyUnknown(update.rawOutput),
-          ...(update.status === 'running' ? {} : { toolFinishedAt: timestampMs }),
+          toolFinishedAt: update.status === 'success' || update.status === 'error' ? timestampMs : undefined,
         },
         merge: true,
         activeRunId: update.runId,
@@ -407,7 +430,8 @@ export function mapAdapterSessionUpdate(
             id: `final_${update.runId}`,
             role: 'assistant' as const,
             text: update.message.content,
-            timestampMs,
+            timestampMs: typeof update.message.timestampMs === 'number' && update.message.timestampMs > 0
+              && Number.isFinite(new Date(update.message.timestampMs).getTime()) ? update.message.timestampMs : timestampMs,
             modelLabel: modelLabel(update.message.provider, update.message.model),
             usage,
           }

@@ -1,5 +1,400 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 图片 UI 录像复核完成；同候选抓到新的历史加载后持久跳位，按负责人要求在后续2–3小时收敛。
+  - 072 自然EOF解码396帧/33contact全部独立亲看，实际容器120.683767秒；单图、键盘、三行输入及自动增高可见，换行初段短暂底部裁切后完整显示。没有录到展开/预览/Remove/六图/切会话，其通过仍基于独立实机截图；VFR间隔不是连续paint。编码子进程全退出、独立确认不存在后释放heavy。
+  - 已载 `4398d15a` 的原QA5560进入自有H6C；六次真实阅读drag依次看到37–40、34–37、32–35、29–33、27–31、25–27，随后截图仍25–27/loading。无新增手势的后续两截图却固定为8–11，历史已81行/两页，阅读位置未保留。V2样本与最后32事件保留，但408个旧事件已被覆盖，不能据尾窗指认最早原因；原idle大面积空白仍独立未关闭。
+  - 有界073录屏90秒要求/rc0/recorder独立退役，完整稳定传回6,611,362B/SHAa4f27f65…；容器与视觉范围另审。200像素/250ms小drag后8–12可读、无长按菜单。一次Home/返回原进程后相同正文可读；初始缓存仍capturing与过渡层级的失败检查保留，稍后两份缓存实际stopped/background、223样本未自动重启，不能声称即时缓存写入。
+  - 两自有Native原文件完整大小/SHA不变、0Send，C/E原owner仍在。Root `658ddb03` 精确CI37278763078及独立fresh全日志均核验11 jobs中9成功，types/功能/三Mobile/v1/两桌面均绿；双lock未批准braces只阻audit及依赖汇总。PR141/167/168/169/170未合并，未发布。下一步仅聚焦历史修复/回归与已修改功能收敛，不扩新功能；认证与Desktop GUI仍为已有owner验收边界。
+
+- 2026-10-05 首次历史 prepend 的四阶段消费者特征测试（负责人授权；生产零差分）。
+  - 独立 fresh-main task worktree 以已审 Root `9f874f6a` 作为显式本地前置来源，新增测试/最近说明；不改生产、依赖或既有 Native/手机证据。最终新增补丁可单独移入组合候选，不能把前置来源称为本任务新实现。
+  - 真实 ThreadView 回调、history anchor 与已安装 FlashList 源联接，分别控制 Shadow 尺寸、旧实际 child 上命令 clamp、child mount 与 SDK 滚动事件；正常顺序、额外真实 size 回调恢复及 fresh reader/旧 ACK 为独立对照。SDK 事件引发的真实 commit 仍可重试，不为绿结果伪造回调或 ACK。
+  - 明确资源交接后 own bootstrap exit0；三次外围 Native Sheet/编辑/工具详情装配失败均为0个用例执行且保留原始输出，只补无关叶模块 mock 后该单文件4/4通过。串行文档检查7对/5项通过；登记子进程全部退出后释放 heavy。不跑类型或全套、不操作设备或 Native。固定 Host 高度/坐标不是 Native paint，063 首页瞬时跳位原因仍未确定，没有生产修复或安全公共 MVCP 交接结论。
+  - 独立 `bb9daed5` 已整合为 Root `2ad22664`，保留组合 UI/既有 milestone；Root 自有 Metro暂停/heavy下真实组合单文件4/4、docs9对/5项通过。独立精确CI37277948157的types/功能/三Mobile/v1/两桌面均绿，fresh实际日志仍只有双lock未批准braces与汇总红；PR170尚未合并。确认的Activity重建目前没有QA隔离触发入口，不能把旋转/Theme/JS Reload/process cold当等价覆盖。
+
+- 2026-10-05 图片托盘第二候选完成有界真机视觉与操作复验，历史矩阵继续。
+  - Root `4398d15a` 保留组合修复，取消紧凑附件态透明内 capsule 的重复圆角裁剪，固定原生 host；input-shell 高度裁剪、原 input 父链与 resizeFocus 保持。Root 串行 ThreadPrimitives70、docs9指令对/5用例及UI254文件/979token来源通过，未跑本地全套；首候选输入行不可见的失败证据保留。
+  - 恢复仅自有开发 reverse，真实手机HTTP200后唯一保数据 QA 冷开5560；完整新缓存22,569,979B/SHA375d34e0…核验27源码/70标记，旧 Native APK26e56859…不变。首次 screenshot255 与错误的依赖 picker 断言均保留，后者0动作；后续独立步骤实际完成选择，不计失败步骤为通过。
+  - 本人亲看截图确认浅色单图＋准确三行聚焦草稿、展开/收起/隐藏键盘均可读；中心全屏预览正确，明确 Remove 保留同草稿。五张自有图后实际 tray Add 原生菜单→相册→第六张，六图自然3＋3换行、Add隐藏，键盘/草稿可见；第六张预览显示6/6，删除后恢复Add且保留草稿。深色实际单图、追加至六图及聚焦短草稿也可见。全部明确清空，原QA主题system的选中值已恢复；即时UI恢复不冒称冷启动持久化验收。
+  - 两个自有Native文件完整大小/SHA未变，0Send，C/E原owner进程仍在。071首UI候选失败录像完整解至自然EOF，实际58.435478秒/215帧/18contact独立亲审：旧认证提示/正文仍在，附件与空输入表面后进入正确洋红预览；未录Send/切会话/Home或crash，不能把预览黑底过渡当idle正文空白。新072 finite120s录屏rc0/自有recorder退役，完整稳定传回743,274B/SHA115f3cde…；容器/视觉另审，截图通过不扩大到连续paint。原idle空白、首prepend瞬跳、迟到picker及确认后Activity重建仍待。
+  - `4398d15a`精确CI37274601545已结束：功能/types/静态/v1/三Mobile分片及两桌面平台绿；fresh完整日志核验双lock的未批准braces GHSA-vfj7-8cjw-p6xm仍阻audit和汇总，PR141/167/168/169未合并、无发布。
+
+- 2026-10-05 附件共享 surface 首候选真机未通过，继续同 UI 任务的最窄候选。
+  - 真实有附件时 surface、Add/Send 与预览均可见，placeholder、输入草稿与 model chip 像素空白；UIA 保留完整文本/有效 bounds，聚焦和实际短草稿仍不可见。明确移除附件后同一未发送草稿和 model 立即可见，0Send。不能用首候选79项组件绿升级为真机通过，也未证明 Android drawable clip bounds 就是原因。
+  - 仅紧凑附件态取消透明内 capsule 的重复圆角/overflow clip，保持 input-shell 高度裁剪、同 input/native parent、无附件和展开样式；固定 capsule native host 避免移除裁剪后因缺 test ID 被 layout-only flatten。gallery/容量/24点 reserve/44点 Remove/回调不变。
+  - 新 light/dark host 样式边界基线2红/68绿→候选70绿，显式断言 flatten 后没有内层半径；UI246文件/959 token来源、设计文档11组件/10 token families＋5用例、check:docs 7指令对＋5用例通过。UI gate曾拒literal radius0，候选改显式 undefined 让 RN 清除旧半径，未新增token或扩大改动；本轮无新类型，不重复tsc/fullsuite。负责人新手机候选绘制验收仍待后续组合。
+
+- 2026-10-05 图片托盘首候选已真机加载，抓到输入行绘制失败；窄修与复验继续。
+  - Root `9f874f6a` 整合独立 UI，源审确认保留原 resizeFocus、附件 scope/MIME、分页/Native 修复。自有 Metro 暂停/heavy 下串行 PendingImageBar11、ThreadPrimitives68、Mobile types、UI254文件/979token来源、设计与docs9指令对/5用例通过；未跑本地全套。
+  - 恢复自有开发映射、真实手机HTTP200后唯一保数据冷开31863正常进入原R5U。完整新缓存22,569,642B/SHA83a84425…核验27源码/68标记；两次即时EOF探测零响应按工具失败保留，不计网络故障或冷开。QA原Native APK26e56859…保留，无新构建。
+  - 实际1图片托盘和动作正常，但输入提示/模型chip在两次静置截图不可见，层级仍有有效bounds；聚焦键盘与准确短未发送草稿也无像素文字。中心预览成功、Close/明确Remove0后同草稿和模型立即可见。随后清空草稿/0附件，两Native原件全大小/SHA未变、0Send；首UI候选不记通过。
+  - 当前PID有界5000行日志0同步props/Fatal/Type/Reference错误、1ExpoCLI warning；不当作根因。透明内capsule冗余圆角裁剪是可证伪窄候选，原idle正文空白仍独立。新071 finite60s录屏rc0/全传794,792B/SHA9261c337…，容器/视觉待独立审核。
+  - 070完整119.516933s/560编码帧自然EOF/47contact亲审完成；实际仅选图、旧托盘、会话面板及有限结束前过渡/loading，未录settled H6C或返回R5U。此前A→B→A通过基于独立截图/Native原件；VFR空档/过渡空白不冒称idle故障。9f exact CI37273085928功能/types/静态/v1/三Mobile及两桌面平台全部绿，audit与其汇总红；新日志独立核验继续。未合并/发布。
+
+- 2026-10-05 待发附件托盘与输入区整合（负责人根据实际手机截图要求优化）。
+  - 有附件时用一块共享 surface/glass 承载全宽托盘及底部输入/动作行，加号变为同底面的轻量图标；无附件保留 A+ 单行。托盘 Add 使用现有56点触区内的44点细边控件，去除重复白色填充和叠加上留白。
+  - 保留同一个原生输入的父链、展开/键盘/模型/语音和发送行为，保留56点预览、44点删除目标与24点右侧隔离；不改选择、预览、删除、六项容量、动画/减少动态效果、附件会话作用域或后端合同。
+  - 本树独立安装依赖，逐文件串行验证：PendingImageBar 旧 UI（已保24点 reserve）3红/8绿→候选11绿；ThreadPrimitives 旧 UI 6红/62绿→候选68绿。真实 Paste 输入实例在附件增减、聚焦和展开后保留；几何用例是组件样式/回调模型，不冒称 Native 命中、键盘或六图视觉验收。
+  - Mobile 类型通过，UI 检查246文件/959 TypeScript token来源，设计文档11组件/10 token families＋5腐败用例、check:docs 7指令对＋5用例通过；未跑完整套件。负责人真机视觉与命中验收待组合候选。未操作手机、Native、Metro或发布。
+
+- 2026-10-05 Codex 组合候选已安装并完成附件会话隔离真机复验；其余矩阵继续。
+  - Root `1c698b2e` 合并独立附件 scope 与 Reanimated 安装守卫，保留既有 MIME、Reset、steering、分页和原生输入修复。暂停自有 Metro、heavy 租约下串行通过 controller 111、picker 20、paste 8、安装守卫 6、Mobile types、docs 9 指令对/5 检查器用例；未跑本地全套。
+  - 单次本地 QA debug 构建成功：新 APK 105,185,664B/SHA26e56859…，实际安装的 QA base APK 全 SHA 相同。Mobile consumer、Kotlin class、runtime jar 和 APK DEX 的缺失 tag 守卫分支逐项核验；Paste 生成源码保持不变。原生静态包含不等于 missing→mounted 或空白根因验收。
+  - 开发 reverse 再次缺失使首次冷开无法加载脚本；恢复自有端口后单次 Reload 已加载 JS 但仍停留启动图，旧错误与本次时序分开，Splash 生命周期仅条件候选。完整新手机缓存22,568,511B/SHA76414d6c…核验27源码/65标记；随后保数据冷进程24632恢复正常列表及原R5U，缓存大小/全SHA匹配，清空草稿没有复活。一次检查器将正常 pidof exit1 误作失败，保存停止后现场再仅完成剩余 Start；未重复停止或改数据。开发链路原因未定，不归因 Codex 会话。
+  - 原R5U选入自有PNG后1附件，实际切H6C正文40/空草稿/0附件，返回R5U仍空草稿/0附件；两个原生文件完整大小/SHA均不变，0Send。新同scope选图、15秒后台返回及模型页打开/关闭各保持1附件，随后明确移除；最终0附件/空草稿，未改模型设置。附件隔离这轮已复验，迟到picker/确认后活动重建、原idle blank与warm Current/Stop仍独立待验。
+  - 068/069全部947编码帧/80联系图亲审完成，实际未录cold或session切换，不能冒称完整场景。新070有限录屏rc0、全文件3,379,546B/SHA2dd3751e…稳定传回，容器/视觉待独立检查。精确组合CI37268382150的功能/types/v1/静态/三Mobile分片及两桌面平台通过；实际失败日志仅两lockfile的未批准braces审计及其汇总门。PR141/167/168均未合并、无发布。负责人新增图片托盘/加号UI优化已登记，在本轮附件复测收尾后继续。
+
+- 2026-10-05 共享 composer 附件按会话进入退休（负责人授权独立修复；待候选手机复验）。
+  - 负责人在旧 QA 包实际确认：从自有 Codex 草稿会话切到另一自有长历史会话，正文已清空但已选 PNG 仍在托盘；没有 Send。源码确认同连接/Agent 复用 Thread 控制器时未退休托盘，字符串范围也不能拒绝 A→B→A 的迟到结果。
+  - 将附件托盘、setter、图库/最近照片/相机/文件/原生粘贴回调绑定到每次会话进入的代际；新会话粘贴不等待已离开的读取。同范围重连、短暂缺失 adapter 和 history reload/Reset 保持附件；不重挂原生输入框，不改变编码、能力、wire 或发送规则。
+  - 自有依赖安装后、heavy 租约下串行验证：真实 controller 和真实 picker/paste 单文件干净基线 13 红/1 兼容通过，修复后整文件 74/74 通过（新组 14 项，托盘退休覆盖 OpenClaw/Hermes/Codex/Pi/Claude Code）；原生选择/文件字节、历史等外围依赖受控，未把五后端参数用例称为真机验收。首轮卸载 fixture 的 Hook 顺序警告已纠正，独立重跑基线与完整绿没有该警告。Mobile 类型、文档 7 对 AGENTS/CLAUDE 与 5 检查器用例、UI 246 文件及设计系统 11 组件/10 token families 均串行通过。
+  - Bootstrap/首次基线期间与负责人恢复 Metro 的短暂交接观察竞态另留私有时间事实；随后负责人暂停 Metro 至本轮验证结束。不操作手机、Native、服务或账号，不发布。
+- 2026-10-05 Android Reanimated 缺失 view 的同步 props 安装补丁（负责人授权，原生验收待独立 QA 构建）。
+  - 固定旧 QA 日志中的 2,629 次失败分属三个短 burst：SVG 绘制布局事件和页面转场重放保留 props，对缺失 tag 反复产生完整异常栈；不称连续动画泄漏、Surface 整体退出或空白根因。
+  - 仅精确 Reanimated 4.5.5 / RN 0.86.3，在现有同步更新 try 内复用 `preserveMountedTags`；明确缺失/预分配 view 跳过本次，保 registry 后续挂载可用；非 UI 线程 false 与未知异常保持旧 invoke/warn 行为。双 postinstall 从 Mobile 实际 package consumer 解析原生目标，根传递 4.2.1 不改；必需单文件门覆盖漂移/幂等/standalone、hoisted、linked 解析与最近工程规则。
+  - 首次独立 bootstrap 错误纳入根传递 4.2.1 的旧 Java source，exit1/0 tests 原件保留；修为 Mobile consumer 后独立 bootstrap exit0、原生目标 4.5.5 / 0.86.3，冻结实际上游 source。单 Node 文件 no-op 基线新增守卫/源码拒绝合同 3 红、其余 3 绿，恢复候选 6/6 绿；同进程 resolve 缓存的 RN fixture 错误已按实际失败仅改首次解析前建立本地 RN，旧失败证据保留。文档门 7 对指令文件 / 5 用例和 whitespace 通过，heavy 已释放。没有类型检查、Native 构建/手机操作；安装源码验证不等于 APK、缺失后挂载运行或 blank 修复。
+- 2026-10-05 安卓 Codex 未发送草稿与附件跨会话实测，发现图片串入另一会话；独立修复待组合真机复验。
+  - R5U 的单次 ADB 长文注入计划1338字符，实际仅446字符准确前缀；命令成功不证明逐键投递，保留失败现场，不将自动化或输入链未知原因冒称产品截断。实际446字符草稿后台返回及保数据冷进程14311恢复准确；只读模型页确认Read-only/Low/Standard，无设置写入、发送或凭据操作。
+  - 自有纯色图片经系统照片选择器完成后，R5U准确446字符及1附件成立。切到独立H6C后三份稳定层级均正文40、输入仅提示而无草稿、1附件仍在，截图亲见同一图片；这是实际会话附件串入。返回R5U仍446字符，随后明确移除图片并清空草稿；两个自有Native文件均未改变，清空后的冷保存验证仍待。旧时间点的过渡层级和提示文本断言失败分别保留，不用其代替稳定证据。
+  - 独立scope修复按connection/Agent/session每次进入建立generation，退休tray及图库/相机/文件/paste迟到回调，保留同scope重连与history reload/Reset；五后端实际controller消费者基线13红/1兼容绿，候选单文件74/74、Mobile types/docs/UI通过。PR168尚未合并，Root组合源码及手机验收待继续。
+  - Reanimated缺失view窄修PR167完成独立安装与6项源码/版本/消费者路径检查；精确CI功能、types、v1及两桌面平台绿，仅未批准braces审计阻合并。当前手机APK尚无该新补丁，原生编译与missing→mounted实际验证分开，不能宣称空白或跳位已修复。
+  - 065实际30.100167秒/93编码帧/8联系图全部亲审，仅末页正文到长按菜单；066实际17.321278秒/286帧/24联系图全部亲审，正文38–40到33，未录入真正prepend。两者原录屏结束证据不升级，VFR缺帧不证明连续paint。新068/069仅已完成有限device recorder rc0及全文件传回/SHA核验，容器与实际视觉覆盖仍待，录屏命名不是覆盖证明。
+
+- 2026-10-05 Android 稳定滚动宿主候选已真机加载，两轮分页与新认证错误留证，全面测试继续。
+  - `51dcc302` 完整手机缓存22,566,321B/SHA12bef398…，26源码与57标记核验；保数据冷进程1935、6766各按完整大小/SHA关联，未替换商店App、重启Native owner或操作Desktop。受控复制的独立H6C拥有准确80条继承消息/32、32、16三页，创建是主机夹具准备，不冒称手机fork操作。
+  - 两轮实际历史阅读均33→65→81行；末页后原生raw序列继续更新，停留及短拖截图正文正常。第一轮50px/500ms手势打开长按菜单，不计成功小滚；第二轮200px/250ms正常阅读。完整Stopped V2分别232与256保留样本（第二轮19样本退休），raw/SDK新鲜差项仍有，跨域查询不是原子paint。首次录像检查在启动前失败；065仅末页后，原returncode未记录；066明确exit255且提前结束，完整文件已保留，不能宣称录全分页。修复验收仍有界，原idle整块空白未闭环。
+  - 063/064全部1772编码帧/148联系图实际审核完成：063首分页25–27→09–11→24–27存在约1.31秒短暂跳位，单独结束截图漏掉该过程。它发生时刷新容器始终存在，故与末页宿主替换分开；content-size的Shadow布局回调早于Fabric挂载的候选已源审，尚无安全且验证完整的公共MVCP交接，不做最终offset替代paint证明。
+  - 新R5U唯一纯Init原生Read-only/Low成立，但1 start/1失败complete/1 receipt/1用户/0助手；Mobile显示模型认证失败。原输入未重放，Main/Current/Stop均0；负责人当前Desktop模型可用性异步确认中，不读写凭据或自动登录。旧warm Stop仍未验收。保存日志另确认Reanimated缺失view的2629次同步props失败集中3个2–3秒爆发，独立窄修继续，不作为空白已定因。
+  - `51dcc302` exact CI所有功能、类型、静态、三Mobile分片、v1及macOS/Windows Bridge通过，唯一未批准braces审计继续阻merge。PR141未合并、无发布。内部盘空间紧张仅搬11个已结束大录屏并逐字节/SHA核对保留原路径链接；原证据目录、活动profile数据库和Native来源未搬动，失败的整目录迁移保持失败。
+
+- 2026-10-05 安卓 Codex 末页分页的滚动宿主生命周期窄修，修复版真机回归继续。
+  - 原40轮会话实际连续读历史，33→65→81行；首分页保留offset_command→JS ACK约2.09秒窗口。第二页后无新手势的截图出现37–40/01–03变化，原生scroll观测停在旧序列，SDK/JS继续；5次系统掉帧报告、完整缓存和90秒/30秒录屏已留现场。陈旧raw与非原子截图不证明全部paint因果。
+  - 确认Android移除RefreshControl会替换Native ScrollView，而FlashList首次onLoad绑定不会跟随重建；末页/同key恢复可触发该结构变化。Android保留刷新容器，以enabled、refreshing和回调门关闭无更早历史时的拉动；页头仍按真实分页显示，iOS保留原结构。五后端红基线5项，修复后ThreadView213项、Mobile类型和文档9指令对/5用例通过。尚未将新源码加载手机，不称空白/跳位已修复；PR141仍受未批准braces审计阻挡，无发布。
+
+- 2026-10-05 a7 手机加载与首次 V2 几何/冷历史有界观察完成，长历史独立采样继续。
+  - 完整手机JS缓存22,565,947B/SHA9a4b1fef…、26源码/53标记的全传输属于19777；后续Native加载错误现场保留。恢复丢失的开发reverse并从手机取得HTTP200/准确Metro状态后，唯一保数据QA冷开13948正常列表，缓存前后大小/SHA同全传输，仅作冷进程关联。Desktop、Native owner、商店与Production未动。
+  - Q5A完成态一次Start实际亲见started toast；首份43,493B V2完整稳定缓存以已审冻结生产encoder验证56sample/20layout事件，0reject/drop。raw序列仍0，不声称raw/SDK一致或paint。20,089ms后台命令间隔返回同PID、原完成回复/无复活表单，首图保留活动返回过渡；独立最终129,569B缓存严格stopped/background、188sample、32保留/20退休layout事件。无手势，本轮不算分页验收；新可复用固定缓存读者只校验独立观察，不重放旧one-shot extractor。
+  - 原R5T只读冷重入确切A→guide2→B各Native ID一次、0abort累计泡；原Native357,515B和initreceipt全字节/SHA未变，不冒称warm split已实机修复。原40轮QA搜索两同标题项目后选择exact original，初加载空画面无手势恢复37–40，与idle滚动恢复问题分开。新long-history capture正准备。a7 exact CI所有功能/types/static/mobile/v1/Desktop绿，唯一未批准braces审计仍阻merge；无发布。
+
+- 2026-10-05 停止后跨指南累计回复重复的原生/UI精确关联与源码窄修完成；手机加载验收待继续。
+  - 1454 独立第3泡的 Native ID 精确对应原 Main assistant ordinal10；第4本地 abort 尾精确为该 A＋双换行＋ordinal11 B，canonical 原序 A→guide2→B，三者有效 typed clocks。较早ordinal3同文 A有不同ID；不从正文或时钟推断指南消费。独立诊断纠正原role-prefix假设，旧证据保持；0RPC/Native写/进程操作。
+  - 仅完整唯一、同turn、有效clock的canonical序列可拆无usage/附件的本地 abort_ 累计尾；ACK到达不切文本。已确认guide的sentLocally起源标记保留；exact-owned不变前缀保原cell/key，仅展开后缀，changed/ambiguous/non-prefix仍保守。Known Native/history ID先于同文fallback，合法较早同文段不被抢身份，不全局按时钟排序。Root真实finish/preserve基线3红；actual controller ACK先、B pending期间到达、cancelled终态及late head基线1红；16行/12assistant重复身份与prefix再3红，最终history97/controller97通过。viewport union同样单文件4/15/208/24通过，Thread fixture同名AppState自动合并重项已删，类型通过；不声称1454手机已修或空白定因。
+  - 059/060/061的54/112/753 contact及11010编码帧已全部亲看：061直到最后9032仍工作正文和两commentary，未录Current/Stop/Home或整块空白。062超预算probe保持失败、0后续decode/contact。完整传输、容器/codec与实际视觉场景分别记录。QA PID19777仍旧d616/3400607b缓存，候选尚未加载；Desktop GUI与braces owner-only不绕过，未merge/release。
+
+- 2026-10-05 Codex A5A 原审批/工具与 Q5A 原问答提交真机闭环完成；滚动空白和终态重复继续修复。
+  - A5A 独立纯 Init 与 Main 均确认真实 Read-only，原第二 turn 的唯一 printf 审批经既有 IPC 只读观察、手机一次 Allow，得到原 item completed/exit0、准确 stdout 与最终回复；2 starts/completes/receipts、0错误/abort。冻结 reader 因要求未持久化的 exec begin/end 格式失败，另以原 canonical CommandExecution 严格关联验证，不改旧 reader/结果。键盘存在时首次工作回执 tap 未打开；隐藏键盘后打开工作记录、命令详情，Copy 后在同自有空草稿实际 Paste 得到准确28字符含换行，再清空且0Send。后台同PID返回保留详情，初帧重连/遮挡留证，不冒称全程在线。
+  - Q5A 先 Low ACK 再 Read-only，首次过早 Read-only 被 disabled 门拒绝且0写。纯 Init 确认原只读线程后，仅原QA owner切 Plan；唯一 Main 产生原双字段问题，第一项选推荐选项、第二项18字符 custom，关闭重开保留第二页与准确草稿。一次 Submit 后原 call 唯一准确 answers/output、2 starts/completes/receipts、0错误/abort；离开再进入同完成态，完整 Native 与 receipts 字节不变，问题表单不复活。同PID19777，未测刻意双击或本轮冷开，不重放夹具。
+  - 059/060全编码帧分别641/1336，通过natural EOF及全部54/112 contact亲看；059发送后确见Home转换但不能从像素证明退出原因，060只覆盖纯Init至Main草稿。061全解9033帧/753 contact、视觉审核继续；062唯一probe因帧数超预算拒绝，decode/contact未启动，完整视频仍保留。7个实际codec child均独立确认退役；不把容器时长当场景或连续paint覆盖。
+  - 整合731的默认关闭QA viewport观测，Root逐文件4/15/208/24项通过；不改变恢复行为、不宣称原空白已修。原停止后aggregate重复已在真实finish/preserve消费组合基线3红，候选92项通过，实际controller ACK/head时序继续审查。PR141仍未merge/release，Desktop GUI与未批准braces审计保留owner-only边界。
+
+- 2026-10-05 R5S 长输入发送抓到独立 Android 原生 SIGSEGV；原生补丁整合，真机验收继续。
+  - 已实际加载 74f/d958 的 QA PID26323 在唯一长文本 Main Send 后退出；Android 明确记录 reason5/status11/前台 importance100。独立完整 crash buffer 的自有进程堆栈反复出现 AndroidTextInputState/AttributedString/Fragment/ShadowView 析构链，不与旧 SIGABRT 或滚动恢复空白混为一项。059 完整录像已转存，视觉审核待执行。
+  - Paste input 2.0.1 的 ShadowView fragment 保留旧 input state；对齐 RN BaseTextShadowNode 清除 props/state 的既有处理，保留 tag/event emitter/layout。整合 d6163370，Root 单文件8项、docs9指令对/5用例与实际 install patch 通过。独立 QA debug 原生构建成功，源码/生成JNI字节一致，新object/lib/APK已核SHA；唯一保数据 install-r 后完整安装APK与候选104,977,678B/SHA c2315ab9…一致。未升版本或替换商店App。标准 RN input 亦有相似原始形状，不能宣称 Paste 独占根因。
+  - R5S 原任务自然完成，最终仅2回执/start/complete、0 Current/abort/error；恢复后唯一 Stop 未得到原生中止证据，开发警告条遮挡另留现场，不记为通过或确定产品故障。原样冻结，不重发；修后另建独立样本测试连续 Current 和 Stop。
+  - 新QA PID19777完整JS缓存22,543,659B/SHA3400607b…，24源码/44标记通过，与APK原生证明分开记录。新R5T纯Init后长草稿全选清空保持进程；错误shell双引号注入及尾部一次ADB输入失败均留现场、未误发。纠正草稿1317字符全量核对后Main仅1Send；2条相同Current进入原turn，canonical间隔326,309ms，仍仅2普通回执。唯一Stop得到原turn明确1abort、0Maincomplete/error，同PID闲置UI层级与正文可见。Current1首次视觉tap未生效，警告条关闭后第二tap才进入Native；不得冒称单击链通过、真实IME或OS子进程已终止。061/062完整转存，Stop晚于062录制结束，录屏不替代截图/Native证明。空白/旧SIGABRT与跨后端原生回归仍待。
+  - 051–054/057–058 独立全部339张contact/4044编码帧视觉审核完成：057看见实际发送至回复，058仅打开并保持Reset确认，无最终Reset效果。83c18253及原生补丁standalone exact CI功能/类型/v1/Desktop通过，仅未批准braces审计阻挡；未合并或发布。分页空白诊断及Desktop owner-only检查仍未完成。
+
+- 2026-10-05 Reset 窄修整合到 74f696bd，fresh M2 真机验收通过，全面 Codex 测试继续。
+  - 完整手机缓存22,543,551B/SHA d958f357…与24源码/44标记验证；新QA PID26323正常加载。开发加载过程中保留 Unable-load-script/ANR 与 USB reverse 恢复记录，只操作 QA 开发服务/保数据冷开，未触商店、Desktop owner 或 Production；未把零字节探测归因手机网络。
+  - M2唯一初始化Send得到1回执/start/complete/user/reply、0工具/error/abort。唯一Reset后不离开当前会话即0消息，已验证未发送草稿保留；被动检查、离开重入后的 settled 截图仍空且草稿保留。只读Native核验旧线程归档、完整历史SHA不变、仍仅1回执；重入正常准备不同空Native绑定，不能要求永远无绑定。原M1显式Saved copy仍显示完整问答。058开始至Reset确认248.424秒超过180秒录制窗，不能声称该视频包含Reset；不重放M2造证据。
+  - Root组合6文件逐一in-band 482项、Mobile类型通过；文档随实际边界更新。044/050/056串行natural EOF与独立全部345张contact/4127编码帧视觉审核完成；050抓到约101.322ms编码帧间的09–11→24–27位置跳变，没有实际原生坐标/录制起点与手势对齐，分页及用户反馈的滚动恢复空白仍未定因。051–054/057–058审片继续。PR141待本次push及exact CI，braces未批准、未merge/release；Desktop Retry仍owner-only GUI。详见 `../3.1/session-reset-history.md` 与 QA 报告。
+
+- 2026-10-05 Codex 9959 会话管理真机检查发现重置后旧正文留屏；立即修复继续。
+  - 新独立C管理会话首发恰好1输入/回执/start/complete、0工具；重命名及恢复显示名在手机、Bridge和Native name字段确认（不是SQLite title字段）。归档/恢复在两端确认，同Native身份与原问答保留；Markdown251B与JSON445B实文件含完整2消息，系统分享均取消，未选接收者。手机本地副本阅读、置顶/取消置顶通过。
+  - 唯一Reset确认后，Bridge绑定/activity已清且旧Native已归档，原任务仍1 start/complete、0新Send；1188当前页面仍2旧消息/1旧回复，Root亲看截图。1193返回首页重入后为空；本次不声称重入持续旧缓存。QA PID15648固定W/E窗口0行，不能当无错误证明。显式成功ACK的同scope历史退休窄修已启动，修复/新fixture真机复测尚待。
+  - 原9959在Metro充分预热后，同E固定历史行1046和新管理行1093均能正常长按；此前失败被开发服务状态混杂，未证明实际Native事件序列。PR161保留为未整合源码候选，撤回手机缺陷/已修因果。高速ADB搜索/长名称输入有缺字现场，逐字对照完整70字符；没有确定Android包装层缺陷，不修改iOS或宣称真实IME已验。原历史样本未改。
+  - 独立录屏审查完成045–049的147张contact/1749编码帧；047包含Preview/Close/Remove，048后续审片见Start反馈，Root当时未亲见ACK的992/993纠正仍保留。VFR间隔和233.741秒容器时长不证明连续绘制或180秒场景覆盖；044旧部分失败留存，050–054及056传输/视觉范围继续分开记录。全面验收未完成，未绕braces审计/合并/发布。
+
+- 2026-10-05 Codex 9959 历史闲置、后台返回与较早正文检查；原空白仍未定因。
+  - 新15648的QA历史正文在143.626秒闲置检查及小幅滚动后可见；一次实际70.235秒后台后，同PID前台正文也可见，初帧短暂“正在重连”不冒称持续断线。后续较早正文24与25/26有序出现，小幅滚动前后未见大空白；该次加载的请求数/精准像素锚点未测，不以turn号代替SDK分页阈值。
+  - 一次新Start点击后未亲见started Toast；原992误标ack已用993独立纠正，不重写原件。当前完整生产encoder合法cache216,762B/SHA549b5643…、256样本、raw/SDK差>1px为0；文件capturing及最后旧raw事件不证明绘制或当下采样活性。048–050录屏完整字节/SHA与前后stat转存，尚不代替全编码帧视觉验收。
+  - 59ad仅新增QA文档，手机JS仍9959。exact CI37226059643的类型、功能/static、Mobile三片、v1、secrets、macOS/Windows通过；已读失败job，唯一实质阻挡仍两锁braces GHSA-vfj7-8cjw-p6xm。上游当前无已发布修复，未应用未批准例外或绕过门禁；PR141仍未合并/发布，独立全面手机测试继续。
+
+- 2026-10-05 Codex 相机权限/取消与实际拍照真机检查；保留中断现场，全面验收继续。
+  - 拒绝权限及临时授权后Cancel保留exact草稿/0附件。临时权限回合等待期间10636退出，Android reason8 permission_change/后台importance400；959只有shutter、0确认，不能记为accepted image丢失或Native crash。系统重建14313遇QA开发script加载失败，两USB reverse实际丢失；仅恢复QA开发连接及一次QA保数据重启，新15648，Native Desktop/商店/Production不动。原时间解析/时区误差保留并另记纠正；device实际+0800。
+  - 15648前后完整cache size/SHA与早先9959全传输相同（22,536,264B/8c7c206e…），不是第二次完整传输。应用时权限下one shutter/Okay、1附件中心预览、Close保1、明确Remove0与原草稿通过，0Send。当前Mobile没有Expo pending-result消费者；未确认回合不冒称成功结果丢失，真实confirmed-result重建与原会话恢复仍待。
+  - 041–047完整转存/源前后stat+SHA/宿主全SHA+fsync成立，0活跃screenrecord；容器/全编码帧/视觉审查独立继续。闲置空白按用户“滚动恢复”反馈，继续区分虚拟窗口坐标与实际paint，未定根因。
+
+- 2026-10-05 Codex 图片/产物/引用与 B 六页真机验收；修复附件中心误删，全面验收继续。
+  - b851 手机实际PNG/GIF输出分别为928/774B JPEG，声明与签名一致、预期颜色回复成立；第三次无工具回复的RGB产物预览/双击、58B TXT下载SHA及系统分享取消通过。六图唯一尝试在本地容量门被保留，Edit还原原文/6图；前后完整Native/receipts仍3 starts/completes/users/receipts、全字节不变。蓝泡来自预检前queue，非dispatch证明；独立42.9秒后1006重连原因未定。
+  - E非默认项目引用普通创建有可编辑草稿、0Send，host确认项目继承而非设备默认；未触草稿Back清理新Bridge索引，源/默认保留，不冒称Native文件删除。B六Profile页完成隔离写入/刷新/后台、Cancel及stale-Save拒绝后恢复205/127B原SHA、model/skill语义还原，清理exact新增fixtures；MCP/Plugins仅空态，quota不可用、真实HOME/account未改。
+  - 实抓GIF中心误删：44pt目标及hitSlop重叠56pt缩略图中心。整合cff→9959仅12→24pt trailing reserve，保原可访问删除目标。初次QA JS reload在10636完成完整手机缓存22,536,264B/SHA8c7c206e…、20source/38marker成立；首checker因Metro末comma格式拒绝保留，独立v2重新全传输通过。GIF/PNG中心预览、Close保附件、明确Remove、六图2列与第6预览6/6真机通过，0Send。
+  - Root窄PendingImageBar8、Mobile类型、docs9指令对/5检查器通过；b851及standalone160 exact CI功能/类型/v1绿、唯一未批准braces仍阻merge，PR141/160未合并/发布。041–047的后续转存见上方相机检查里程碑；容器/视觉审核仍待；idle空白与原Desktop Retry因果仍未明，后者仍owner-only GUI检查。详见更新的Codex Android QA报告。
+
+- 2026-10-05 修复草稿附件中心误删（Codex 真机 QA 发现，所有后端共享组件）。
+  - 56 点缩略图中心被右上角 44 点删除 target 与 hitSlop 覆盖；附件 wrapper 右侧预留从 12 改为 24 点，中心打开预览，删除 target 尺寸、文件卡片与动画保持原样。
+  - 实际组件几何与 Pressable 路由回归先 4 红 / 1 兼容通过，修复后 PendingImageBar 单文件 8 项、Mobile 类型、UI 246 文件、设计文档 11 组件及 check:docs 7 指令对 / 5 用例通过。涵盖 GIF/PNG/JPEG 中心、独立删除、多附件索引、文件卡片和可访问标签。宿主测试不运行原生 hit testing，负责人将合入后真机复测；未操作手机、Native、发布或 Root 组合源码。
+
+- 2026-10-05 Codex b2 真机普通阅读、R4Q partial 与隔离 Profile 开始；图片 MIME/引用项目修复整合，全面验收继续。
+  - b2 完整手机缓存22,534,963字节/SHA0fb6996b…的全传输属29347；开发reload白屏后仅一次保数据QA冷开，新10636前后size/SHA相同，不能冒称第二次全传输。同高修复已实际加载；Root亲看9帧/18次历史drag由37–40读至1–4未见大空白，不是精确pixel anchor或闲置空白已修证明。
+  - 032/033串行naturalEOF全解120/21编码帧，独立12contact及原帧审查，Root另看3sheet与关键原帧；032正文存在、033始终菜单遮挡，稀疏VFR不等连续绘制覆盖。034–040待传输/容器/视觉审查。R4Q正常Create/init及oneCurrent成立，second draft在freshgate见工具完成后未发，0secondCurrent/0TaskStop，2 starts/receipts/completes、1guide/0abort，自然终态保留，partial不冒称全链通过。
+  - R4Q actual started及延迟menuStop后完整取得202,454字节/SHA7f505175…；生产encoder严格valid256条，唯一54.4px差的raw已52.4秒旧。读取距末写39分28秒，capturing是历史值，不证明当下liveness/paint/空白原因。
+  - B旧未用邀请码到期后独立刷新同既有Preview房间一次、手机oneDone配对并移除两exact临时QR。正常empty创建1mapped/0Bridge receipt/0Send；实际资料页8模型/7skills/1AGENTS，quota—不可用。后续短暂offline在任何Reconnect tap前自行恢复，原Bridge代际/配置稳定，原因未定；隔离六页写入与恢复继续，C/E/真实HOME/Production未改。
+  - Root整合quote be0→c918与MIME1f302→c59，保现有composer规则及双方进度。实际picker20/prep4/project-reply9/legacy4/ThreadScreen74共111逐文件串行、Mobile类型通过；docs先捕获B fixture遗漏CLAUDE，补精确相对link后10指令对/5用例通过。新手机media/quote仍待。b2 exact CI及两standalone功能绿、唯一未批准braces仍阻merge；PR141/158/159未merge/release，Desktop原Retry仍owner-only GUI。
+
+- 2026-10-04 相册导出载荷 MIME 窄修（独立 `codex/image-picker-payload-mime`）。
+  - Expo Android quality 0.8 的 base64 导出为 JPEG，但原 provider GIF/PNG MIME 可保留到发送准备与 wire；仅在成功相册结果进入 PendingImage 前用最多 12 字节确认 JPEG/PNG/GIF/WebP 签名，未知签名保留原声明/默认。URI、quality、原载荷、动画导出语义、六图上限、scope 与 camera/recent-photo 路径保持。
+  - 实际 hook→发送准备→Codex 序列化帧基线 7 红/11 绿，窄修后 hook 单文件 20、既有发送准备单文件 4 项串行通过；Mobile 类型与 docs 7 指令对/5 用例通过。没有操作手机/Native、构建、发布或改负责人候选；小 GIF 真机 gallery 输出与修后 MIME 仍待 HT-PICKER-MIME-1004，源码/模拟 wire 不替代真机验收。
+- 2026-10-04 引用回复「新对话」保留源项目（本轮 Codex 全面 QA 的确定源码缺口，真机待验）。
+  - ThreadScreen 原有当前连接/Agent/会话描述符已报告 project.id，但引用创建没有传给 ManualSessions，设备多项目连接可能采用默认项目。现在仅把该 opaque ID 传入普通 createSession 并加入草稿重试的作用域；没有项目的 OpenClaw/Hermes/Codex/Pi/Claude Code 保持原路径。仍只保存选中回复为可编辑草稿，不使用 fromSession、不发送或修改源会话。
+  - 新增实际 ThreadScreen scoped-project 与未 mock ManualSessions 的服务回归；基线 3 个 screen 用例和 4 个 service 用例失败，5 个缺项目兼容用例通过。逐文件 in-band：项目服务 9、原服务 4、ThreadScreen 72，共 85 项通过；Mobile 类型、UI 样式 246 文件、check:docs 7 指令对/5 用例通过。非默认 QA 项目的零发送真机检查尚未执行；不将源码/单测当实机验收。没有设备、Native、生产或发布动作。
+
+- 2026-10-04 Codex 组合 c6 真机问答取消与几何留证，同高阅读修复继续复测（全面验收未完成）。
+  - c6 手机完整实际缓存22,534,470字节/SHA98a9f4b6…；QA数据保留冷开后再次完整传输、当前PID/前后SHA/源marker确认。C/E仍开发CLI dd5ecfe9…；未重启Native owner、Desktop、Production或替换商店App。原cc4 Start未知闭合；c6独立Start实际started、一次sampler Stop、合法stopped缓存256条，raw/SDK仅一项差0.000015258789px、超过1px为0，不能证明绘制/闲置空白根因。
+  - fresh Q4G原Read-only init+Plan question，选项/自定义draft经关闭重开、前后页、Back、后台返回保留；一次form Stop使原任务abort且pending0，2 starts/receipts、1 complete/1 abort，0 answers/error/approval/额外tool。冷开不重发。旧严格reader仍因raw参数省略flags未验证；官方schema允许省略、handler另补custom，不能据此补造wire/blocking证明。
+  - R4P主任务两sleep成功；Root迟到输入且未做最后active检查，guide作为普通第三turn发送。实际0 Current/0 Task Stop、3 starts/receipts/completes且0 error/abort，原case闭合，不算App故障或steering通过。新更长窗口case待测，旧baseline/严格结果不放宽。032/033实际容器122.022/119.354s、120/21编码帧，Root与独立审片员亲看PTS0两帧；033菜单挡正文，非Start ACK，尚未全帧视觉验收。
+  - Root整合同高reader修复，实际hook24/Thread207逐文件串行、Mobile类型通过；尚未加载手机，不宣称修复586–588空白。c6 exact CI功能/types/static/v1/secrets/macOS/Windows绿，唯一braces审计阻挡未批准；PR141未merge/release。Desktop额外只读源审无新确定性缺陷，原Retry仍owner-only GUI。媒体/Profile/管理/兼容手机覆盖继续。
+
+- 2026-10-04 分页确认后同总高度的新阅读手势（独立任务，依赖 PR #128 / #149；不是闲置空白根因结论）。
+  - 源码确认：prepend 与估高修正可以让原生内容总高保持不变。旧高度记录在补偿 ACK 后仍保留，新手势虽重新捕捉内容，随后的真实移动却按旧高度被吞；下一次布局会拉回上一位置。仅在几何已确认、新鲜 drag 的实际有限原生高度到达后退休同高旧记录，再尝试捕捉内容；起始布局暂缺时，同一手势后续有效事件仍能捕捉。保持 pending old-child 位移、未确认 offset 命令 ledger、scope/list 与底部跟随边界。
+  - 实际 hook 两项与 Thread Codex/OpenClaw/Hermes 三项先红，布局错误回到 960 而非读者选择的 920；首版成功 capture 才退休的补丁又被缺起始布局的同 5 项打红。最终仅新手势入口收紧，hook 整文件 24、Thread 整文件 199 共 223 项逐文件串行通过，含迟到未确认命令与缺起始布局组合；Mobile 类型、247 UI 文件/66 检查器结果、App config 7 项、设计文档 5 项与 check:docs 7 指令对/5 用例通过。不宣称解决 586–588 闲置空白、原生绘制或崩溃，不操作手机/Native/服务或发布。
+
+- 2026-10-04 Codex 组合 cc4 实际更新与普通阅读取证继续（全面验收未完成）。
+  - Root 串行 cc4 Service337/cache17/registry11/observer8/Thread201共574、Mobile/Runtime/CLI类型、docs和开发CLI通过。旧C18/E1058认证非空全显式idle后各一次parent停止并确认精确child/端口退役；新C/E CLI SHA dd5ecfe9…与新手机完整22,533,994字节/SHA fa5d22d0…留证。没有以旧roster或源码替代新代实际推理验收；Production/商店/Native Desktop未改。
+  - 新opt-in实际字节与QA菜单确认，完成态R4L只Start一次但两次固定final-file观察均未见缓存；Inspector0page、0evaluate。原次闭合unreported，不重试、不宣称sampler接受/rawSDK坐标或空白根因。菜单固定反馈与同页Profile refresh栅栏另行整合，Root两实际UI文件14/16、Mobile类型/docs通过，真机尚旧cc4。
+  - A4M Copy→exact自身draft→clear、Favorite、poster→实际系统Share→0recipient取消→close留证，0Native输入。026/027真实容器36.024/45.475s，有界八秒205原始PTS帧由独立审片员逐帧核验正文，Root亲看四locator；非旧idle空白因果。032完整传输530,271字节，尚未probe/decode；681–683两普通拖动及后续idle正文正常，不能宣称全面空白修复。
+  - fresh Q4G empty会话已创建并选Low，init/Plan/问答取消尚待；新同文Current、媒体/Profile/兼容继续。相关PR功能CI通过仍受未批准braces门禁，不merge/release；原Desktop Retry现场仍owner-only GUI，不绕过工具限制。
+
+- 2026-10-05 分页/小滚动现场的 opt-in viewport 阶段记录器（独立源码任务）。
+  - 在既有默认关闭的 QA 几何 collector/cache 上记录现有布局、内容尺寸、滚动请求与 ACK 分类，固定数字/布尔/枚举，不含消息、ID、key、路径或凭据。四门和 accepted Start 后才收集；最新 32 事件、普通 scroll 100ms 门、单调 sequence 与淘汰/节流/拒绝计数明确显示有限覆盖。
+  - React Fragment 只记录 Start 后不完整 cell 生命周期索引，不增加 Native wrapper、查询、强制 render 或滚动。命令关联只在当前 capture 的 JS correction ledger 内有效；旧 capture 的迟到 ACK 不借新序号。V2 严格标量编码并保留 exact V1 只读兼容；旧冻结提取 helper 不改，新提取需同时 pin/link 两个 pure 模块。
+  - 独立安装并持 heavy 逐单文件 in-band 验证：viewport ring/严格编码 4、真实 hook/迟到 ACK 与 cell 生命周期 15、Thread 200 共 219 项通过；新 Thread 夹具明确使用开发模式的实际 hook，原普通 mock 控制保持。Mobile 类型、UI 253 文件、文档 7 指令对/5 检查器用例通过，完整门禁由独立 PR CI 执行；未操作实机、Native、Metro，不宣称采集或空白修复通过。050 编码帧短暂 QA09–11→QA24–27、586 空白后手指恢复与注入 SDK 阶段合同均保留各自证据边界；native text-input 崩溃补丁另案，不视为本问题修复。
+
+
+- 2026-10-04 Codex 安卓 QA 菜单 Start 状态反馈（独立源码任务）。
+  - 真机首次 Start 点击后固定缓存未出现，现有菜单忽略采集器返回值；目前不能区分绑定拒绝和异步文件失败，原次操作保持 unreported，不重试、不补造 accepted ACK。
+  - 仅四门成立的 Android QA 显式 Start 显示固定 started/unavailable Toast；started 只指采集器接受 arm，不指缓存落盘。注册不反馈/采样/IO，过期菜单在 gate 关闭后静默；旧菜单仍读取当前绑定，单次 arm、未知部分成功阻塞和 Stop 路径保持。
+  - actual register+collector 4 项基线红，修后 registry16/cache17 逐文件串行绿，Mobile 类型、设计系统和 docs7 指令对/5 检查器用例通过；不操作手机、Native、Production，不改变产品或发布状态。
+
+- 2026-10-04 Codex Profile 同页刷新与迟到写入确认（完整连接体验测试中的独立修复）。
+  - Skill 切换等待确认时仍可下拉刷新或点击已有失败横幅的重试；旧 ACK 会覆盖较新读取，或通过 `read.replace` 取消仍未完成的新读取，旧失败也会盖在刷新成功之上。此前焦点往返栅栏不覆盖同页显式刷新。
+  - 顶部刷新、下拉刷新和重试共用同步代际退休入口，先退休旧 mutation 展示再开始新读取。保留写锁、正常确认和既有焦点/项目/连接栅栏；不取消已经发出的原生写入，不自动重放写入，也不改变其它后端。
+  - 四条实际 NativeProfileScreen 消费者回归在旧代码上失败，既有十项通过；修复后单文件十四项 in-band、Mobile 类型和 check:docs（7 指令对 / 5 项）通过。源码同行复核通过；exact-head CI 见本任务 PR。未操作 B/Native/手机或运行服务；该竞态仍需单独手机验收，不把确定性 UI 回归当实机复现。
+
+- 2026-10-04 QA 几何记录单文件缓存提取（负责人授权独立任务，默认关闭，本机窄验证完成）。
+  - 在现有开发内存 collector 上增加 Android QA 专用 Dev Menu Start/Stop，需 `__DEV__`、Android、精确 QA 包名和静态环境 opt-in 四门；注册不采样。仅已接受 Start 消耗进程级一次资格，拒绝可显式重试、未知结果封闭；Fast Refresh/新 Thread 不复活旧采集。
+  - 只读已有 ring，不新增 raw/SDK 查询、React render、布局或滚动；固定缓存 tmp/final、10 秒/122 次/20 分钟/单在途写，最多 256 条/256 KiB 严格标量重验。不能宣称 sandbox chmod/fsync、持久完成、原闲置空白根因或真机已采集。
+  - fresh origin/main 独立 worktree，显式依赖原 geometry collector；独立安装、heavy 串行执行实际 partial Start 基线红→绿，cache 17/绑定 11/原 collector 11/原 hook 8 共 47 回归通过；Mobile typecheck、docs 7 对/5 用例、UI 250 文件通过。补齐 installed Expo 公开 cacheDirectory/moveAsync 的两条类型声明。负责人组合树、设备/Native/QA 服务未改；真机捕捉需要新明确 QA opt-in 与实际加载字节、PID、Start intent/文件时效证据，远端 CI 和现场验收独立进行。
+- 2026-10-04 Codex Desktop 完整历史读取的内容代际保护（用户手机连接综合验收中的源码确定性竞态）。
+  - 同一订阅集合内，历史分页读取已取到运行中 turn 后，Native 结束可清除 run/cache 并触发定时广播；旧读取稍后仍能把运行中完整缓存写回，定时广播又会合并进旧 promise。本任务在独立 fresh-main 工作树以 PR147 会员规则为 prerequisite，增加当前 RPC/record/id/cwd 与内容代际双门，最多重取一次，继续变化则拒绝并保留定时发布；最后 await 后使用新确认设置与当前 active overlay，不重发输入或建立 writer。
+  - 新增实际 Service 消费者的终态、下一 turn、迟到设置、双失效预算、上下文退休、text-delta 兼容和终态后迟到工具缓存回归。旧实现九场景七红、两兼容绿；修复后独占串行 Service 单文件 177/177、Bridge Runtime 类型检查通过，依赖为本工作树独立安装。该确定性缺口尚不能归因于用户 Desktop reopen/Retry 现场；未操作 Desktop GUI、Native/QA 会话、Production，也未部署或发布。
+- 2026-10-04 Codex 组合 3e4209 真正 Read-only 与原始授权闭环留证；全面真机验收继续。
+  - 串行窄验证：CodexService 328、Mobile collector 11/observer 8/UI follow 13/Thread 201，共 561；Mobile/Runtime/CLI 类型、docs 9 指令对/5 检查器及本地开发 CLI 通过。只有认证全显式 idle 后才各一次停止隔离旧 C/E parent，并确认精确 child/端口退出；新 C/E 本地目录 C17/E1057 均正常。actual CLI SHA237c916e…、手机完整缓存22,522,652字节/SHAc2183364… 经进程代际/配置/前后完整字节校验；Production/商店/Native Desktop 未更改。默认关闭几何诊断已加载，但 public Inspector list 为0 page，未开启采样/未得到 raw/SDK 坐标，不能以源码或滚动恢复认定空白根因。
+  - fresh A4M 初始化与唯一主输入都在原生实际确认命名 Read-only、on-request/user、有效只读、6.1Sol/low/default；2 starts/completes/唯一 receipts、usage成立且0 abort/error。真正原 turn ordinal2 的 pending审批 schema/命令/目录/原 item 严格匹配后，手机只 Allow 一次；同一次只读 IPC capture 记录原 command completed/exit0，QA 小文件恰26字节/一行。手机原 PID 保持、online并显示原生最终回复，留观截图与030/031录屏保存；本轮未观察到此前允许后退出，不等于崩溃修复已完整验收。
+  - 冻结 v6 after 严格工具格式仍 unverified：模型使用 text(result) 而非 JSON 包装，返回 yielded cell；测试 prompt 禁止另一工具，模型未 wait并最终报告结果不确定。单命令原生 live终态/文件证明与该完整夹具失败分开，旧 baseline/reader/result未放宽或重写，未重发主输入。第一次捕获仅 pending；Root 中文问号校验在 intent/点击前误拒绝，0决定；纠正后新的显式只读捕获仍同原请求，0自动重连/新 writer，不能把跨 capture盐哈希当同身份。
+  - 原普通阅读026/027视频完整传输，独立有界审片计划及两peer通过，媒体尚未执行。下一步为默认关闭的QA缓存几何取证、fresh同轮Current别名与真实 question/media/管理覆盖。Desktop旧会话重开/Retry仍owner-only GUI检查；未批准braces审计仍阻挡合并，未发布/部署。
+
+- 2026-10-04 Codex 0.160 首轮 lazy 线程兼容与每次发送权限绑定（独立任务，手机复测待新 QA）。
+  - A4L 首次 Read-only 选择的固定诊断为 request_failed，尚无初始化输入；reference 专门回归确证未 materialize 的线程不能 resume，同一已加载线程的 metadata read 有兼容返回。该源码事实支持修复路径，不从未记录原生错误推定现场唯一原因。
+  - 仅当前 RPC 成功 thread/start 的精确 record/native ID/cwd/loaded 资格允许首轮 metadata 验证；完整 ACK 提供命名权限，再在 0.160 turn/start 显式绑定 permissions/policy/reviewer，不能同时发 sandboxPolicy。资格在实际 dispatch 前退休；旧 index/cold resume/import/Desktop 无推断 fallback，未知发送不重放、不创建第二 writer。已保存会话保留 warm 配置围栏；配置一致不是实际 execution attestation，Owner environment/真实 Read-only 仍待新手机 QA。
+  - 独立实际 service 回归基线 217 项中 6 红；修复及 context/closed/granular 边界共 224 项全绿。Runtime 类型和 docs 7 对/5 项通过，自身依赖与声明独立构建；源码 peer 通过，未操作 Native、手机、账户或 Production。
+
+- 2026-10-04 共享 Thread 空白现场的最小开发诊断（Codex 安卓 QA 范围，默认关闭）。
+  - `__DEV__` Inspector 内存入口 `__CLAWKET_CHAT_GEOMETRY_QA__` 支持 start/read/stop；不依赖 logcat，不增 UI、不触发 React render、滚动或布局。对照既有 raw native 事件与 FlashList 公共坐标/可见范围，最多读取四个 layout。
+  - 1 Hz、256 条、20 分钟、一个在途查询；会话/连接/焦点/list/native binding/后台退役及迟到回调栅栏。仅有限数字、布尔和固定类别，不输出正文、ID、key、路径或凭据。
+  - 公共 SDK 无 engaged/paint ACK；诊断和注入 SDK 时序的回归不能作为 586 闲置空白的根因证据。真机采集仍由负责人在明确加载候选后执行；未操作设备/Native/QA 服务、未发布。
+  - 独立依赖、heavy 串行验证：collector 11、observer hook 8、UI follow 13、原 Thread 166（共 198）通过；Mobile typecheck、docs 7 对/5 用例、UI 248 文件通过。Release 模块不装 Inspector 入口，默认关闭和损坏/越界字段、迟到/重复采样及退役都有回归；CI 及真实设备采集另行验证。
+
+- 2026-10-04 Codex 组合 527e 实际加载与首轮配置请求失败现场；全面验收继续。
+  - Root 串行组合 CodexService 297、ThreadView 201、history anchor 20、真实 installed FlashList contract 2 全绿；Mobile/Runtime/CLI 类型、docs 9 指令对/5 用例与本地开发 CLI 通过。实际旧 C/E 认证 idle（C 17/E 1057，全部 0 active）、同代检查后各只一次 parent SIGTERM，旧 parent/精确 Native child/端口消失；新 CLI 2712826b… 与手机完整缓存 512bc17b…（22,503,924 字节）校验。Development reverse 丢失导致停在启动页；恢复同两开发端口后加载新缓存。仅 QA 冷启且保留数据，Production/Native Desktop/商店包未更改。
+  - fresh A4L 新建 empty 会话，GPT6.1Sol/Low/Standard 正常；首次 Read-only 626 仍拒绝。真实 metadata diagnostic 是 request_failed，所有 response/thread 字段 absent，未进入解析；固定创建窗唯一 record 为 0 receipts/permissionsUnconfirmed，固定 first/cwd Native 只读查询 0 行。0 初始化/审批主输入、0决定/Retry/fixture read mode；关闭现场不重放，Readonly execution/Allow Once 尚未验收。
+  - 官方 reference 有 thread_resume_rejects_unmaterialized_thread 回归：首次用户输入前 resume 可失败，而 loaded metadata-only read 支持未落盘线程。此源事实与现场类别相符，但 request_failed 包括其它拒绝/超时，尚不唯一认定现场原因。新建资格/独立 idle 读与真实 turn 权限绑定继续修复；不得仅跳过 probe 放行此前 A4H 的权限执行漂移。
+  - exact 527e CI 37180005465 三 Mobile 分片、static/tests、v1、secret、macOS/Windows 全绿；Root 精读 audit 111370475089，唯一未批准公告仍两锁文件 braces GHSA-vfj7-8cjw-p6xm。PR141 与相关独立 PR 未合并、未发布；owner-only 审计和 Desktop GUI 检查不绕过。普通阅读空白新候选仍需实际 raw/SDK 位置证据，不以滚动恢复或合成时序宣布已修。
+
+- 2026-10-04 Codex 组合候选 d843 已实际加载，权限确认仍阻断新会话首发；全面真机验收继续。
+  - 新开发 CLI SHA `8fe4ba52…` 与 actual 手机缓存 bundle `0d2ea853…`（22,503,721 字节）经进程代际、配置和完整字节校验；C/E 仅在认证目录显式 idle 后更新，Production、商店包和账号配置保持。首次加载的短暂白屏随后出现正文；该 QA PID 的过滤日志为空，不能声称未发生错误。
+  - fresh A4K 新会话首次选择 Read-only 即返回 permissionsUnconfirmed，0 输入、0 baseline、0 审批决定；fresh R4M 保持默认 Workspace，唯一 pure-init Send 也被同一配置校验阻断。手机显示尚未发送；对应唯一创建窗 record 为 0 receipts，固定 first/cwd 的只读 Native 查询 0 行。两轮关闭、不重试，不发送 approval main、Current、Stop 或其他后续输入；尚未验证真实 Read-only 执行、Allow Once 崩溃回归或新 alias 的真机效果。
+  - source 确认 warm resume 的权限确认依赖了可缺省的非权限字段，独立真实 service 回归新增四项先红；严格 permission-view 解析修复与定类诊断继续，现场尚未证实具体拒绝条件。普通阅读首手势修复已合入组合源码，手机仍 d843；独立 SDK 注入时序不冒充空白现场根因。
+  - exact d843 CI 37174989985 的三 Mobile 分片、类型、tests/static、v1、secret scan、macOS/Windows 全绿；实际读取 audit job 确认唯一 blocker 是两锁文件未批准的 braces 高危公告。上游没有官方已修版本，保持既有 owner-only 审计决策；PR141/146/147/148/149 未合并、未发布。
+
+- 2026-10-04 普通阅读首个手势建立滚动锚点（独立任务，依赖已审查 PR #128，真机空白仍待因果确认）。
+  - 实际 Thread 两条回归确认：未分页的首次拖动没有建立应用锚点；起始布局不可用时，同一手势的后续有效原生事件也不能补捕捉。现首个 drag 尝试有效内容锚点，reading 事件允许首次捕捉；保留补偿 ACK、旧尺寸、pending 几何、新手势与 scope 的既有门。只有捕捉成功才关闭该 list 的 SDK MVCP，不全局关闭。底部手势未移动或期间 tail 增长仍由手指控制，实际结束回到底部后继续跟随；换会话退休旧锚点。
+  - 单文件串行：实际 Thread 基线 2 红→整文件 193 绿（新 4 项）；useHistoryScrollAnchor 20 项绿。真实已安装 FlashList RecyclerView/controller/manager/layout/tracker 另 2 项绿：注入 Native 与 JS 不一致的 clamp 后，SDK 100 ms ignore gate 丢弃反馈，定时结束不会自己纠正，下一真实 scroll 才恢复窗口；禁用 SDK 补偿时反馈可到达消费者。仅 Native host/measurement/scroll 反馈为夹具，不复制 SDK 算法。RN 正常在 mount 后应用 MVCP，注入旧 maximum 不证明真实手机发生该时序；586–588 空白和 596 同位置正常的现场尚无原生 offset/engaged-window 数据，不宣称本修改解决其根因、绘制或原生崩溃。
+  - Mobile 类型、247 UI 文件检查、设计系统文档（11 组件/10 token families/5 用例）与 check:docs（7 指令对/5 用例）通过。无手机、Native、RPC、构建、安装、发布或运行服务操作。实际真机复验仍由主测试；既有 owner-only 依赖审计门禁不绕过。
+
+- 2026-10-04 Codex 安卓 QA 组合候选：显示身份、逐客户端跟随、配置确认已整合，真实验收继续。
+  - Root 合入 PR148 steering 同文时钟围栏、PR147 membership / Windows pipe fixture、PR146 future-configured 读回围栏及准确术语；保留此前当前 owner admission、ordered snapshot、ACK/input lineage、canonical 用户时钟与 resize focus 修复。旧 tool-reader 测试补 IPC-frame source；真实 membership socket 测试明确允许进入会话时唯一只读 owner discovery，随后 lifecycle 不得再查 history 或 dispatch。初次组合测试的零请求假设失败已修正，未削弱生产 owner 查询。
+  - 持 heavy 逐文件串行：Mobile historyMergePolicy 77、Desktop IPC 32、Codex service 273 全绿；Mobile / Bridge-runtime 类型及 docs 9 指令对 / 5 检查器用例通过。未跑本地全套。新组合尚未加载到手机，旧缓存仍 26af / d874；Read-only 实际执行、fresh 同文 guide、普通阅读空白、Desktop GUI 和媒体等仍待实机验收。
+  - 596 静置补抓正文正常（6 容器），但与 595 手势结束相比，同 canonical guide top 430→1860；这与旧空白现场位置相同却有正文。Root 区间无手机手势，不把未录得的人类动作排除；位置差不是 blank 充分条件。SDK/engaged-window 与 ordinary anchor 独立 source fixture 继续，不宣称已定位。
+  - exact PR141 / 1c02 CI 37173096138 的 Mobile 三分片、types、tests/static、v1、secret scan、macOS/Windows Bridge 全绿；已读取失败 job，唯一 blocker 仍两 lockfile 的未批准 braces GHSA-vfj7-8cjw-p6xm。当前组合未合并、未发布；负责人审计决策和 Desktop GUI 验收仍保留 HUMAN TODO。
+
+- 2026-10-04 Codex 0.160 已确认权限与配置读回漂移围栏（本轮安卓真机发现，独立任务）。
+  - 后续 A4K 首次权限选择和 R4M 首次发送均被配置围栏拒绝；原现场关闭且未重试。源码确证完整 settings parser 错将 schema 可省略的 effort/tier/collaboration 字段用于权限核验，新增 4 条合法省略回归基线全红。权限独立投影保留 cwd/policy/reviewer/sandbox/profile、代际/idle/cache/receipt 围栏和混合写完整 ACK，并增加 metadata-only 固定失败类别/字段类型诊断；现场具体返回尚未捕获，不能认定 606/614 由这些省略字段导致，实际 Read-only 验收仍待新 QA。
+  - 独立 service 单文件 193 项、Runtime/CLI 类型（自身依赖声明构建）与 docs 7 对/5 项通过；新增 16 项包含可选字段、混合写、损坏权限字段和逐字段日志隐私。源码 peer 通过；仅发布代码 PR，未重启现场或更改 Native/global/Production。
+  - A4H 发送前手机 Read-only 已确认，但唯一初始化 Native turn context 与发送后设置均为 Workspace；模型/推理、唯一输入/receipt、终态、usage 和零工具均成立，不能归因于证据助手或 UI 乐观更新。原现场与 baseline 冻结。
+  - 已 loaded 的 Bridge-created 0.160 会话在权限 ACK 后及 receipt 前，通过同一 owned writer、无 override 的 warm resume 独立核验保存的未来配置权限；严格同 RPC/thread/cwd/idle/settings generation。漂移、缺字段/失败确认要求重新确认，0 receipt/0 input dispatch；被动权限通知不得静默扩大下一次发送。Legacy/imported/Desktop owner 路径保留，不创建第二 writer 或自动重发。
+  - 隔离空 HOME/CODEX_HOME 离线生成 installed 0.160 experimental schema，确证受支持权限字段；未启动 AppServer/RPC/inference 或改 Native/global/Production。reference 完整 caller 链确认 warm response 是 future configuration；Thread-origin 正常切权应可用，Owner-configured 环境另保原profile。撤回基于旧 active snapshot 推断会必拒下一 turn 的局部结论。参数支持不等于实际执行已恢复，本修复是配置读回安全围栏；新的 Read-only 真机执行验收仍待负责人 A4K 场景。新增 19 项定向回归在旧实现 18 红；术语修订后重验 service 单文件 177 项、Bridge-runtime 类型与 docs 7 对/5 项通过，涵盖 ACK/首发漂移、部分权限写、保留设置缓存的配置确认、迟到旧代与 legacy/imported 兼容。
+
+- 2026-10-04 Codex 新 owner 请求关注方重报（负责人授权补远程续聊后 Desktop 状态更新的明确协议缺口）。
+  - 只读已安装 Desktop 源码确认：owner 首次取得 stream role 时会请求 following status；Bridge 此前忽略尚未 loaded 的订阅，但合法 resume 后没有发该控制公告，已有 Desktop 关注方可能一直收不到活跃／终态快照。成功 start／安全 resume／fork 后，仅无已知订阅的当前 owner 发 version-1 local following-status 请求；绑定 captured RPC、原 record／thread／loaded，失败、旧进程与退休结果不公告。控制发送失败不使已完成的 Native 接管变成失败，不另建 writer、不重发输入。
+  - 独立 freshmain 任务只叠必要 PR147 会员依赖。真实 framed broker＋实际 Service 消费者：早订阅→明确 no-owner／idle→延期合法 resume→重报→活跃／终态快照；基线两项红／四安全项绿，窄修后通过。补陌生 cold／不确定 owner、控制发送失败边界；service 单文件 176 项通过，保留 128 会员与历史 await 栅栏。未操作手机、Native、Desktop GUI、账号或现有服务；该协议证明不等于用户 Desktop Retry 现场验收。fresh own core 类型产物补建后 runtime 类型通过，check:docs 7 指令对／5 检查器用例通过；安全门禁与 owner-only 例外仍遵守。
+
+- 2026-10-04 Codex Desktop 逐客户端跟随退役（负责人授权全面 Codex QA 修复，并补充远程续聊后 Desktop 重开报错）。
+  - 只读实际安装包核对：本地 IPC 跟随有 source client，生命周期广播 version 0；此前 Bridge 只按 thread 保存一个 boolean，两个客户端跟随后任一 unfollow 会停掉另一个客户端的后续状态广播。改为每 thread 最多 128 个独立客户端，精确退役；连接丢失、Native owner 退出及 thread archive/reset/delete 清旧订阅和调度。
+  - 已有订阅对新客户端和 version-1 local following-status 请求定向续订；不加载完整历史、不调用 Native dispatch。实际 owner 断开只使其 snapshot stale，不生成 no-owner／终态或自动重发。显式完整历史请求保留 IPC-frame source，完整 settings/turn 状态契约和旧 socket 栅栏保持。
+  - 独立依赖、串行回归：旧实现 IPC 4 项红、实际 service 4 项红／1 项兼容通过；修复后 desktop-ipc 单文件 32、service 单文件 168，共 200 项通过（含真实 framed socket、延期历史读与 v1/v2 设置旧回归），runtime 类型及文档 7 指令对／5 检查器用例通过。当前用户原 Desktop 报错原因仍未确定，已有 null.settings 完整投影修复保留；工具明确禁止 Desktop GUI 自动化，实际窗口验收仍在 HT-CODEX-DESKTOP-0929，不能用源审或合成协议测试替代。未操作设备、Native、账号或现有 Bridge，未发布／部署。
+  - 首轮 CI 的 macOS、Mobile 三分片、static 与 v1 replay 通过；Windows 揭示新增 framed 测试的命名管道字面量漏转义。仅将该测试路径改为 raw string，单文件 32 项复验通过，真实 Windows 由更新后的 CI 验证；braces 安全门禁仍需负责人决策，未绕过。
+
+- 2026-10-04 Codex 同文 Current 指南的历史显示身份错绑（本轮完整安卓 QA 的独立修复）。
+  - 真机运行中第一条指南不再显示，完成后两条原生指南恢复；完成态 XML 的消息容器确认两个不同 native ID，但第一条 10:39 指南的用户正文 render key 是第二次 10:41 dispatch 的本地身份。原始 UserMessageText testID 误读为 message.id 的私有记录已保留，并由父节点关联的更正版明确取代。新完成态单次 history 读取完整，不能回溯运行中的 Mobile wire 或据此声称消失根因全部已证。
+  - 已识别 steering 本地行遇缺 send key 的同文 fallback 时，双方有效时钟超出现有 60 秒匹配窗就保留未归并本地行，不能把新身份给旧 native 指南；已知精确 native/history 身份、缺失/无效时钟以及普通 OpenClaw/Hermes 旧匹配路径保留。未改变控制器、发送或原生协议，也未重放指南。
+  - 实际现有历史合并消费链：62 秒、125 秒与 completed/cold 连续归并基线 3 红，精确身份/旧匹配基线 2 绿；窄修后单文件 65 项、Mobile 类型、check:docs 7 指令对 / 5 检查器用例通过，heavy 已释放。完整门禁由本 PR CI 验证；真实手机回归由 Root 在候选中进行。未操作设备、Native/QA RPC、生产服务、打包或发布。
+
+- 2026-10-04 Codex R4L idle 正文空白现场与滚动/冷开恢复对照（仍未修复验收）。
+  - Root未发后续手势期间，586–588截图完全同SHA：在线header/首时间chip/底边guide仍可见，正文大面积空白。ownQA-PID 250日志entry实际4,752行/552,480字节，记录Reanimated SurfaceMountingManager找不到tag警告，无Fatal/ShadowTree；不据此定因。UIA visible message节点7→2，同guide/随后assistant原点均+1,205px；屏外clipped bounds在正常585也存在，不能当新增非法布局证据。
+  - 负责人实际滚动后恢复，589显示init/main/assistant重新出现；Root未代发手势或消息。只在QA包做一次保数据冷开，591Roster/593同会话tail/595两guide正常；actual cache仍26af/d874，Native仍4starts/4receipts/3complete/1abort且0新增输入，两guide presentation keys均回canonical Native IDs。冷开与手势恢复不证明具体根因。
+  - ordinary reading未分页时App anchor尚未接管，FlashList默认MVCP仍开启；SDK短暂忽略scroll校正可能留下旧engaged window，是待复现候选。独立alias修复实际3红→65绿并通过types/docs/功能CI，PR148仍受未批准braces审计阻止合并；不称该13行修复覆盖idle空白。
+
+- 2026-10-04 Codex R4L 运行中编辑/移除与第二条 held 立即发送：输入控制通过，显示验收仍未完成。
+  - actual26af9a8 的 fresh v10 冻结门验证 sole init/main、两同文 Current 同原 turn 三个 distinct 用户项，三 Next 全部 Native absent。原第二条命令 pending 中 Edit 恢复完整 Q1，改稿 Next 后实际顺序 Q2/DROP/EDIT，再运行中移除 DROP；空草稿 Stop 一次后两条保持 held，实际第二条 EDIT 的立即发送提升为 EDIT→Q2。最终 4 starts/receipts、3 completes、1 original abort，0 原稿/已移除输入/extra tool/error/approval/question；不冒称 OS child 已终止。
+  - 547/548、553/555 expanded Send 自动隐藏键盘，Current/Next 完整可见，无 manual Hide；同第二步整轮计时持续。两 guide canonical 分钟独立为10:39/10:41，但 live556/557 第一条不在原可见序列，完成后585历史又出现两条。585父节点关联确认两 distinct Native message IDs，但第一条 renderKey 错配第二次 local dispatch；旧 testID 报告误把 renderKey 当 message.id，已保留并以更正版取代。一次同代 C controlOnly/head 97ms 返回完整20消息/6用户，无游标；两guide ID/正文/时钟各一次、用户原序，Native/Bridge记录字节不变。这是完成后新样本，不证明556时Mobile已收全；显示归因与窄修复继续。设备缺少 scoped SQLite read primitive，未复制/读取整库或其他会话。
+  - 018 有界审片完成：7,143选定帧RGB/PTS处理，1,229连续帧+112原图overview视觉审阅；确认键盘遮chooser，下降后才露Current/Next。guide短窗已旧时间但无回退瞬间；首decoder额外tail扫描已披露且不算覆盖，子进程清理/heavy release exit0。权限PR146与Desktop会员PR147各自窄回归/类型/功能CI通过，仍仅未批准braces high阻止合并；尚未集成真机或宣称Desktop原报错修复。
+  - R4L四段录像完整传输与容器probe分别为179.982s/9,595帧、40.877s/3,292帧、179.973s/15,312帧、4.206s/298帧，非四段180秒；exit255/0与录制上限不当场景覆盖证据，尚未解码审阅。权限候选先暂停整合：局部测试曾被误读为warm响应必反映旧轮，完整caller链已撤回此判断；reference warm resume取saved future config，Thread-origin保留FromThread，Owner-origin另有独立配置。继续核对configured环境/线程defaults/实际turn与installed行为；拒发不等于Read-only能力恢复。
+
+- 2026-10-04 Codex combined focus/user-clock 候选实际加载；A4H 权限偏差及 R4J 部分验证（全面验收仍未完成）。
+  - 串行组合 Composer 6、Screen 71、Native history 86、CodexService 244 共 407 通过，Mobile/Runtime 类型、开发 CLI build、docs 9 指令对/5 检查器通过。只在认证全 idle 后更新隔离 C/E owners，配置字节保持；手机 actual cached bundle 26af9a8，22,502,884 字节/SHA d87476bab8e819cd30a6a0a48e9c18aa922d0bc221d58b5c0def2a007f1a96ef，开发 CLI SHA3df5cbaaed289755fe30aa891ba28cb530fbe1aac1e0b89ed8dd11f8bb31f7cf。Production/store 未变。
+  - A4H sole pure init 前 picker 已确认 Read-only，但原生实际 Workspace，重开 picker 也 Workspace；其他原生 input/usage/complete/receipt/model/effort 门均匹配。严格初始门拒绝，不建 baseline、不发 approval main/decision/file；执行视图确认与 fresh 真 Read-only 待修复复验，不能算审批崩溃修复通过。
+  - R4J sole init/main 后 frozen v9 因 static JS 对象字段为带引号的 Literal 而 unverified；调用语义符合两个限定 sleep，没有继续 Current/Next。手机 Stop 一次记录原 abort：2 starts/receipts、1 complete、1 abort，0 error/approval/question，旧 baseline 不改；不是 App 故障或完整控制链通过。020 recorder exit255、完整传输其部分文件，不能冒称覆盖全部现场。018 完整视频已传输566,749,625字节/SHAb28b070905b50819b19107615676e3398d0568da07606be56bec69605a75ef4a，有界视觉检查继续。
+  - 负责人补充 Desktop 旧会话远程多次回复后重开报错、Retry 无效、全退出恢复。真实 Desktop-owner 和 Bridge-owner/Desktop-follower 路径分开；当前 computer-use 明确禁止 Codex GUI 访问，没有绕过或全局重启。per-client membership 源码缺口独立调查，不能冒称原两次报错原因已证。PR141 exact26af CI 功能/完整类型/static/v1/desktop 全通过，唯一实质门是未批准 braces high，仍未合并/发布。
+
+- 2026-10-04 Codex Current 补充消息在历史刷新后回到主任务时间（安卓 R4H 实测拆出的独立修复）。
+  - 两条同文补充消息的原生 `UserMessage` ID 不同、同属原 turn，并各自报告有效毫秒时间；Bridge 用户历史投影却只用了原 turn 的开始秒数。现从原生 item 页保留校验后的用户项时间，优先开始、缺失时用完成时间；非法或倒序时间保留旧回退。消息 ID、client key、顺序与其他后端不变，时间不作为续发或重放依据。
+  - 修复前历史投影 1 项、实际服务历史 4 项红；修复后逐文件串行 `history.test.ts` 30、`service.test.ts` 168 全绿，Bridge Runtime 类型和文档检查通过。覆盖两个同文 guide 的独立时间/ID、原输入 receipt、缺省与非法时间及完成时间回退。
+  - 本任务只修改源码、回归和文档；未发送真实消息、重放、操作手机、启动原生进程、更新现有 Bridge、发包或部署。候选整合仍需保留既有助手逐项时钟与最终回复完成时钟；真机修复验收由当前独立 QA 继续完成。
+
+- 2026-10-04 Codex 真机 R4H 控制链继续验收（仍未完成）。
+  - 手机实际缓存验证 d96be1e bundle（22,502,297 字节，SHA aca01e8636379348bd188f67a848624da8b7094321a90edeca1d11cde2d59e6d）；C/E Preview owners 已按 authenticated explicit-idle 校验更新到 bba5a2e5 development CLI，配置字节不变。先前 IPv6 Metro / reverse 缺失是开发加载问题，现 IPv4 / reverse 修复后载入候选，非 Codex 连接失败。
+  - fresh 初始化与唯一主任务后，两次同文 Current 由独立原生项绑定同一 original turn；实际第二条命令持续 pending，第 2 步与整轮计时未重置。三条 Next 保持 Native absent；空草稿 Stop 一次后原 turn aborted，三条可见 held。随后 Edit 恢复完整原稿，移除第三条，再 explicit idle Send 编辑稿，先编辑稿后第二条各自完成；4 starts/receipts、3 completes、1 abort，无旧稿/被移除输入。此次先 Stop 再编辑，不能冒称运行中编辑后 second-held Send now；该组合仍待 fresh 复测。冻结 v8 对官方 same-call cancellation 非 Script 字串保持 unverified，不改旧 baseline/验收器，也不把它当额外命令或 OS child 已终止。
+  - 录屏 018 约 30 分钟已保存，完整传输/逐窗检查继续。现场确认 expanded Send 的 Current/Next 被重新抢焦点的键盘遮住，手动 Hide 即见；窄 focus 修复已集成，组合与真机验证待完成。另捕获两 guide canonical bubble 时间退回 main start，Native 原条目时间明确存在，Bridge user clock 修复在独立任务中。所有 raw evidence 私有；商店 App、Production、发包/发布与未批准 audit 例外未动。
+
+- 2026-10-04 展开输入框发送后的 Current/Next 选择器被键盘遮住：真机选择器已有遮罩，手动隐藏键盘后立即可见；源码确认 Send 后收起触发两次无条件恢复焦点，覆盖发送前 blur。独立 fresh main 分支让发送及显式 blur 同步退休待执行布局焦点，仅手动编辑或显式 focus 可重新声明，打开选择器同时 dismiss 键盘。保留普通 compact Send、同一原生输入/草稿、两平台手动展开收起和各后端协议。实际 Composer 基线 3 红/3 绿、Screen 入口基线 1 红均命中缺陷；修复后 Composer 6、Screen 整文件 70 与 Mobile 类型检查串行通过，UI 样式 246 文件、设计系统及指令文档 7 对/5 用例通过。真机键盘遮挡修复仍待主任务加载候选复验；无设备、Native、QA RPC、Production 或发布操作。
+
+- 2026-10-04 主任务工作栏/partial审批组合验证318项通过：Thread197、turn-work21、work-dock-model7、controller93，Mobile类型/check:docs 9指令对5用例通过，保131显式unknown/139逐项clock/8b29final资格/ACK顺序及revision门。只对全显式idle的隔离C/E旧owner发SIGINT并确认退出，再启开发CLI bba5a2；配置字节及Production进程保持，认证目录再次全idle。手机仍旧2033；组合源准备装载，真实审批与fresh运行控制继续，不冒称手机已验收。
+
+- 2026-10-04 同回合工作胶囊追加 partial 审批 attention 边界：实际 Thread 缺少原始输入、工具带 turn 身份而有效审批无 turn 身份时，先确认 1 项失败/4 项负向通过；独立消费当前会话的有效请求后 5 项通过，Review 定位实际审批卡，已解决、过期、不支持及 pairing 请求不复活工作审批。请求不加入未知工具、执行收据或计时归属，切换会话不保留旧请求。整文件、类型和 docs 由主任务组合验证；本分支已释放 heavy，无设备/Native/QA RPC/Production 操作。
+- 2026-10-04 Codex 同原生回合引导的工作胶囊计时与步骤边界：在 fresh main 独立树明确依赖 f722 + 7d，以实际 Thread 只插入引导和未加载原始输入的分页窗口先复现 2 项失败。消费者复用 turnIdentity 和当前控制器拥有的会话/执行/原始输入证据，保持总计时、步骤编号及已完成的首步等待；不同执行/发送 key、未知旧后端和 partial/scope/terminal 保留边界。工具自身计时不在本修复范围。本机串行逐文件：ThreadView 169、turn-work 19、work-dock-model 7、controller contract 62，共 257 项通过；Mobile 类型、UI/设计系统、check:docs 7 指令对/5 用例通过。真机仍由主任务验收；没有操作 Native、设备、QA RPC 或 Production，未发布/部署。
+
+- 2026-10-04 Codex 017 全帧现场复核与旧版本历史对照；真机全面验收继续。
+  - 017完整传输462,908,981字节/SHA2aaad119d9dda26556420b5c231ab6d680e8d276e613264f929b1ed99119f354；独立复核PTS838–918的全部6,296编码帧及17张全分辨率关键帧。正文全白状态由851.389733持续到首恢复851.812867，约0.423秒，不把截图间隔说成持续一分钟或精确render latency。恢复含空助手气泡、阅读位置变化及同第二步工作栏1:36→0:01；这些现象分开记录，不能据源码直接断定空白根因。
+  - 在实际旧QA CLI09bd/精确owner代次下仅一次authenticated controlOnly+chat.history：完整25消息/7canonical user，无游标，两guide各精确Native ID/正文一次且原序，missing/duplicate/unexpected皆0；Native及索引前后字节不变。固定2033 Git对象及原dist重建的14-source review严格等原baseline，新的Mobile源码不冒称旧运行版本。完成后的历史未丢guide，不证明当时live/UI正确；原5completed/5receipt、未验Stop/edit/remove/promotion的分类保持，不重放。
+
+- 2026-10-04 Codex 同轮lineage/pending/clock本地组合通过，手机仍2033。
+  - f722+7d最窄整合保留既有131 Desktop有序投影、139 Native逐项时钟、eligible final完成时间、ACK echo/dispatch顺序和pending草稿修订门。去掉合并产生的重复可选timestamp类型声明；独立production peer通过。逐文件串行Mobile live22/historyMerge67/sessionRun7/adapterEvents30/controllerContract93/historyState169/cache45/controllerAdapterEvents48，Bridge Native history75/service234，共790项通过。Protocol/Mobile/CLI类型、开发CLI build、check:docs 9指令对/5检查器通过，未跑全量本地套件，heavy释放。
+  - 新源码与开发CLI构建尚不等于手机/正在运行QA owner版本；工作栏计时消费者修复待独立窄回归，组合后继续真实审批与fresh运行控制fixture。PR141/140/142的功能与完整类型CI通过，唯一实质门禁为未获批准的braces高危审计；PR仍未合并，无发布/Production改动。
+
+- 2026-10-04 Current 指引等待确认的交互修复（负责人授权，Codex Android 深入验收中发现源码缺口）。
+  - 原防重锁只有 ref：等待第一条 ACK 时仍可选择 Current，弹层关闭后第二次操作被静默忽略。新增可渲染 pending 状态；选择入口保持，Current 明确禁用并显示既有「发送中…」，Next 和 Stop 保持可用，不自动排 Next、不解除防重锁、不重放。
+  - ACK 仅清理发送时的草稿修订，用户后来重新输入的同文草稿仍保留；原会话、适配器与卸载边界保留。正常各后端能力与确认行为不变。
+  - 旧实现真实基线 6 项失败：三个支持后端仍开放 Current、同文新草稿被清、缺少等待状态、入口静默排 Next。修复后本机独立依赖、逐文件串行：controller contract 69、chooser sheets 12、ThreadScreen 70、queue 106，共 257 项通过；Mobile 类型、UI 246 文件、设计系统文档 11 组件/5 用例、19 语言严格检查/8 用例、check:docs 7 指令对/5 用例通过，heavy 已释放。未操作手机、Native、RPC、生产服务、构建或发布；真机验收与 dependency audit 的 owner-only 例外仍分开。
+
+- 2026-10-04 Codex 真机2033复验检查点；全面验收仍在进行。
+  - 手机私有开发bundle实际为2033源，22,482,541字节/SHA8a52a4604e38348ee78781df6cc63d7979de811db005ead99d18652f04bd7640；C/E隔离QA CLI为SHA09bd77711192409196c1c95b912156b75457b9e554b8e5a51bd65eda53a5c929。已在authenticated idle后仅重启隔离QA owner，配对/config字节保持，Production/store不变。原completed STREAM冷历史三段时间匹配Native持久化lifecycle start，final仍优先completion；旧record/completion时间比较的差异另存解释，不重写原baseline/receipt。
+  - H5录像016三段实际分页/快速滑动窗口的全部658编码帧复核通过，无观察到页首跳转、错正文复用或大片空白；两次分页stable正文RGB一致。仅覆盖该80消息fixture的有界窗口，不是整段6506帧、极端budget或审批崩溃验收。
+  - 新空会话重启保留所选6.1Sol/low/Workspace/Standard，sole init原生完成。新STREAM原main接收两条同文、不同canonical ID且同原turn的guide；三条Next在main活跃时未进入Native，main自然完成后自动发送，最终5starts/5completes/5receipts。编辑操作前main已结束，edited input为0、Stop/promote为0；编辑/移除/held/提升未验，不重放原run。guide2后405正文全白，406恢复；017录像/连续截图/日志保存，持续时间与因果需独立复核。
+  - 源码另确认pending steer ACK仍可选择Current而被静默忽略，以及same-run guide误作新presentation边界导致累计assistant/tool重复/冷恢复漏段。分别开新鲜任务树修复；尚未装入手机，不能直接称405根因已确定。详细分类与剩余范围见`docs/3.1/codex-android-qa-20261003.md`。braces owner-only门禁仍未批准/应用，无release、部署或发布。
+
+- 2026-10-04 Codex clock/history/ring combined QA source checkpoint; phone acceptance continues.
+  - PR139 paragraph clocks are integrated with the existing final-completion clock fence. Two integration regressions preserve paragraph timing while eligible finals retain completion time, including a partial legacy page whose paragraph cannot borrow final eligibility. Static independent review confirms all original history/tool/delivery fences remain.
+  - Serial narrow checks passed: actual Mobile controller adapter events 48, liveRunThread 12, sessionRunState 6, queue 112; Native history 75 and CodexService 230, totaling 483. Protocol/Mobile/CLI types, local development CLI build and docs 9 instruction pairs/5 checker cases passed. The phone still loads815 and the C/E Preview owners still run274 at this checkpoint; source/build success is not physical acceptance.
+  - H5 actual-phone captures exercise two real prepends, earliest history, fast fling, return to bottom, scope return and background return. The fork uses a validated immutable parent-history reference; the old copy-shape validator failure stays preserved. Recording016 is fully transferred, SHA3137ec00facb34ca6a256dd53184bcc4a94a30f787dc25e4a5c3604acde19e91, continuous visual inspection pending. Idle history cannot validate the approval crash repair.
+  - A new empty QA conversation has6.1Sol/low/Workspace/Standard settings and zero submitted prompts/receipts before the next QA owner restart; cold-empty settings and first-send acceptance remain pending. No Production/store application, release or audit exception changed.
+
+- 2026-10-04 Codex 流式多段正文时间回退修复（安卓真实 R4E QA 现场，独立任务）。
+  - 原生三段 commentary 有独立生命周期时间，但历史读取剥掉 item entry 时间；手机新 live tail 又复用整轮开始时间，导致 04:13 → 04:15 → 04:13。新增可选段时钟，工具提交与后续增量保留首次时间，断线和 active history 恢复保留同一段；run/render identity 不变。
+  - 原生历史 valid start 优先 complete，缺失/畸形保留旧 turn fallback；owned live 首次有效生命周期 start 优先，缺失才用原条目首次 emission 或本机 receipt，512 条有界且不污染 raw item。手机旧 Bridge fallback 是该段首次收到时间，不声称原生 start；Desktop 无时钟仍有来源限制。OpenClaw/Hermes/Pi 既有时间保持；最终回复 completion fence 继续优先。
+  - 窄回归基线实际 Mobile 9 红/27 绿、Bridge 2 红/166 绿；修复后逐文件串行 actual controller 43、liveRunThread 12、sessionRunState 6、Bridge service 177 共 238 项通过，新增 lifecycle start 跨分钟优先与无 tool 连续 A/B 同 tail 冷恢复均实际 1 红→绿；覆盖空 active snapshot 等待首正文、工具后空 tail、断线及非当前会话的首次时钟隔离。Mobile/协议/runtime 类型与 check:docs 7 对/5 用例通过。未操作手机、原生线程/服务、账号、发包或生产部署。真机候选与完整连接体验仍由负责人继续验收。
+
+- 2026-10-04 Codex Android combined-candidate checkpoint; phone acceptance continues.
+  - The STREAM Workspace main is verified against its original immutable baseline: one canonical main, two sequential original command waits (120 and 90 seconds), both exit zero, exact terminal reply, two original turns/receipts including initialization. No guide, queue, Stop or promotion was dispatched; those controls remain unverified. A live third commentary bubble returns to the whole-run start time while its native item has a later clock; a separate stream-clock repair is in progress.
+  - The bounded history preparation and Android native-driver presence ring are integrated into the QA task branch. Serial combined checks passed: PresenceRing 12, ThreadView 189, history anchor 20, SessionActivityRing 2 and SessionPanel 45; Mobile types, UI style 248 files and docs 9 instruction pairs/5 cases passed. The phone still loads the prior 274b311 entry at this checkpoint, so these new source checks are not physical acceptance or crash proof.
+  - Removed accidentally committed cherry-pick conflict markers from this log, preserving both progress entries and HUMAN TODO content. Recording 015 was explicitly stopped and Android shows its completion notification; transfer and video inspection remain pending. No Production service, store App, release or audit exception changed.
+
+- 2026-10-04 Android PresenceRing 原生动画驱动（Codex 真机审批冻结/ShadowTree commit-exhaustion 调查中的独立减负）。
+  - Android 的共享状态环改用 RN Animated 原生旋转/透明度驱动；保留原 SVG、颜色、1.4 秒工作转圈、双 1.2 秒二次缓动呼吸、状态语义和无障碍，iOS 保持现有 Reanimated。后台/非活动、减少动态效果、卸载停止，状态切换重置，普通渲染不重启循环。
+  - RN 0.86.3 Stable 源码确认逐帧同步 View 属性路径不经过 ShadowTree commit；仅减少一个已知持续竞争源，不把真实审批冻结/SIGABRT 的根因或修复宣称已证实。不改 RN flag、依赖、原生代码、设备、用户服务或凭据，不打包/发布。
+  - 实际 PresenceRing 组件回归基线 8 项失败、4 项既有外观/iOS 通过；窄修改后 12 项通过，包含每个 60Hz 呼吸采样与原正反缓动对照。串行验证：PresenceRing 12、ThreadView 166、SessionActivityRing 2、SessionPanel 34，共 214 项通过；Mobile 类型、UI 样式 246 文件、文档 7 指令对/5 用例通过。真机审批复测见 HT-ANDROID-PRESENCE-1004。
+
+- 2026-10-04 Codex Android QA continues; not accepted or complete.
+  - Real second approval denied the original native command and preserved the first file line; three original turns/receipts, strict static code-mode command checks, no replay. Native emitted an incorrect success token after denial; App text agrees with Native. Cold QA launch recovered the first Allow completion with no new dispatch. The captured ShadowTree native crash remains unfixed. Recording 013 is fully transferred (2727.923s); timestamp-aligned samples prove at least 13 seconds of unchanged reply/layout/dock elapsed time while status rings continue moving before Android exits to Home. This supports a competing animation/commit path; it does not isolate a component or prove the candidate fix.
+  - Combined Profile generation, session-action errors, local oversized-send retention and Android Markdown identity fixes: serial Controller queue 112, adapter 41, Thread, Profile 10, SessionPanel 45 and CodexService 211 passed. Protocol/Mobile/CLI types, local development CLI build and docs 9 pairs/5 cases passed. The adapter test now captures deterministic jitter only during construction and immediately restores global Math.random for error symbolication; no product error check was disabled.
+  - Phone now loads source 274b311; same-credential isolated C/E Preview owners restarted after authenticated owned-idle checks, Production unchanged. Served actual entry SHA2743fab240af10dcb37ba1a83c069bdd45160fb2ae5c6fe9344ba23e0dab87dc; local CLI SHAe71c25bb2b27e06be53d7168a42ee5b9729c77b62f6d85d155f1d3c645ad3769. The first STREAM Read-only native turn refused commands with zero tool calls, so Stop/queue was not exercised. A fresh Workspace/6.1-Sol/low/Standard fixture has one completed initialization; main remains unsent. Steer/queue/Stop, media/artifacts, Profile and residual history blank verification continue. No release; existing braces owner gate still blocks merging.
+
+- 2026-10-04 Codex 会话操作拒绝反馈（独立 session-action-errors 任务）。
+  - actual SessionPanelView 基线 reset/delete 无声拒绝和同步异常 3 项红；actual CodexService turn/start 待确认时错误开放 reset/delete 1 项红。已用 scoped 既有失败 Banner 保留原行可重试，Codex 原生生命周期通过 allowedActions 关闭运行中操作；开始事件先发布即时描述，Stop ACK 不解锁，原终态仍仅发布既有单份元数据。不改变 OpenClaw/Hermes/Pi 的活跃会话语义。
+  - peer 发现前一操作迟到拒绝会覆盖后一操作成功，实际新增回归 1 红→绿；独立 action generation 栅栏不取消归档读取。串行单文件 SessionPanel 44、CodexService 159 共 203 项通过，Mobile/Bridge 类型通过；文档 7 指令对/5 检查用例与 UI 246 文件/66 checker outcomes、app config 7、design docs 5 全绿；CI 待远端门禁。仅自动回归，未宣称手机验收；未操作手机/原生线程，未发布。
+- 2026-10-04 Codex Profile 返回页面后的迟到写入确认（完整连接体验测试中的独立修复）。
+  - Skill 切换等待确认时仍可打开 SKILL.md；返回后新读取的状态会被旧切换 ACK 覆盖，同一焦点往返也能让旧失败提示重新出现，或让之前的「使用 Skill」创建结果迟到导航。原逻辑只比较当前 focused 布尔值，无法区分离开前后两个页面代际。
+  - Profile mutation 增加按已提交 adapter/project/section/online/focus 状态更新的代际栅栏；旧成功、失败和导航结果不再覆盖返回后的读取。正常确认、写锁、原生 CAS 与不重放写入保持现有行为；未修改其它后端或 Bridge。
+  - 三条确定性回归在原代码上失败，修复后 NativeProfileScreen.test.tsx 10 项 in-band 通过；Mobile 类型、UI 样式（246 文件）、应用配置（7 项）、设计系统文档与 check:docs（7 指令对 / 5 项）通过。exact-head CI 结果在本任务 PR 记录，负责人实际手机 Profile 验收仍独立进行。未操作 Native/手机、重启运行服务、构建或发布。
+
+- 2026-10-04 Codex Android 深测继续：真实命令审批与分页录屏残留问题（未完成）。
+  - 当前 QA JS / 独立 Preview Bridge 均来自 `8f502810`，Native 0.160.0。长等待答题后的 final 在 cold history 保持完成时刻/时间分隔；另一真实命令审批等待数分钟后 final 也显示完成时刻。五个 GPT-6-Luna effort、跨会话设置隔离与 archive/restore 已用原生完成记录和私有身份基线核对；Fast actual tier 仍未报告。
+  - 两个 fresh Read-only 会话产生真实 command approval：手机单次拒绝后同 original item declined、原 turn 完成、文件不存在；单次仅允许一次后同 item completed/exit zero、原 turn 完成、测试文件恰好一行。后台返回仍保持原请求。Native rollout 缺少瞬时 command terminal 的边界保留，严格 code-mode 包装核对与第二次写入重新审批仍待完成，不能仅靠卡片消失判断授权。
+  - fresh 80-message 历史两次 prepend 已不跳新页顶部，能到最早消息并正确回到底部；完整录屏 012 仍揭示两次短暂空白及助手正文与错误用户消息并排的复用错位。最终稳定截图不构成全程通过，正在查原生 Markdown 身份与窗口提交。
+  - Allow once 后 QA App 意外退至 Android Home；现场 crash/exit 日志确认 RN 0.86.3 原生 ShadowTree commit exhaustion / SIGABRT，原生命令已成功完成。具体触发组件、修复与 cold recovery 尚未证明，不冒充连接失败或已修复。原 Production Bridge、商店 App 与其他后端服务未动；未发布。详见 `docs/3.1/codex-android-qa-20261003.md`，全部独立任务仍遵守 braces HUMAN TODO 的合并门禁。
+
+- 2026-10-04 Codex 最终答复重载后时间回退（负责人真机 219→220 与视频 010：同一回复从完成时刻退回 31 分钟前的请求时刻，时间分隔随之消失）。
+  - 原因：实时成功 final 使用手机收到完成通知的时间，原生历史所有行却使用 turn.startedAt。已有 unknown 工具状态/时钟修复与这个正文时间问题无关。
+  - 依据：官方 Native Turn.completedAt 是 Unix 秒；last_agent_message 只认可最后一条非空 final_answer 或旧模型 absent/null phase。已完成 final 和生成图片附件统一原生完成时间；用户、commentary、plan、工具以及缺失/非法/未知原生时间的既有 fallback 保留。协议只增加可选 FinalMessage.timestampMs，不改变其它后端未提供此字段时的行为。
+  - 验证：Bridge 历史基线 3 红、实际 Mobile controller（普通/含工具）基线 2 红；修复后逐文件串行 history 35、service 171、Mobile adapter 26、controller 26，共 258 项通过，包含旧模型分页、未知 phase（包括 final 后追加 commentary/unknown 不借时钟）、非法时间、Desktop 完成先于 ACK、图片 final 与反复 canonical reload 的气泡/时间分隔不变。Protocol/Mobile/Bridge 类型、文档 7 组指令对/5 项检查器用例与 diff 检查通过。本任务不操作手机、Native、RPC、账户或运行中的服务；负责人随后集成验收，未发布。完整门禁交 PR CI；依赖审计 braces 公告仍等待负责人处理，不能绕过合并门禁。
+
+- 2026-10-04 Codex 全面 Android QA 中间验收（持续进行，未完成）。
+  - 专用 Preview / QA App 保留原数据；新会话和六天前 QA 会话真实单次发送完成，八个模型均由实际 native turn/context/usage 验证。旧会话可能保留 warm owner，Fast 仅 settings 元数据，均不冒充 cold resume / actual tier。原 Production Bridge、商店 App 与其他后端服务未变。
+  - 真实原生 Plan 阻塞请求两题：推荐选项、自定义答案在关闭 Sheet、后台与 force-stop/cold launch 后保留；手机一次 Submit 后唯一 same-call / original-turn output 证明两题答案收到，原回合完成。记录只读 live observer 与 native rollout 各自证据边界。
+  - 长历史录屏已复现两轮无手势跳页；最新 native content-height clamp 修复装入 QA JS，fresh 80 消息/40完成turn副本准备好，仍待真机验收。答题后的同一最终回复时间从完成时刻回退到提问时刻，前后截图/录屏已保全，正在窄修复。
+  - 持续验收矩阵与版本边界见 `docs/3.1/codex-android-qa-20261003.md`；尚缺 steering/queue/Stop、审批、设置恢复、媒体/产物、profile、网络/cold owner 及后端 smoke。源代码回归和 CI 通过不记作手机通过。全部任务 PR 因 braces 高危审计等待现有 HUMAN TODO 的 owner 决策，未应用例外、未合并或发布。
+
+- 2026-10-03 Codex 引导消息确认与原生历史竞态（用户要求持续真机测试时发现的源码边界）。
+  - fresh main 的实际 controller hook 两项确定性基线红：原生引导历史先到、时间继承两分钟前的 turn start；随后 ACK 再加一份，旧 turn 完成且新 turn 开始时还会落到新末尾。这是测试复现，尚不宣称真机复现。
+  - Codex ACK 按 dispatch 消息身份/位置归并：已有明确新 native echo 保留；否则插存活 dispatch anchor 后；窗口替换无旧锚点只读 canonical，不猜新 turn 位置。dispatch 时钟与单调本地序号保持两次同文/同毫秒引导独立，晚 ACK 不覆盖新 run clock；新草稿、失败草稿、scope 和无自动重发边界保留。独立有 send key 的下一条消息不吞并引导，OpenClaw 能力门禁与 Hermes/Pi 既有确认路径保持。同行复核补出引导先于已有助手 A 的 same-native-ID/render alias 形状，两项合并基线红后修复：echo 用 user lineage，与 local 插入用 full lineage 分离；实际 adapter recovery 原生 ID 无 history alias 也归并，local/queued row 不能证明 echo。
+  - acceptance 必须在旧 in-flight history 完成后再读，且 adapter/session 退休即阻止该追加 read；多个 ACK 等同一旧 read 时只共享一条 fresh read。本机单文件串行 controller 74、historyMergePolicy 64，共 138 项通过；Mobile 类型、check:docs 7 指令对/5 检查器用例及 diff 检查通过。完整门禁由本 PR CI 继续验证。未操作手机、Native/Bridge 服务、账号或现有会话，未构建/发布。
+
+- 2026-10-03 全局会话面板创建晚完成覆盖后来选择（Codex 真机 QA 后续只读审查确认，独立窄修复）。
+  - 全局 Host 在创建等待期间没有 UI 代次保护；关闭后重开或选择其他行，后端创建/本地持久化晚完成仍会导航到新会话并关闭后来面板。创建成功原本应自动进入；真机 118 的 XML 仍 pending、同名 PNG 已在关闭动画末端，不能据此断言正常自动进入失败。
+  - Host 捕获 presentation/request generation；关闭、重开、行选择和卸载使旧 UI handoff 失效。实际创建结果及手动访问照常持久保存，读者离开后不导航、不关新面板、不展示旧错误；当前正常创建继续自动进入。付费墙明确继续保留同一作用域，派发前及持久化后再次检查，不因过期继续操作另建会话。
+  - 真实 Host 与生产创建 helper/ManualSessions 延迟 AsyncStorage 回归在原实现 2 红（错误导航），修后覆盖关闭重开、行选择、卸载、adapter 退休后的 false handoff、正常五后端、当前/过期错误及付费继续的 current/closed/selected 边界。逐文件 in-band：Host 16、Panel 35、ConversationEntry 35，共 86 项通过；Mobile 类型、247 UI 文件样式、设计系统文档及 check:docs 通过，完整门禁交给独立 PR CI。不操作设备，不改变 Root 候选树或 Production，不升版本、打包或发布。真机验收仍由本轮负责人进行。
+
+- 2026-10-03 Codex 工具状态与历史重载一致性（负责人要求全面真机测试中即时修复）。
+  - 原生 WebSearch/ImageView 可以没有 `status`；Desktop 恢复此前强制先发 running，之后又漏掉无 status 完成和未知工具更新，导致只剩一个真实工具时仍显示 11～15 步并行。按历史的状态/输出投影发送初始状态及变化，保留同一工具行、重复快照去重、同 status 输出/非零退出码修正；明确未知状态不推定运行或完成，回合不因工具结果而结束。
+  - 最低支持的官方原生代码证明 ImageView canonical 历史只在 completed 的 ViewImageToolCall 上写入；隔离 CODEX_HOME 生成当前 Desktop 0.160.0 schema，确认 ImageView 仅 id/path/type、搜索也无 status，元数据证据存入本轮共享 evidence。只有已知历史契约可隐式成功：图片查看为 completed-only；搜索 Begin 无 status 且 action/results 为 null，保留 unknown，End 必须官方四种有效 action、string query 与合法可选 results。非空 results 原样进入既有 32K JSON 工具输出，缺失/null/[] 不补造结果、不改模型正文；显式未来/运行/失败状态优先，owned completed 同样不强造 success。Bridge 所有的搜索/图片查看通知只在 active run 的内存覆盖中保留已确认 started/completed；冷历史、活跃历史与 follower 保持一致，原生项/文件不改。
+  - 可选初始 `tool_call.status`、unknown update 与 history `statusReported` 向后兼容：缺字段仍按旧后端 live start；明确 unknown 不计并行、不建完成时钟、不触发 settled recovery，历史合并也不回填旧完成时钟；seq-gap直接history projection显式清字段，避免live/history对象spread沿用此前完成时钟。Claude/Pi 旧 missing-result fallback、OpenClaw/Hermes 缺省路径保留。回归覆盖十次已完成图片查看加一个正在执行命令、unknown↔running、冻结原生对象及 live/active/cold history。
+  - 独立工作树 npm ci 后逐文件串行：Bridge history 57、service 170；Mobile adapter-events 20、turn-work 15、history 157、controller contract 61、historyMergePolicy 57（共 537）；protocol/Mobile/Bridge 类型与 docs 通过，Bridge/Mobile 只读 peer review 无阻挡。未碰设备、重启用户 Bridge、发布或改账号；Android 组合候选验收由本轮根任务继续。PR131 既有 CI 仅未获批准的 braces 高危审计红，禁止绕过，更新后的 CI 继续等待。
+
+- 2026-10-03 Codex Desktop 跟随恢复时保留文本、工具和任务顺序（负责人授权全面 Android Codex 体验测试与修复）。
+  - 原快照先把整轮助手文本拼完，再发全部工具，恢复正在运行的会话会把工具后的文字挤到首个工具前；现在每个新工具只先接收它之前的累计文本，最后再更新尾部。重复快照、普通尾部增长及较早文本校正不再临时回放缩短的前缀或重复工具。
+  - 旧任务终止和新任务活动状态同包到达时，先投影并结算精确匹配的旧任务，再用独立 run 开始新任务；旧结果缺失或未知时保留旧 run 与所有权，不猜完成、不重用 run，也不发起本地写入。停止后的迟到跟随快照被拒绝。
+  - 本机串行：Codex `service.test.ts` 164 项、Bridge 类型检查通过；新增顺序、重复/stale、尾部增长/校正、三种 terminal rollover、未知结果与 retirement 回归。完整门禁交由本 PR CI，手机验收由同任务后续 QA 包继续；未重启现有 Bridge、部署或发布。
+
+- 2026-10-03 Codex 冷续聊恢复失败后永久 busy（负责人要求完整安卓实测中的 Bridge 路径审查与修复）。
+  - 只读代码与既有回归确认：Desktop broker 可连但原会话已无 owner 时，原来先保存 prompt receipt / run，再恢复本地 thread；速度/权限证据或 writer lock 准备失败抛普通错误，被误当作已发送但结果未知。此时没有 native turn，下一条被 busy 拒绝，停止又因 turnId 缺失报仍在启动。原回归仅覆盖 broker 不可连接时的提前检查。
+  - 冷发送新增只读 owner discovery，在 receipt 前完成明确 no-owner 的安全本地恢复。owner 在 discovery 与发送之间消失的竞态中，仅原始 IPC 明确 no-owner / pre-dispatch broker-unavailable 才将本地准备失败结为 rejection；保留已接受 fingerprint，重复同 key 不重发。routed timeout、泛化 handler failure 与随后 native turn/start 的不确定结果仍保留 unknown run，不另开 writer。
+  - 新增 12 项确定性回归覆盖 unknown speed、unknown permission profile、writer busy、缺失 native settings 的提前拒绝与 owner 消失竞态、discovery 中发现已有 active turn 保留原身份，以及修复后显式新发送、Desktop / native uncertain dispatch 不重放。独立 worktree / heavy 租约下逐项串行：Codex service 170/170、Bridge 类型、check:docs 7 指令对/5 检查器用例通过；完整门禁由 PR CI 验证。未操作手机或重启现有 Bridge，安装版取得修复仍需要后续授权交付；本轮未发布或部署。
+  - [PR #127](https://github.com/p697/clawket/pull/127) 首轮 CI：Mobile 三分片、tests/static、v1 replay、Windows/macOS Bridge 兼容、secret scan 全通过；依赖审计因新公告 `GHSA-vfj7-8cjw-p6xm` / `braces` 失败，required 汇总随之失败。两份 lockfile 均受影响，npm 当前 latest 仍为 3.0.3；未加例外、未绕过门禁、PR 尚未合并，负责人决策见 HT-AUDIT-BRACES-1003。
+
+- 2026-10-03 Codex 聊天历史、滚动锚点、短回复归并与权限拒绝恢复（负责人要求手机深入 QA；本条为该轮代码审查发现的窄修复）。
+  - H4 空白的独立窄补修：实际 Thread 回归接入当前已安装 FlashList engaged-row tracker，原实现对旧 native child 发 offset 5760 时目标行尚未绘制窗口准备，红例确认并非日期/身份问题的重复。有限 timeline 现先用公开 drawDistance 准备窗口，再由该准备 epoch 的 React layout commit 与可达原生尺寸放行精确 offset；只覆盖全 data 至多 96 行、drawDistance 至多 16 个 viewport、每 prepend 至多 4 次估高准备，包含 date/tool/run 与 header。SDK 正反向五采样速度及越界 projection 回归证实整段布局覆盖；不同页 32/16 项、old child 新 finger、迟到旧 commit、scope/bottom、同总高度新尺寸与预算 fallback 共 11 项新增通过，Thread 整文件 189 与 anchor 20 共 209 项逐文件串行绿，Mobile 类型通过。fresh finger/scope/回底部/精确 ACK 显式恢复 250（Web 500），不调用不可取消 scrollToIndex、不设固定等待或遮罩；超过预算保持原锚点、等可达尺寸后继续而不无限扩图。极端 SDK projection 在 ACK 恢复 baseline 之后仍是普通 buffer 的独立边界，Native ACK 与 React commit 均不冒充 paint ACK；超过该有限预算的空白、H4 34 px settle 和 H5 真机整屏仍待验收，本条不声明完全解决分页空白或原生崩溃。
+  - 2026-10-04 H4 真机录像仍未完整验收：最新候选两次实际 prepend 已保住阅读组，012 录像却在 08:00.909 显示旧 assistant 12 / 当前 user 25 / 旧 assistant 13，16:44.221 又出现旧 assistant 01 / user 09 / 旧 assistant 02；同时有短暂上半、下半或整聊天空白。完整原生录像 SHA `fbf6bbaf4339379937c9825cbdf1684aac35d86f9bcc74280009190560c366c8`、真实 PTS 和稀疏帧保存在 ignored 私有证据目录；不把 4 秒与 22 秒截图间隔说成连续空白。源码确认 Android Native Markdown 后台解析前保留旧 painted text，而 FlashList 复用 holder 原来不更换该 Native view。现按稳定 message renderKey 分隔不同回复的 Native parser，保留同回复 stream/final/history alias 的实例；实际 Thread 加入受控异步原生解析与窗口复用回归，两组原先失败，修后整文件 178 项绿，Mobile 类型、247 UI 文件、设计文档与 check:docs 7 指令对/5 用例通过。分页渲染窗口和 34 物理像素 settle 仍独立待修、待真机复验；本修复不证明消除了 RN ShadowTree 原生崩溃。PR #128 仍受同一 braces owner-only 门禁阻塞，未合并或发布。
+  - 新鲜 80 项副本再次真机复验未通过（`evidence/codex-android-experience-20261003/011-fresh-history-next-drag-failure.mp4`）：首个小拖动后保持 26/27/28 只能证明停手窗口；录像 t350 s 实际读到旧页首 25 + spinner，t352 s prepend 后变成新页首 09，不把之前稳定窗口当作分页通过。另 229→230 正文整体下移 56 物理像素尚待新候选验收；旧 165/166 的“像素完全相同”已由 RGB 复核撤回，不能用 RGBA alpha=0 的 getbbox 推断稳定。实际 hook/Thread 红回归确认旧 native height / offset 0 的 end-drag 在新 rows 后到达会重选 09，后续新 native size 不再恢复 25；同时覆盖 header 20 点使 getter 误判已补偿和旧 viewability 选择错误正文。现用原生 offset 与 row bounds，保留至多 32 个同 scope/list/当前手势的旧内容高度；旧坐标事件只作用于同一 row 的读者位移，新拖动以它确认的原生坐标接管；原生尺寸回调即使被 onScroll 提前写入同一高度也会完成 pending retry，不自动重发或续页。补修前 4 项生产时序失败；旧 child 新手势、首个 layout 前 release、新 child 初始 0 与 onScroll 先于尺寸回调的追加时序也均红→绿；useHistoryScrollAnchor 20、ThreadView 175，共 195 项逐文件串行通过，Mobile 类型通过。单测仍不代替真机同组/Y、跨页与末页验收，候选尚未通过。
+  - 更早历史与自动 head 刷新原共用“最新请求”序号，任一并发刷新会丢掉已接受的分页，或旧分页取消新 head。现在同会话/adapter/选中代次/socket 代次的读操作串行提交；后续分页取刷新后的游标，切换和重连的新代次不等旧请求，旧排队请求不再发出。事件快照保留收到时刻，排队不会把旧活动伪装成新证据；健康探测、发送和 run 恢复不进入此队列。
+  - 工具结束的聊天胶囊原用最早工具作 key；分页补出更早步骤会换 key，FlashList 失去可见锚点。改用胶囊所在的最新工具稳定 renderKey。Codex 同 turn 项共享 startedAt，重复 steering/回复原会按时间和文本合并，现用规范 native item ID 保留独立行和文本增长时的身份；原始 Gateway 投影不变。
+  - 无工具 run 完成原可倒查到上一条用户之前的相同助手短回复，旧回复缺时间戳或间隔不足一秒时被覆盖，新用户后没有回复。归并现在止于最新用户；当前 turn 已恢复的回复仍可归并为一条。
+  - 主测试真机追加：六天前 QA 原生会话直接发送命中固定权限恢复拒绝；本机只读核对旧历史仍为 4 项、无今日标记/活跃 turn，Bridge 无 receipt，明确未 dispatch（现场见 `evidence/codex-android-experience-20261003/018-024*`）。原 App 却显示“发送未确认”与通用失败/英文详情，且没有直达恢复入口。现在仅对已协商权限功能的 exact `chat.send` / `codex_error` / 固定权限拒绝标记 typed recovery；恢复原输入为暂停的本地项、设置原会话的 requiresConfirmation，沿用本地化“重新选择权限后再发送”入口直达权限 Sheet，保留新草稿，不显示误导的 uncertainty，不自动重发。普通 server 失败、同文案但未分类、其他方法或旧 peer 均保留既有 uncertainty。
+  - 第六个真机缺陷：新聊天首次问答只有 2 条，Bridge 明确无 nextCursor、无活跃 turn，App 仍显示“加载更早的消息”（现场 `evidence/codex-android-experience-20261003/045-046*`）。此前首次无游标的短页走 legacy 数量/local-cache 分支并假定非空还有历史。Codex adapter 现在显式标记 `SessionHistory.pagination: cursor`，包含旧 Bridge 的 terminal/empty first head 和 reconciled snapshot；客户端据此建立完整窗口，不提供无效的分页按钮。OpenClaw/Hermes/Pi/Claude Code 不自动增加此标记；它们原有游标/limit 行为保留。新增 exact 两消息与空首屏回归及旧 Bridge adapter/event 回归；Codex adapter 31、historyState 167，共 198 项串行通过，fixture 类型收紧后新增 2 项定向再过；Protocol/Mobile 类型与 check:docs 7 指令对/5 用例通过。
+  - 候选真机录屏追加真实分页跳动：Preview QA 80 项/32+32+16 页在无新手势时，t3–3.5 s 仍为第 25 组，t4 s 跳到第 09 组，t5.5 s 连锁跳到第 01 组（现场 `evidence/codex-android-experience-20261003/008-candidate-preview-history-jump.mp4`、113–115；完整录像 167.022 s）。源码确认 FlashList 默认 MVCP 以首个可见 row key 纠偏，而旧页首的条件时间分隔行在同分钟 prepend 后被移除；布局回调又可触发下一页。现分页捕获稳定正文行及屏幕内 Y，补偿 header/估高收敛，RPC 等待期间新拖动更新当前阅读锚点；该列表实例由一方补偿，保持原生 MVCP 关闭防止旧 delta 双算。回到底部释放阅读锚点；独立 peer review 追加两次估高补偿在 native event 前完成的竞争：保留至多 32 个同 scope/list 的目标，迟到旧目标及其 end-drag 重复不覆盖 reader anchor，fresh drag 清已完成目标并保留未收到事件的目标。自动分页每次新 drag 至多一页，mount/补偿布局不能连锁。新增几何与五后端 Thread 回归：useHistoryScrollAnchor 8、useOlderHistoryPaging 13、ThreadView 171，共 192 项逐文件串行通过，Mobile 类型、247 个 UI 文件/66 项样式检查器结果、设计系统文档与 check:docs 7 指令对/5 用例通过；真机同组/Y 和无输入不续页仍待主测试复验；快速 fling 的短暂空白仅记录 Debug 观察，不宣称 Release 结论。
+  - 真机再次复验未通过：原候选消除了 25→09→01 连锁，但新小拖动后仍在无输入时从第 25 组漂到 21/22（现场 `evidence/codex-android-experience-20261003/009-E-history-anchor-residual.mp4`，119–120 s 稳定、121 s 短暂空白/23、122 s 起保持 21/22）。源码与可失败时序回归确认：FlashList JS layout 先于 Android 原生 child size，offset 指令被旧最大值截断，后续同 target 被去重且内容尺寸回调未重试；drag settling 又可能误捕获 clamp ACK。现记录旧原生最大值的 ACK，并仅在原生内容/viewport 改变时重试相同目标，保留迟到 clamp 与多指令 ACK、新手势优先和单一补偿所有权。hook idle/settling 两项、实际 Thread 内容提交、clamp 假底部 settle 与真 target ACK 后迟到 clamp 三种时序在补修前均失败；补偿 ledger 事件现不改变 reader distance/follow，未确认 target 的旧最大值不能释放锚点。useHistoryScrollAnchor 12、ThreadView 173，共 185 项逐文件串行通过；Mobile 类型、247 UI 文件/66 项样式检查、设计系统文档、App config 与 check:docs 7 指令对/5 用例均通过；原生同组/Y、无输入不续页验收仍待主测试。
+  - 权限源码深查补齐首次 cold-resume 的第二条固定拒绝 `The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.`。独立 Bridge 审查确认 direct Send 返回该错误时，拒绝位于 native resume、receipt 保存与 turn dispatch 前；已设置 unconfirmed 的旧会话走首条文案。两条均保持 exact `chat.send` / `codex_error` / 已协商权限匹配；models/list 等设置读取及迟到 run 事件不据文案分类或删除receipt，未知/超时仍不确定且不自动重发。新增第二文案正负 adapter/held-input 回归：Codex adapter 35、controller.contract 67，共 102 项逐文件串行通过，Mobile 类型与 check:docs（7 指令对/5 用例）通过；手机首次 direct Send 由主测试覆盖。
+  - 权限增补串行：Codex adapter 28、controller.contract 65、modelPicker 60、queue 106、ThreadView 166、ThreadScreen 权限定向 1、protocol capabilities 5，共 431 项通过（包含与首轮重复的契约/UI用例）；Protocol / Mobile 类型、UI 风格 / 设计系统 / App config / check:docs 均通过。完整 CI 随增补提交再验证，手机接受新权限选择后的恢复由主测试继续完成。
+  - 本机逐文件串行：useChatHistoryState 165、useChatController.adapter-events 27、controller.contract 60、toolGrouping 6、timestamps 19、ThreadView 166，共 443 项通过；另对事件排队时间证据加强一条定向回归通过。Mobile 类型、246 个 UI 文件风格（66 项检查器结果）、设计系统文档（11 组件/10 token families）、App config 7 项和 check:docs（7 指令对/5 用例）通过。前四项在 PR #128 的 Mobile 三 shard、rest/static、v1 replay 和源码类型均通过；必需门禁仅被两份 lockfile 现有 GHSA-vfj7-8cjw-p6xm / braces 审计阻塞，未合并，例外需负责人批准（HT-BRACES-AUDIT-1003）。真机分页手感仍由并行主测试验收，不把单测当作手机证据。未打包、安装、发布、部署或重启 Bridge。
+
+- 2026-10-03 Codex 长期跨会话浏览耗尽 Desktop follow 容量（安卓全面 QA 的源码审查补充）。
+  - 原因：每次打开原生聊天都永久占一个 follow，64 个之后新聊天无法跟随；新原生索引还会先保存，再因 follow 失败报错，留下半完成记录。
+  - 改法：维持 64 个观察订阅的上限，先释放临时目录观察，再复用最久未读且已确认 idle 的聊天观察；保护 active / 未知 dispatch run、排队操作、审批与问题，以及正在等待的 native IPC 请求。canonical 图同时检查未引用实体，畸形或未完成状态不当作 idle。无快照会话使用最多两个并行只读 owner-discovery，只有当前 socket、follow 与状态 generation 的明确 no-owner 才能复用；历史读取不等待探测。断线作废证据，新状态与迟到结果不能相互覆盖。
+  - 协议：只读核对安装文件 Desktop 26.930.31730，`thread-stream-following-changed` v1 的 `following: false` 删除该 client 的 follower 集合条目；只释放观察，不解写锁、不另开 writer、不发明 RPC。native record 先完成 follow admission 再保存；保存失败回滚内存记录。
+  - 组合源码复核补边界：已索引 idle 会话被回收 follow 后直接 Send，必须在 receipt 前重新 admission；容量失败不记录 key/run，同 key 重试仍返回未发送。warm local-owned 发送不要求 Desktop slot；admission/settings 收到新 active snapshot 再检查 busy。receipt 后重复 follow 写失败可证明尚未 dispatch，结束该 run 为 rejected，保留 receipt 防同 key 重放；容量恢复或该失败之后，由明确的新发送继续。实际 turn 请求的未知结果仍不允许重发或另开 writer。
+  - 持 heavy 租约逐文件串行：desktop-follow 23、desktop-ipc 27、service 163、session-activity 7，共 220 项通过；Bridge 类型与 check:docs（7 指令对 / 5 检查器用例）通过。包含真实 framed socket 的断线、退休会话不重订阅与当前会话恢复；100 会话容量来自确定性 fixture，未冒称手机验收。完整门禁交本 PR CI；不重启用户 Bridge，不打分发包、不发布或部署。新代码仍需后续授权的 Bridge 更新及真机验收。
+  - admission 补修持 heavy 串行再验证 service 167（新增 4 场景：实际 64 active follow、receipt 后观察写失败、warm local-owned 和 active snapshot 竞态），Bridge 类型与 check:docs 通过；其他三个未改文件保持上述结果。容量不足时两次同 key 均未接受、无 receipt/run/dispatch；容量恢复后显式新 send 只 dispatch 一次，已记录失败 key 不重放。
+  - [PR #130](https://github.com/p697/clawket/pull/130) 首轮 CI 的 Mobile 三分片、types、tests/static、v1 replay、Windows/macOS Bridge 与 secret scan 通过；依赖审计唯一阻断为两份 lockfile 的 `GHSA-vfj7-8cjw-p6xm` / `braces`，required 汇总因此失败。未绕过安全门禁，PR 尚未合并，待 HT-AUDIT-BRACES-1003 的负责人决策。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。
@@ -1382,6 +1777,17 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
+| HT-PICKER-MIME-1004 | 相册导出 MIME 真机验收 | 在负责人合入本修复的 QA App，从系统相册选择小 GIF 与 PNG；仅自建 QA 会话发送一次，未知不重发。 | 观察实际 base64 签名和发送 MIME 一致、视觉首帧正确、取消/scope/六图上限保持；不宣称恢复 GIF 动画或制造容量超限。 | hook/发送 wire 回归已通过；真机 gallery 输出待负责人验收。本轮没有设备或发布动作。 |
+| HT-STEER-PENDING-1004 | Current 指引等待确认的真机验收 | 在包含修复的开发 App 上，让 Current ACK 延迟；重新输入不同或相同草稿，打开 Current/Next，再显式选择 Next 或 Stop。 | 等待期间 Current 禁用且显示发送中，选择入口/Next/Stop 可用；旧 ACK 不清新草稿，失败不重放，切换会话后旧 ACK 不修改新会话。 | 本地 257 项窄回归、类型、UI、文档和 19 语言检查通过；负责人真机验收待完成，本任务不发布。 |
+
+| HT-CODEX-ACTIONS-AUDIT-1004 | Codex 会话操作拒绝修复的审计合并阻挡 | 负责人决定既有 braces GHSA-vfj7-8cjw-p6xm 的修复或经批准窄范围例外；代理不绕过门禁。 | required audit 全绿后才可合并；当前仅本机自动回归通过，手机验收继续由主 QA 任务执行。 | 待审计决定；未合并、未发布 |
+| HT-AUDIT-BRACES-1003 | 新 braces 高危公告阻挡 PR 的依赖门禁决策 | 当前 `GHSA-vfj7-8cjw-p6xm` / `braces` 3.0.3 无 npm 已发布修补版本；由负责人选择等待修补，或明确批准该单条 advisory 的有期限例外及理由。代理不自行加例外、改安全门禁或绕过合并保护。 | 两份 lockfile 的 dependency-audit 按选定方案通过；受影响 PR rebase fresh main 后 required 全绿才合并。 | PR #127 源码相关 CI 全通过，但依赖审计失败；尚未合并，待负责人决策。 |
+
+| HT-BRACES-AUDIT-1003 | 新 braces 公告的临时审计例外决定 | 官方修复或负责人明确批准一条指定公告/包、有原因和到期日的临时例外；不能因 Codex QA 紧急或本地测试通过而绕过门禁。 | root 与 Mobile lockfile 的 GHSA-vfj7-8cjw-p6xm / braces high 消除或通过获批规则；各 PR 对齐 main 后完整门禁再绿。 | PR #128 的功能与类型/static/v1 CI 已通过；现有依赖审计阻塞合并，待负责人决定。 |
+
+| HT-AUDIT-BRACES-1003 | 新 braces 高危公告阻挡 PR 的依赖门禁决策 | 两份 lockfile 触发 `GHSA-vfj7-8cjw-p6xm` / `braces`；由负责人决定修补方案，或明确批准该单条 advisory 的有期限例外及理由。代理不自行加例外、改安全门禁或绕过合并保护。 | 两份 lockfile 的 dependency-audit 按选定方案通过；受影响 PR rebase fresh main 后 required 全绿才合并。 | PR #130 源码相关 CI 全通过，但依赖审计失败；尚未合并，待负责人决策。 |
+| HT-CODEX-REPLY-CLOCK-1004 | Codex 回复时间修复的 CI 审计合并门禁 | 由负责人处理既有 braces 高危公告 GHSA-vfj7-8cjw-p6xm；本任务没有例外授权，不扩大到依赖更新或绕过保护。 | 当前 main 上完整必需 CI 全绿后才能合并；组合开发候选的手机验收仍可独立继续。 | 代码、258 项窄回归与类型/文档已通过，PR CI 待确认；审计处理待负责人。 |
+| HT-ANDROID-PRESENCE-1004 | Android 审批切换原生崩溃减负复测 | 负责人在包含本修复的独立 QA App 上执行新建会话的审批允许→工具→正文/工作坞切换，并继续测试工作/等待环、后台恢复及减少动态效果；保留录像/原生日志。 | 外观节奏/状态/无障碍保持，循环后台停止；验证原冻结与 ShadowTree commit-exhaustion 是否仍复现。仅通过自动化或环继续转动不代表崩溃已解决。 | 源码窄修改与组件回归通过；待负责人串行组合验证和真机复测，未打包/发布。 |
 | HT-NATIVE-NAME-1002 | 新增原生连接电脑名修复的 Bridge 交付与手机验收 | 在另行授权的 Bridge 发布/更新后，用旧设备配置执行显式 Codex / Claude Code pair，再在手机新增连接；普通运行不会自行补名称，已有连接可在连接设置手动改名。 | 新连接显示 Product · 电脑名；旧手机继续连接，已有/手动名称不被重配覆盖。本次只改源码并由 CI 验证，不发布、不修改现有配对配置。 | 待负责人授权交付与验收 |
 | HT-USER-FOLD-1002 | 用户消息折叠的双端体验验收 | 在包含本轮代码的开发 App 或后续授权更新中，查看中英文长消息、连续换行、带图片 / 文件的消息；调整字号并在 iPad 分栏查看。 | 默认 6 行，展开 / 收起可达且阅读不被拉向页尾；时间和送达标记不盖文字；长按状态一致、复制 / 分享保留全文；短消息及助手回复照旧。 | 定向自动化已通过；待负责人真机视觉 / 手感验收，本轮未打包或发布。 |
 | HT-HERMES-GATEWAY-KEY-1002 | Hermes gateway 所有权恢复（#69）的发布决定 | 3.1.10 从 `accfe2f4` 起，不含本修复；由负责人决定随哪个 Bridge 版本发布 | 升级后用 `clawket pair --backend hermes --restart-hermes` 让新 bridge 启动并记录 gateway，再 `clawket reset` 后重新配对：手机应直接连上，`hermes-bridge.log` 出现 `owner=clawket`；没有记录的旧 gateway 应在配对时失败并提示 `--restart-hermes` | 待负责人决定；本轮不打包、不发布。 |
@@ -1390,6 +1796,7 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 | HT-TOOL-DOCK-1002 | 工具过程方案 C 真机验收（iOS 与负责人设备） | 在包含本轮代码的开发 App 或后续授权更新中，分别让 OpenClaw / Codex / Claude Code / Hermes / Pi 执行会调用工具的任务；各触发一次执行审批，并让 Claude Code 或 Codex 提问一次。 | 工具步骤不进对话；工具运行超过 1 秒停靠条升起，点开是工作面板；审批时停靠条变琥珀色，「查看」跳到卡片；提问时停靠条换成「回答」；结束后最后一条回复下有带时长的工作记录 chip，记录里有每一步、审批结果和问答。 | 安卓 QA 包已逐个后端实测（见 PROGRESS 2026-10-02 工具过程条目）；Claude Code 权限弹窗因本机 Claude 设置预先允许工具未能触发，由单元测试覆盖；iOS 未测。未升版本、未分发。 |
 | HT-HISTORY-PAGING-1002 | 聊天历史分页真机体验验收 | 在包含本轮代码的开发 App 或后续授权更新中，打开 Claude Code / Codex 的长历史，连续翻页；同时检查 OpenClaw / Hermes / Pi。 | 顶部请求即时转圈、慢读不需重复触发、旧消息插入保持阅读位置；失败可重试，短会话不被拉回底部；OpenClaw reset 与 Pro 预览保持原语义。 | 388 项定向自动化已通过；按现行工作流待负责人真机视觉 / 手感验收，本轮不发起打包或发布。 |
 | HT-CODEX-TITLE-1002 | Codex 标题盾牌删除 PR 的依赖门禁范围决定 | 独立 CI 修复已在 PR #107 合并；PR #103 更新至最新 main，使用批准的有期限审计规则。 | 当前提交通过完整 CI 后合并，不改依赖锁文件或另加例外。 | 范围决定已完成；负责人 2026-10-02 要求继续合并。213 项本地测试通过；更新至 #107 后的源代码提交 c8957bd2 已通过全部适用 CI。合并仍要求当前分支与 main 同步且门禁通过。 |
+| HT-CODEX-READONLY-1004 | Native 0.160 Read-only 实际执行与权限漂移验收 | 保留 A4H 原始 Workspace mismatch；负责人在已授权独立 QA 新会话 A4K 上选择 Read-only，再单次发送并核对原生实际 context/审批。 | 原生实际为 Read-only；若 configured readback 不一致，手机明确要求重新确认且没有新 receipt/turn/start。不得将永久拒绝 Read-only 当能力验收。 | 同 owned writer 的配置确认围栏与 177 项 service 回归/类型已通过；术语修订明确不证明实际执行；原生环境同步与真实 Read-only 场景待验，未发布、部署或更改 Production。 |
 | HT-CODEX-LATENCY-1002 | Codex 原手机连接耗时与慢提示验收 | 后续分别获授权交付兼容 App 与 Bridge 后，用原 Production/Preview 连接冷启、切换连接及打开会话面板；无需刷新配对。 | 分别记录握手和完整目录完成时间；正常四五秒等待不显示慢提示，真实阶段停滞 12 秒仍提供连接设置入口；旧 Bridge 与其他后端可用。 | 源码实现与本地受控验证完成；未发布、部署、重启已安装 Bridge 或操作原手机。实机提升待负责人验收。 |
 | HT-CODEX-PAIR-1002 | 本机 Codex 配对恢复后的手机验收 | 重跑 `npx @p697/clawket@latest pair choose` 并选择 Codex；已有手机连接可先直接重连。 | 配对命令正常显示结果，手机连接后可读取会话；新对话真实回复由负责人验收。 | 本机 public 3.1.9 已通过认证控制安全重启；配置逐字节保持，原生健康与 Desktop IPC 读回正常。手机/推理未验收；源码错误处理修复不包含于公开 3.1.9。 |
 | HT-PLAY-311-1002 | Google Play 3.1.1 送审决定 | 在快速检查完成后，由负责人决定是否点击「提交 58 项更改以供审核」；包含 3.1.1/30102 和已授权的 57 项截图。 | 确認检查结果与候选版本；点击后必须看到正在审核，审核通过后仍保留自管式发布。 | 待负责人授权下一步：本轮已打包、上传并保存，未提审、未公开上线。 |
@@ -1399,12 +1806,14 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 | HT-CODEX-ROSTER-1001 | 原故障 iPhone 与另一台电脑的目录加载验收 | Bridge 3.1.8 已公开，在故障电脑更新并重启 Bridge（保留原配对范围参数），再让原手机重新连接并运行同一只读诊断；后续客户端授权更新再验收 Agent 独立展示与列表重试。 | 2,823 条会话完整返回且 invalidRows=0；首页出现 Codex Agent；原会话保持可用。 | 远端 08:59 UTC 报告已确认 24 条会话的 model 违反响应契约，新旧目录接口均失败；3.1.8 已包含并公开交付 Bridge 契约修复，现有客户端可先验证。故障电脑更新、原手机验收、原生版本记录仍待负责人完成；App 未更新。见 20-connection-diagnostics.md。 |
 | HT-ONBOARDING-1001 | 按平台连接引导真机视觉验收 | 在后续授权的 App 更新或开发包中查看两列平台列表、首页自动检测命令与复制、扫码/相册/原地输码、Codex 终端及 Hermes Agent；不要求刷新现有配对凭据。 | iOS/Android 浅色与深色、大字号、键盘避让和方式切换；核对扫码/相册/码连接失败恢复表单。 | 自动化交互与代码检查已通过，未操作模拟器或设备；真机视觉验收待负责人完成，未发起打包或发布。 |
 | HT-CODEX-RUNTIME-0930 | 桌面运行时优先的手机验收 | 本机现有 3.1.6 已通过保存的原生执行路径切到桌面 0.159.2，Bridge 重启完成；手机重新连接，无需重新扫码。 | 模型目录与新对话一致，消息得到回复；旧原生会话仍可继续。 | 隔离真实新对话成功；本机配对保留、认证/目录读回通过，负责人已确认手机新建成功；旧原生会话续聊仍待验收。负责人已授权本次 Bridge 发布，App 更新另行授权。见 ../3.1/codex-desktop-runtime-2026-09-30.md。 |
+| HT-CODEX-QA-AUTH-1005 | 当前安卓暖发送验收所需模型认证状态 | 负责人确认电脑Codex是否可正常发送；若也认证失败，按正常界面恢复登录后告知。 | 在恢复后新建独立QA夹具完成无副作用初始化，再继续Current/Stop；保留已失败R5U且不重放。 | Native明确unauthorized，手机有认证失败提示；具体凭据原因未知，异步确认待答，不读写认证文件或自动登录；不依赖模型的手机测试继续。 |
 | HT-CODEX-AUTH-0930 | 原故障 iPhone 的认证与错误回显验收 | 负责人恢复必要的原生登录，安装本轮公开 Bridge 后重新配对，在新对话发送无副作用消息。 | 手机得到真实回复；认证失败显示明确提示，退出重进历史仍保留。记录 App build 和运行 Bridge。 | 原故障与旧/新历史差异已只读复现；本机清理完成，本轮 Bridge 发布进行中。新 Mobile 通用兜底需要独立 App 更新，真机验收待负责人完成。 |
 | HT-QR-FRAME-1001 | 扫码框与首次扫码真机验收 | 后续授权 App 更新或开发包中，iOS/Android 各测单 QR、框外第二 QR（Production Codex + Preview OpenClaw）、取消再打开；Android 须包含新原生相机代码。 | 第一次只接收框内码、环境正确；移入同一码可识别，取消/退出无迟到配对；保留固定诊断原因。 | 源码修复与受控回归完成；原现场物理码选择无证据，真机与交付待负责人后续验收。见 ../3.1/qr-scan-frame-2026-10-01.md。 |
 | HT-FIRST-SCAN-0930 | 首次扫码故障真机验证 | 已确认两个后端均立即报错、只有一个二维码、App 为当前仓库构建的 3.1.0；后续授权的 App 更新后重测首次扫码并保留固定校验原因。 | 区分真实首次校验原因与受控旧回调复现；当前代码修改不等于手机已收到修复。 | 本地旧回调竞态和错误反馈修复已实现，原现场的环境变化仍无证据，待 App 更新后负责人验证。见 ../3.1/first-scan-investigation-2026-09-30.md。 |
 | HT-NPM-315-0930 | Bridge 3.1.5 npm 发布两步验证 | 在 npm 官方浏览器流程完成验证，不在聊天中发送密码或验证码。 | npm 发布成功，公开 latest=3.1.5，公开包与固定候选逐字节一致。 | 已完成：npm 两步验证成功；公开 latest=3.1.5，下载包逐字节及 SHA-1/SHA-512 校验通过。 |
 | HT-NPM-314-0929 | Bridge 3.1.4 npm 发布安全密钥验证 | 在已打开的 npm 官方页面完成安全密钥/Touch ID，无需提供密钥。 | npm发布成功，公开latest及下载包SHA与固定候选一致。 | 已完成：五Relay已发布并核验；npm latest=3.1.4，公开下载包三项哈希与固定候选一致。 |
 | HT-COMPOSER-PASTE-0928 | 输入框系统菜单与语音共存验收 | 在后续开发包分别测试 iOS/Android：空白框轻点进入编辑，再长按粘贴；已有草稿双击选词、全选、拖选择手柄、替换粘贴；展开/收起后重复。 | 文本/图片粘贴沿用原入口；不误开麦克风、不因向下拖选择手柄收键盘；空白未聚焦长按语音和麦克风点击/按住松手/上滑取消正常。 | 代码与回归用例已更新；原生菜单和语音触摸待设备验证。 |
+| HT-CODEX-DESKTOP-ROUNDTRIP-1004 | 远程连续消息后 Codex Desktop 重开及 Retry 实机验收 | 使用已 materialized 的独立 QA 同 ID，分别验证真实 Desktop owner 与 Bridge owner/Desktop follower；保存报错现场，Retry 仅一次，不能靠 IPC/手机回复替代 GUI。 | 两次串行手机发送各有唯一原生终态，回到桌面同会话正常加载且历史/设置保持；若失败先保现场再独立评估恢复，不全局重启其他活跃任务。 | 当前 computer-use 工具明确拒绝 com.openai.codex，未绕过限制；源码/窄回归与手机独立工作继续，桌面 GUI 检查待负责人。 |
 | HT-CODEX-DESKTOP-0929 | 原始 Desktop 恢复报错验收 | 在候选 Bridge 下，用 Codex Desktop 打开原先出现 null.settings 的会话，检查显示并继续一条无副作用消息。 | 不再出现恢复对话失败，原 ID/历史保留，消息成功；不能用 IPC 探针代替实际 GUI 验收。 | 完整设置契约、两个安装版本的真实 IPC 与同 ID 冷恢复已通过；本轮 Desktop GUI 自动化访问不可用，未绕过限制，仍待负责人窗口验收。 |
 | HT-CONNECTION-0928 | 原故障 iPhone 路径与新等待动画验收 | 确认实际 TestFlight 版本/build 与测试时区；在后续授权的 App 更新后重测 OpenClaw/Codex/Claude QR、Profile/模型及前后台，并验证飞行模式/切网时的诊断分类。 | 对齐准确失败时间/阶段；诊断只含固定元数据，不能把超时直接认作网络故障；本机 Codex 已保留配对恢复，不要求重新生成凭据。小猫不延迟成功导航。 | 本地修复和日志交叉核对完成；UI 自动化窗口不可用，未做真机端到端验收。详见 connection-incident-2026-09-28.md；未发起发布。 |
 | HT-PLAY-REVIEW-0928 | Google Play 全权限审核访问与真机验收 | 独立云环境、重复 QR、真实 DeepSeek、永久兑换及 Pro 恢复已验证；英文访问表单已保存。 | 已完成：三星 Play 正式版 30001 实测扫码/聊天、清空本次测试数据后同码重配、Pro 终身恢复及付费日志；30101 用同源协议实测和计费源码一致性补证，未原生运行。 | 现有 3.1.0/30101 与 77 项更改已重新送审，后台显示正在审核；快速检查已结束、新内部测试证书已验证。托管发布开启，未公开发布。详见 ../3.1/google-play-review-environment-2026-09-28.md。 |
@@ -1585,6 +1994,11 @@ The owner approved the recommended tool-row/group design and authorized fixing b
 ### Tool activity automated checkpoint
 
 Compact tool/group UI and scheduled-event styles are implemented. Live Lucy reproduction confirmed both cached-tool ordering and a separate Cron refresh loop that cleared/reinserted cards on ordinary chat state changes. Latest code also prevents streamed final replies from resurfacing as duplicates through older cache pages. `check:required` passes (Mobile 229 suites / 2,101 tests, 149 UI source files, 6,324 translations); v1 compatibility passes 35 tests. Signed Release builds/installs; two real Lucy sends and replies, recovered messages, group expansion and detail access were inspected before lock. Mac locked after final Cron fix was installed; final streaming/cron, dark-mode, and Hermes visual acceptance await unlock. The existing local-only QA Pro override is enabled in the simulator build, with production untouched. Full evidence/limits: `14-tool-activity-and-chat-reconciliation.md`.
+
+
+### 2026-10-05 — Android paste input state retention
+
+R5S's one physical Send was followed by an Android SIGSEGV whose repeated frames destroy AndroidTextInputState, attributed strings/fragments and ShadowView. The owned paste component's copied RN implementation stores a fragment ShadowView containing the previous input state. A narrow install patch follows RN's existing text-fragment contract and clears only copied props/state, preserving text, tag, event emitter, layout, IME and paste behavior. It validates exactly paste input 2.0.1 / RN 0.86.3, a single source anchor, both install layouts and idempotence; stock RN and architecture flags are unchanged. Own dependency bootstrap applied the patch successfully; the single Node patch file passed eight cases, docs passed seven instruction pairs/five cases, and repeated Mobile `paste-input:patch` verified the installed source idempotently. Two independent source peers passed. Native QA rebuild and physical long-edit/clear/Send acceptance are required before claiming the captured crash is fixed; no device action or release is performed by this task.
 
 ### 2026-09-06 — Thread expansion and secondary-navigation acceptance
 
@@ -3135,3 +3549,11 @@ GHSA-vfj7-8cjw-p6xm (braces <=3.0.3, high, stack exhaustion through deeply neste
 ### 2026-10-05 — Tool UI unified on design C: no centred pills
 
 Owner question: did the old tool UI (the small dark centred pill) and design C (receipts and the dock above the composer) coexist? They did, by rule rather than chance: the reply's live `ServicePill` showed while the Agent thought and for the first second of tool use (the dock rose only after a second of tool use, never for thinking), a turn with no words after its last step left a centred `ToolActivityPill`, and a dropped connection cleared the run so the running turn folded into that pill. The owner chose to unify on design C. The dock now rises at the turn's first step, or after a second of thinking without a word (after the sent message lands; a quick reply never raises it; not while the prompt still waits for its send acknowledgement), and stays until the turn ends. A reply with no words draws nothing and its first words enter like a reply. A dropped connection keeps the running turn open (steps stay out of the conversation, the dock goes grey) until the run returns. Every finished turn leaves a receipt: on its last reply even when steps followed it, or in an Agent bubble of its own when it said nothing; it reads red (a `bad` glyph on `badSoft`, the step named in the bubble's text color) only when the turn ended on a failed step. `ToolActivityPill`, the thinking pill, the fallback reply placeholder and `ServicePill`'s live, pressable and failure variants (with their service colors) are gone; `ServicePill` is dates and system notices only. Verified in band one file at a time: `ThreadView.test.tsx` 169, `turn-work` 14, `toolGrouping` 6, `timestamps` 19, `model` 30, `work-dock-model` 8, `resolver` 26, `AgentQuestions` 10, `ThreadScreen` 69, and the three `useChatController` files touched by the removed placeholder key (60, 24, 106); Mobile typecheck, UI style, strict i18n, agent and design-system docs passed. No version bump, distribution package, OTA or deployment.
+
+### 2026-10-04 — Codex local frame rejection preserves the outbox
+
+The exhaustive Codex phone QA source audit found that two individually permitted GIF attachments can exceed the shared 8 MiB frame limit after base64 encoding. The socket rejects that frame before sending, but the controller classified the rejection as an uncertain native dispatch and removed the editable outbox item. Codex now validates the complete prepared UTF-8 request, using the same serializer and frame assertion as dispatch, before the controller changes its outbox. Only the exact locally created rejection class proves no send; remote codes, copied properties and arbitrary transport failures retain the existing uncertain-send/no-replay behavior. Refused messages retain their text and attachments in their original held queue and show the existing size error. Single 5 MiB images, the exact 8 MiB boundary and other adapters remain supported.
+
+Two real-consumer regressions failed on the baseline: the Codex adapter sent no frame but returned an unclassified exception, and the controller lost the editable item while showing an uncertain-send error. Serial focused verification passed Codex adapter 29 and controller queue 112 cases, Protocol and Mobile typechecks, and docs (seven instruction pairs / five checker cases). Coverage includes UTF-8 envelope boundaries, large GIF pairs, normal 5 MiB sends, scope changes, asynchronous known rejection and remote/unknown failures. Phone acceptance and exact-head CI remain separate; no Native/RPC writes, phone operation, distribution package, service restart or release occurred in this task.
+
+- 2026-10-04 Codex Android QA: confirmed same-run Current inputs were treated as fresh user boundaries, duplicating earlier live text/tool rows and losing pre-guide recovery. Independent `codex/codex-steer-run-boundary` task adds optional native execution/original-input lineage with receipt/full-history provenance, guide-order/cache/recovery preservation and distinct next-turn boundaries. Verified 529 narrow Mobile/Bridge regressions, Protocol/Mobile/Bridge types and documentation checks; five new presentation cases failed against the baseline before passing with the fix; a later no-tool guide tail-clock case also failed before its known-clock consumer was corrected. The observed 405 blank viewport remains a separate video investigation, not an established consequence or claimed acceptance pass.

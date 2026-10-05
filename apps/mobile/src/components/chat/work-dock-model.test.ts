@@ -14,6 +14,15 @@ describe('resolveWorkDockPhase', () => {
     expect(phaseOf([step('a', 'success'), prompt])).toBe('thinking');
   });
 
+  it('keeps replying across same-turn guidance while a genuine next input returns to thinking', () => {
+    const main = { ...prompt, turnId: 'turn', idempotencyKey: 'main-key' };
+    const guide: UiMessage = { id: 'guide', role: 'user', text: 'Continue', turnId: 'turn' };
+    const words: UiMessage = { id: 'words', role: 'assistant', text: 'Working', streaming: true, turnId: 'turn' };
+    expect(phaseOf([guide, words, main])).toBe('replying');
+    expect(phaseOf([{ ...guide, idempotencyKey: 'next-key' }, words, main])).toBe('thinking');
+    expect(phaseOf([{ ...guide, turnId: undefined }, words, main])).toBe('thinking');
+  });
+
   it('lets a pending approval outrank the step, and a lost connection outrank everything', () => {
     const approval: UiMessage = {
       id: 'approval_1', role: 'system', text: '',

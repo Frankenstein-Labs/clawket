@@ -1,3 +1,5 @@
+import { resetSessionHistory } from '../connection/session-reset';
+import { ConversationArchives } from './conversation-archives';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ChatCacheService, CachedSessionMeta } from "./chat-cache";
 import { UiMessage } from "../types/chat";
@@ -93,6 +95,14 @@ function makeMsg(overrides: Partial<UiMessage> = {}): UiMessage {
 }
 
 describe("ChatCacheService", () => {
+  it("retains native execution groups across cache reload without accepting malformed identities", async () => {
+    const scope = { gatewayConfigId: "gw1", agentId: "main", sessionKey: "chat" };
+    await ChatCacheService.saveMessages(scope, [makeMsg({ id: "main", turnId: "native-turn" }),
+      makeMsg({ id: "guide", turnId: "native-turn" }), makeMsg({ id: "bad", turnId: " padded " })]);
+    const rows = await ChatCacheService.getMessages(scope.gatewayConfigId, scope.agentId, scope.sessionKey);
+    expect(rows?.map(row => row.turnId)).toEqual(["native-turn", "native-turn", undefined]);
+  });
+
   it.each(["openclaw", "hermes"].flatMap(backend => [true, false].map(known => [backend, known] as const)))(
     "restores the current %s snapshot before network history (known generation: %s)", async (backendKind, known) => {
       const key = "agent:main:main";
@@ -1188,4 +1198,30 @@ it('round-trips participant identity and local-send evidence in connection-scope
   expect(mapped[1].sentLocally).toBe(true);
   expect(mapped[1]).toMatchObject({ cacheRowId: 'usr_100', sendUncertain: true });
   expect(await ChatCacheService.getMessages('participants-b', scope.agentId, scope.sessionKey)).toEqual([]);
+});
+
+
+it('confirmed Reset deletes every old cache generation after an in-flight write while preserving Saved copy and other sessions', async () => {
+  const scope = { gatewayConfigId: 'reset-connection', agentId: 'main', sessionKey: 'same-key' };
+  const messages = [makeMsg(), makeMsg({ id: 'reply', role: 'assistant', text: 'saved reply' })];
+  await ChatCacheService.saveMessages({ ...scope, sessionId: 'older-native' }, messages);
+  await ChatCacheService.saveMessages({ ...scope, sessionKey: 'other-key' }, messages);
+  const saved = await ConversationArchives.save({ connectionId: scope.gatewayConfigId, agentId: scope.agentId,
+    sessionKey: scope.sessionKey }, { title: 'Saved copy', messages: [{ role: 'assistant', text: 'saved reply', attachments: [] }] });
+  const savedBytes = store['clawket.conversation-archives.v1'];
+  const writing = deferred<void>();
+  const entered = deferred<void>();
+  (AsyncStorage.multiSet as jest.Mock).mockImplementationOnce(async (entries: Array<[string, string]>) => {
+    entered.resolve(); await writing.promise;
+    for (const [key, value] of entries) store[key] = value;
+  });
+  const oldWrite = ChatCacheService.saveMessages({ ...scope, sessionId: 'old-native' }, messages);
+  await entered.promise;
+  const adapter = { connection: { id: scope.gatewayConfigId }, resetSession: jest.fn().mockResolvedValue(undefined) };
+  const reset = resetSessionHistory(adapter as any, scope.agentId, scope.sessionKey);
+  writing.resolve(); await oldWrite; await reset;
+  expect(await ChatCacheService.getSessionLineage(scope.gatewayConfigId, scope.agentId, scope.sessionKey)).toEqual([]);
+  expect(await ChatCacheService.getMessages(scope.gatewayConfigId, scope.agentId, 'other-key')).toHaveLength(2);
+  expect(store['clawket.conversation-archives.v1']).toBe(savedBytes);
+  expect((await ConversationArchives.list()).some(entry => entry.id === saved.id)).toBe(true);
 });
