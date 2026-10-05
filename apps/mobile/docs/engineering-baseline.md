@@ -38,6 +38,12 @@ The repository required gate is intentionally broader than the focused commands 
 
 Composer attachment ownership uses the route's connection/Agent/session, with a new in-memory generation on each scope entry. The mounted controller's real image-picker and paste consumers are covered in `src/chat/useChatController.contract.test.ts`: selected trays retire on session changes; gallery/recent/camera/file/paste completions and retained setters cannot survive A→B→A. Same-scope adapter reconnect and history reload retain the tray. These deferred-consumer tests do not prove native picker timing or physical navigation acceptance. Text draft persistence, held outbox recovery, encoding and backend wire contracts remain independent.
 
+## History prepend stage characterization
+
+`src/screens/Thread/historyPrependNativeStages.test.tsx` connects the real `ThreadView` and its history anchor to the installed FlashList source. Its host facade separates four inputs: an early Shadow content-size report; application of the real requested offset against the old child's maximum; independent child mounting; and a later native scroll event through the SDK. Host cell measurement uses fixed synthetic message/date heights, and ignores unrelated header/composer intrinsic geometry. It records both staged React holder coordinates and the independently applied child coordinates; neither represents Native paint.
+
+The late event does not directly invoke restore. If the real SDK schedules another commit, `ThreadView`'s real commit callback may retry; the test retains that outcome instead of inventing a size callback or target ACK. Separate controls place the child before the command, supply an explicitly additional real size callback after a clamp, and deliver an old command event after a fresh reader displacement. Fake timers only settle existing SDK entry/ignore/reveal timers before the stages; no delay is treated as a mount acknowledgement. This is a consumer contract characterization, not a production fix or a determination of the 063 phone jump's cause.
+
 ## Native synchronization
 
 After changing Expo, React Native, an Expo module, or another native dependency:

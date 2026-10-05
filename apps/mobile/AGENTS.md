@@ -270,6 +270,8 @@ Store packaging follows the root `AGENTS.md` Release Authorization Rule; the com
 
 ## Testing and completion
 
+History stage characterization keeps the real `ThreadView` callbacks, `useHistoryScrollAnchor` and installed FlashList RecyclerView/controller/manager/layout/tracker together. Model Shadow size reports, actual child mounting, command application and native event delivery independently; never synthesize a size/scroll callback just because the modeled child mounted. SDK commits caused by real scroll delivery may themselves retry through the application's commit callback. These host coordinates and React cells are not paint evidence or proof of the cause of a phone recording; see `docs/engineering-baseline.md`.
+
 Use the narrowest useful test while iterating, one file at a time in-band. The milestone gate below runs in CI; locally it runs only when the owner asks, never at full parallelism (root Local Test Resource Rule). Mobile changes normally require:
 
 1. `npm run mobile:typecheck`
