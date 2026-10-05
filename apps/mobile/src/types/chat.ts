@@ -62,6 +62,8 @@ export type UiMessage = {
   renderKey?: string;
   /** Completed live rows retain their order until the same turn is reconciled. */
   presentationRunId?: string;
+  /** Backend-authored execution group; distinct from the local presentation run ID. */
+  turnId?: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   attribution?: MessageAttribution;
   sentLocally?: true;
@@ -85,6 +87,8 @@ export type UiMessage = {
   usage?: MessageUsage;
   toolName?: string;
   toolStatus?: 'running' | 'success' | 'error' | 'unknown';
+  /** Explicit adapter state; unknown is not the legacy missing-result hint. */
+  toolStatusReported?: true;
   toolSummary?: string;
   toolArgs?: string;
   toolDetail?: string;

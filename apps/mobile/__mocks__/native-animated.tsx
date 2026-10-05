@@ -17,4 +17,10 @@ export const Animated = {
   loop: jest.fn(() => ({ start: jest.fn(), stop: jest.fn() })),
 };
 
-export const Easing = { linear: (value: number) => value };
+export const Easing = {
+  linear: (value: number) => value,
+  quad: (value: number) => value * value,
+  inOut: (easing: (value: number) => number) => (value: number) => (
+    value < 0.5 ? easing(value * 2) / 2 : 1 - easing((1 - value) * 2) / 2
+  ),
+};

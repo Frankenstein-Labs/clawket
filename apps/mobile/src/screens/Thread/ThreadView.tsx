@@ -1,6 +1,7 @@
 import { ArtifactProvider, ArtifactAttachments } from '../../components/chat/ArtifactAttachments';
 import { AndroidChatKeyboardAvoider } from '../../components/chat/AndroidChatKeyboardAvoider';
 import { isIncomingParticipant, messageSenderLabel } from '../../chat/messageAttribution';
+import { originalRunUserIndex, validTurnIdentity, type RunWorkIdentity } from '../../chat/turnIdentity';
 import { localizeAgentSystemNotice } from '../../chat/agentSystemNotice';
 import { ParticipantIdentity } from '../../components/chat/ParticipantIdentity';
 import { useWorkspaceLayout } from '../../navigation/workspace-context';
@@ -9,7 +10,11 @@ import { useReplyEntranceDelay } from '../../chat/useReplyEntranceDelay';
 import { messageTextRaise } from '../../chat/textCentering';
 import { SessionPreviewNotice, SessionPreviewFooter } from './components/SessionPreviewNotice';
 import { useUiThreadFollow, type UiThreadFollow } from './useUiThreadFollow';
+import { useChatGeometryQa } from './useChatGeometryQa';
+import { ChatGeometryQaCell } from './ChatGeometryQaCell';
+import type { ViewportQaObserver } from './chatViewportQa';
 import { useOlderHistoryPaging } from './useOlderHistoryPaging';
+import { useHistoryScrollAnchor } from './useHistoryScrollAnchor';
 import { useTranslation } from 'react-i18next';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -227,6 +232,7 @@ const TIMELINE_REVEAL_TIMING = { duration: Motion.duration.normal, easing: Easin
 const EMPTY_HINT_EXIT = FadeOut.duration(Motion.duration.fast);
 const getTimelineRowKey = (row: ThreadTimelineRow): string => row.key;
 const getTimelineRowType = (row: ThreadTimelineRow): string => row.type;
+const HISTORY_ANCHOR_POSITION = { disabled: true } as const;
 
 function areMessageStatusesEqual(
   left: ReadonlyMap<string, UserMessageStatus>,
@@ -352,6 +358,8 @@ export type ThreadViewProps = Readonly<{
   keyboardVisible?: boolean;
   readOnlyFooter?: React.ReactNode;
   isRunning: boolean;
+  /** Scoped native execution evidence: current-run guidance cannot restart work presentation. */
+  runWorkIdentity?: RunWorkIdentity;
   /** A local send is leaving the device; the composer already shows Stop (A+ motion: send turns into stop). */
   sendInFlight?: boolean;
   canSend: boolean;
@@ -359,6 +367,8 @@ export type ThreadViewProps = Readonly<{
   historyLoadMoreError?: boolean;
   historyPagingBlocked?: boolean;
   historyScope?: string;
+  /** Focused active route only; development metadata sampling defaults off. */
+  qaGeometryActive?: boolean;
   onRetryHistory?: () => void | Promise<unknown>;
   topInset?: number;
   bottomInset?: number;
@@ -419,6 +429,7 @@ export type ThreadViewProps = Readonly<{
   onSelectSlashCommand?: (command: SlashCommand) => void;
   onDismissSlashSuggestions?: () => void;
   onReviewRuntimeSettings?: () => void;
+  permissionsNeedConfirmation?: boolean;
   onResolveApproval?: (
     approvalId: string,
     decision: 'allow-once' | 'allow-always' | 'deny' | 'approve' | 'reject',
@@ -491,12 +502,14 @@ export function ThreadView({
   keyboardVisible = false,
   readOnlyFooter,
   isRunning,
+  runWorkIdentity,
   sendInFlight = false,
   canSend,
   loadingMoreHistory = false,
   historyLoadMoreError = false,
   historyPagingBlocked = false,
   historyScope,
+  qaGeometryActive = false,
   onRetryHistory,
   topInset = 0,
   bottomInset = 0,
@@ -541,6 +554,7 @@ export function ThreadView({
   onSelectSlashCommand,
   onDismissSlashSuggestions,
   onReviewRuntimeSettings,
+  permissionsNeedConfirmation,
   onResolveApproval,
   testID = 'thread-screen',
 }: ThreadViewProps): React.JSX.Element {
@@ -682,6 +696,23 @@ export function ThreadView({
     const timer = setInterval(() => setCalendarDay(localDayNumber(Date.now())), 60_000);
     return () => clearInterval(timer);
   }, []);
+  // Native guidance stays inside its original execution, including partial pages.
+  const displayScope = JSON.stringify([historyScope ?? '', agentId, sessionKey]);
+  const connectionDown = state.kind === 'offline' || state.kind === 'reconnecting';
+  const reportedWork = runWorkIdentity && runWorkIdentity.sessionKey === sessionKey && validTurnIdentity(runWorkIdentity.turnId)
+    && validTurnIdentity(runWorkIdentity.inputMessageId) ? runWorkIdentity : undefined;
+  const heldWorkRef = useRef<{ displayScope: string; identity: RunWorkIdentity } | null>(null);
+  if (heldWorkRef.current?.displayScope !== displayScope || (!isRunning && !connectionDown)) heldWorkRef.current = null;
+  if (isRunning && reportedWork) heldWorkRef.current = { displayScope, identity: reportedWork };
+  const activeWork = reportedWork ?? (!isRunning && connectionDown ? heldWorkRef.current?.identity : undefined);
+  const originalInputIndex = activeWork
+    ? originalRunUserIndex(messages, activeWork.turnId, activeWork.inputMessageId, activeWork.inputMessageKey) : -1;
+  const originalInput = originalInputIndex >= 0 ? messages[originalInputIndex] : undefined;
+  const nativeWorkKey = activeWork ? JSON.stringify([activeWork.runId, activeWork.turnId, activeWork.inputMessageId]) : null;
+  const workScope = activeWork?.scope ?? displayScope;
+  // An actionable approval remains visible even when its run membership is unreported.
+  const attentionApproval = messages.find(message => message.approval?.kind !== 'pair'
+    && isActionableApproval(message, capabilities, Date.now()));
   // A reply with no words yet draws nothing: the header and the work dock say
   // the Agent is working (owner decision 2026-10-05: no pills for it).
   const timelineMessages = useMemo(
@@ -717,12 +748,19 @@ export function ThreadView({
   // echo keeps the prompt's row identity but takes the computer's clock, and
   // the dock counts with the phone's (device check 2026-10-01: 10 s jumped
   // to 20 s mid-run).
-  const newestUser = newestUserIndex >= 0 ? messages[newestUserIndex]! : undefined;
+  const newestUser = activeWork ? originalInput : newestUserIndex >= 0 ? messages[newestUserIndex]! : undefined;
   const newestUserKey = newestUser ? newestUser.renderKey ?? newestUser.id : null;
-  const runStartRef = useRef<{ key: string; startedAt: number | undefined } | null>(null);
-  if (newestUserKey === null) runStartRef.current = null;
-  else if (runStartRef.current?.key !== newestUserKey || runStartRef.current.startedAt === undefined) {
-    runStartRef.current = { key: newestUserKey, startedAt: newestUser!.timestampMs };
+  const clockKey = nativeWorkKey ?? newestUserKey;
+  const runStartRef = useRef<{ key: string; scope: object | string; displayScope: string; startedAt: number | undefined } | null>(null);
+  if (runStartRef.current?.displayScope !== displayScope) runStartRef.current = null;
+  if (!(connectionDown && !activeWork)) {
+    if (clockKey === null) runStartRef.current = null;
+    else if (runStartRef.current?.key !== clockKey || runStartRef.current.scope !== workScope || runStartRef.current.startedAt === undefined) {
+      const prior = runStartRef.current;
+      const upgradingOriginal = activeWork && newestUserKey && prior?.scope === displayScope && prior.key === newestUserKey;
+      runStartRef.current = { key: clockKey, scope: workScope, displayScope,
+        startedAt: upgradingOriginal ? prior.startedAt : activeWork?.startedAt ?? newestUser?.timestampMs };
+    }
   }
   const runStartedAt = runStartRef.current?.startedAt;
   // The work dock (tool process design C, owner decisions 2026-10-02 and
@@ -732,37 +770,46 @@ export function ThreadView({
   // for a second without a word, after the sent message has landed; a quick
   // reply never raises it. Once up it stays until the turn ends. An approval
   // raises it at once; a question takes its place above the composer instead.
-  const liveWork = useMemo(() => collectLiveTurnWork(messages), [messages]);
+  const liveWork = useMemo(() => collectLiveTurnWork(messages, activeWork), [messages, activeWork]);
   const liveTurnKey = useMemo(() => {
+    if (nativeWorkKey) return nativeWorkKey;
     const prompt = messages.find(opensTurn);
     return prompt ? renderKeyOf(prompt) : null;
-  }, [messages]);
-  const liveTurnSpoke = useMemo(() => liveTurnHasWords(messages), [messages]);
-  const approvalWaiting = capabilities.execApproval && Boolean(liveWork.pendingApproval);
-  // A dropped connection clears the run until it is back. The turn that was
-  // running stays open meanwhile: its steps stay out of the conversation and
-  // the dock says the connection dropped.
-  const connectionDown = state.kind === 'offline' || state.kind === 'reconnecting';
-  const runningTurnRef = useRef<{ session: string | null | undefined; turn: string | null } | null>(null);
-  if (isRunning) runningTurnRef.current = { session: sessionKey, turn: liveTurnKey };
-  else if (!connectionDown || runningTurnRef.current?.session !== sessionKey) runningTurnRef.current = null;
-  const heldOffline = !isRunning && connectionDown && runningTurnRef.current !== null && runningTurnRef.current.turn === liveTurnKey;
+  }, [messages, nativeWorkKey]);
+  const liveTurnSpoke = useMemo(() => liveTurnHasWords(messages, activeWork), [messages, activeWork]);
+  const approvalWaiting = Boolean(attentionApproval);
+  type WorkPresentation = { turn: string | null; scope: object | string; displayScope: string };
+  const samePresentation = (record: WorkPresentation) => record.displayScope === displayScope
+    && record.scope === workScope && record.turn === liveTurnKey;
+  const upgradingOriginal = (record: WorkPresentation) => Boolean(activeWork && originalInput
+    && record.displayScope === displayScope && record.scope === displayScope && record.turn === renderKeyOf(originalInput));
+  const currentPresentation: WorkPresentation = { turn: liveTurnKey, scope: workScope, displayScope };
+  // A dropped connection clears the controller's run, but its captured execution
+  // remains open until this scope reconnects or is replaced.
+  const runningTurnRef = useRef<WorkPresentation | null>(null);
+  if (isRunning) runningTurnRef.current = currentPresentation;
+  else if (!connectionDown || (runningTurnRef.current && !samePresentation(runningTurnRef.current))) runningTurnRef.current = null;
+  const heldOffline = !isRunning && connectionDown && runningTurnRef.current !== null;
   const liveTurnOpen = isRunning || heldOffline;
-  // Thinking counts from the turn's start, or from when this view first saw
-  // it run if that is earlier (the prompt may carry the computer's clock).
-  const runSeenRef = useRef<{ turn: string | null; at: number } | null>(null);
+  const runSeenRef = useRef<(WorkPresentation & { at: number }) | null>(null);
   if (!liveTurnOpen) runSeenRef.current = null;
-  else if (!runSeenRef.current || runSeenRef.current.turn !== liveTurnKey) runSeenRef.current = { turn: liveTurnKey, at: Date.now() };
+  else if (!runSeenRef.current || !samePresentation(runSeenRef.current)) {
+    const prior = runSeenRef.current;
+    runSeenRef.current = { ...currentPresentation, at: prior && upgradingOriginal(prior) ? prior.at : Date.now() };
+  }
   const thinkingDueAt = runSeenRef.current
     ? Math.min(runSeenRef.current.at, runStartedAt ?? Number.POSITIVE_INFINITY) + WORK_DOCK_GRACE_MS
     : undefined;
-  const dockRaisedRef = useRef<{ turn: string | null } | null>(null);
-  if (!liveTurnOpen || (dockRaisedRef.current && dockRaisedRef.current.turn !== liveTurnKey)) dockRaisedRef.current = null;
+  const dockRaisedRef = useRef<WorkPresentation | null>(null);
+  if (!liveTurnOpen) dockRaisedRef.current = null;
+  else if (dockRaisedRef.current && !samePresentation(dockRaisedRef.current)) {
+    dockRaisedRef.current = upgradingOriginal(dockRaisedRef.current) ? currentPresentation : null;
+  }
   const thinkingLong = thinkingDueAt !== undefined && Date.now() >= thinkingDueAt
     && !liveTurnSpoke && !awaitingSendAcknowledgement;
   if (liveTurnOpen && !dockRaisedRef.current && (approvalWaiting || heldOffline
     || (!replyEntrance.holding && (liveWork.steps.length > 0 || thinkingLong)))) {
-    dockRaisedRef.current = { turn: liveTurnKey };
+    dockRaisedRef.current = currentPresentation;
   }
   // Wake when a turn that is still thinking reaches the second.
   const thinkingWakeAt = liveTurnOpen && !dockRaisedRef.current && !liveTurnSpoke && thinkingDueAt !== undefined
@@ -776,13 +823,14 @@ export function ThreadView({
   const dockVisible = !locked && !sessionPreview && !questionPending && liveTurnOpen && dockRaisedRef.current !== null;
   const dockShown = dockVisible && !showSlashSuggestions && !composerExpanded;
   const dockPhase = resolveWorkDockPhase({
-    work: approvalWaiting ? liveWork : { ...liveWork, pendingApproval: undefined },
+    work: { ...liveWork, pendingApproval: attentionApproval },
     messages,
     offline: heldOffline,
+    active: activeWork,
   });
   // Tool steps leave the conversation: a finished turn leaves a receipt on its
   // last reply (or in a bubble of its own), the open turn's steps live in the work dock.
-  const foldedTurns = useMemo(() => foldTurnSteps(timelineMessages, liveTurnOpen), [liveTurnOpen, timelineMessages]);
+  const foldedTurns = useMemo(() => foldTurnSteps(timelineMessages, liveTurnOpen, activeWork), [liveTurnOpen, timelineMessages, activeWork]);
   const rhythmRows = useMemo(() => withThreadRhythm(groupThreadRuns(placeTurnReceipts(buildThreadTimelineItems({
     messages: foldedTurns.messages,
     runs: runCards,
@@ -801,6 +849,7 @@ export function ThreadView({
   reduceMotionRef.current = reduceMotion;
   const followNewMessagesRef = useRef(true);
   const historyPagingBusyRef = useRef(false);
+  const historyDragRef = useRef<(() => void) | null>(null);
   const previewWasVisible = useRef(Boolean(sessionPreview));
   if (previewWasVisible.current && !sessionPreview) followNewMessagesRef.current = false;
   previewWasVisible.current = Boolean(sessionPreview);
@@ -814,6 +863,20 @@ export function ThreadView({
   const distanceFromBottomRef = useRef(0);
   const scrollMetricsRef = useRef({ height: 0, viewport: 0, offset: 0 });
   const timelineRef = useRef<FlashListRef<ThreadTimelineRow>>(null);
+  const qaObserverRef = useRef<{ scope: string; observe: ViewportQaObserver } | null>(null);
+  const qaScope = historyScope ?? sessionKey ?? '';
+  const observeViewport = useCallback<ViewportQaObserver>((value, command) => {
+    const current = qaObserverRef.current;
+    return current?.scope === qaScope ? current.observe(value, command) : null;
+  }, [qaScope]);
+  const historyAnchor = useHistoryScrollAnchor(historyScope ?? sessionKey ?? '', timelineRef, timelineItems,
+    Platform.OS === 'web' ? 500 : 250, observeViewport);
+  // Observation-only distance changes must not create a new control callback.
+  const qaDrawDistanceRef = useRef(historyAnchor.drawDistance);
+  qaDrawDistanceRef.current = historyAnchor.drawDistance;
+  const { restore: restoreHistoryAnchor, readerScrolled: updateHistoryAnchor,
+    beginDrag: beginHistoryDrag, capture: captureHistoryAnchor, release: releaseHistoryAnchor,
+    isActive: historyAnchorActive, isCorrectionPending: historyCorrectionPending } = historyAnchor;
   // Placement state belongs to one list instance: another session mounts a new
   // list whose layout commits run before this view's effects, and they must
   // never act on the previous list's measurements.
@@ -876,9 +939,10 @@ export function ThreadView({
   const snapNatively = useCallback(() => {
     const list = timelineRef.current;
     const native = list?.getNativeScrollRef?.();
+    observeViewport({ kind: 'end_command' });
     if (native) native.scrollToEnd({ animated: false });
     else list?.scrollToEnd({ animated: false });
-  }, []);
+  }, [observeViewport]);
   const uiFollow = useUiThreadFollow({
     onSettled: (generation) => {
       if (generation === followGlideGenerationRef.current) clearFollowGlide();
@@ -889,6 +953,19 @@ export function ThreadView({
       if (followNewMessagesRef.current && !readerScrollingRef.current) snapNatively();
     },
   });
+  const qaGeometry = useChatGeometryQa({
+    active: qaGeometryActive,
+    scope: historyScope ?? sessionKey ?? '',
+    list: timelineRef,
+    rows: timelineItems,
+    raw: uiFollow.qaGeometry,
+    reading: () => ({ ...scrollMetricsRef.current,
+      readerScrolling: readerScrollingRef.current,
+      bottomFollowing: followNewMessagesRef.current,
+      historyPaging: historyPagingBusyRef.current,
+    }),
+  });
+  qaObserverRef.current = { scope: qaScope, observe: qaGeometry.observe };
   // Follow corrections go straight to the native scroll view: FlashList's own
   // scrollToEnd waits a macrotask, leaving grown content clipped under the
   // composer for a frame or two before it jumps into view.
@@ -905,6 +982,7 @@ export function ThreadView({
         uiThreadFollow ? FOLLOW_GLIDE_FALLBACK_MS : FOLLOW_GLIDE_SETTLE_MS,
       );
       if (uiThreadFollow) {
+        observeViewport({ kind: 'follow_glide' });
         uiThreadFollow.glide(followGlideGenerationRef.current, scrollMetricsRef.current.offset);
         return;
       }
@@ -913,14 +991,16 @@ export function ThreadView({
       // The glide scrolls on the UI thread; ending it there lands this jump
       // after its last step instead of under it.
       if (uiThreadFollow) {
+        observeViewport({ kind: 'follow_snap' });
         uiThreadFollow.snap();
         return;
       }
     }
     const native = list?.getNativeScrollRef?.();
+    observeViewport({ kind: 'end_command' });
     if (native) native.scrollToEnd({ animated });
     else list?.scrollToEnd({ animated });
-  }, [clearFollowGlide, endFollowGlide]);
+  }, [clearFollowGlide, endFollowGlide, observeViewport]);
   const snapToEnd = useCallback(() => followToEnd(false), [followToEnd]);
   const scheduleBottomFollow = useCallback((viewportChanged: boolean) => {
     // FlashList owns initial placement. Size reports from native views
@@ -946,6 +1026,15 @@ export function ThreadView({
   const handleCommittedLayout = useCallback(() => {
     const list = timelineRef.current;
     if (!list) return;
+    observeViewport({ kind: 'layout_begin', windowEpoch: historyAnchor.windowCommitEpoch,
+      drawDistance: qaDrawDistanceRef.current });
+    // Preserve a surviving content row before considering end-follow corrections.
+    if (!followNewMessagesRef.current) {
+      const { height, viewport } = scrollMetricsRef.current;
+      restoreHistoryAnchor({ nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined,
+        nativeOffset: viewport > 0 ? scrollMetricsRef.current.offset : undefined, nativeHeight: height, viewport,
+        windowCommitEpoch: historyAnchor.windowCommitEpoch });
+    }
     let content: number;
     let viewport: number;
     try {
@@ -954,6 +1043,8 @@ export function ThreadView({
     } catch {
       return;
     }
+    observeViewport({ kind: 'layout_commit', layoutHeight: content, layoutViewportHeight: viewport,
+      windowEpoch: historyAnchor.windowCommitEpoch, drawDistance: qaDrawDistanceRef.current });
     const previous = committedLayoutRef.current.list === list ? committedLayoutRef.current : null;
     if (previous?.content === content && previous.viewport === viewport) return;
     const { tailKey, rows } = committedRowsRef.current;
@@ -978,7 +1069,8 @@ export function ThreadView({
     const withinBudget = Math.abs(growth) <= viewport * FOLLOW_GLIDE_MAX_VIEWPORT_RATIO;
     const grew = growth > 0 && viewport === previous.viewport && (appended || uiFollowRef.current !== null);
     followToEnd(withinBudget && (followGlideRef.current || grew));
-  }, [cancelBottomFollow, followToEnd, releaseComposerHold, timelineLoaded]);
+  }, [cancelBottomFollow, followToEnd, historyAnchor.windowCommitEpoch,
+    observeViewport, releaseComposerHold, restoreHistoryAnchor, timelineLoaded]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollButtonProgress = useSharedValue(0);
   useEffect(() => {
@@ -992,6 +1084,7 @@ export function ThreadView({
     transform: [{ translateY: reduceMotion ? 0 : Space.sm * (1 - scrollButtonProgress.value) }],
   }));
   const scrollToBottom = useCallback(() => {
+    releaseHistoryAnchor();
     // A glide in flight is already on its way to the end.
     const far = distanceFromBottomRef.current > Space.lg && !followGlideRef.current;
     cancelReaderSettle();
@@ -1006,8 +1099,9 @@ export function ThreadView({
     endFollowGlide();
     returningToBottomRef.current = animated;
     followNewMessagesRef.current = !animated;
+    observeViewport({ kind: 'end_command' });
     timelineRef.current?.scrollToEnd({ animated });
-  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide, reduceMotion, timelineLoaded]);
+  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide, observeViewport, reduceMotion, releaseHistoryAnchor, timelineLoaded]);
   const refreshScrollButton = useCallback(() => {
     const { height, viewport, offset } = scrollMetricsRef.current;
     if (viewport <= 0) return;
@@ -1025,23 +1119,30 @@ export function ThreadView({
       offset: nativeEvent.contentOffset.y,
     };
     scrollMetricsRef.current = metrics;
-    refreshScrollButton();
+    observeViewport({ kind: 'reader_scroll', offset: metrics.offset, contentHeight: metrics.height, viewportHeight: metrics.viewport });
+    // A queued compensation/clamp event supplies native sizing but cannot turn
+    // the reader's old-height maximum into an intent to follow the bottom.
+    if (!updateHistoryAnchor(metrics.offset, readerScrollingRef.current, metrics.height, metrics.viewport)) refreshScrollButton();
     // Rows inserted above a short top-anchored list (older history, a preview
     // unlocked) make the anchor correction push the offset past the end; iOS
     // keeps it there as blank space until the next touch. A reader's own
     // bounce is left to the native view.
     const overscroll = metrics.offset - Math.max(0, metrics.height - metrics.viewport);
-    if (overscroll > 1 && metrics.viewport > 0 && !readerScrollingRef.current
+    if (overscroll > 1 && metrics.viewport > 0 && !readerScrollingRef.current && !historyAnchorActive()
       && !returningToBottomRef.current && !followGlideRef.current) {
       snapToEnd();
     }
-  }, [refreshScrollButton, snapToEnd]);
+  }, [historyAnchorActive, observeViewport, refreshScrollButton, snapToEnd, updateHistoryAnchor]);
   const settleReaderScroll = useCallback(() => {
     cancelReaderSettle();
     if (!readerScrollingRef.current) return;
     readerScrollingRef.current = false;
-    followNewMessagesRef.current = !historyPagingBusyRef.current && distanceFromBottomRef.current <= Space.lg;
-  }, [cancelReaderSettle]);
+    // A prepend command clipped to the old native maximum looks like the end
+    // until native sizing catches up; it cannot release the reader's anchor.
+    followNewMessagesRef.current = !historyPagingBusyRef.current && !historyCorrectionPending()
+      && distanceFromBottomRef.current <= Space.lg;
+    if (followNewMessagesRef.current) releaseHistoryAnchor();
+  }, [cancelReaderSettle, historyCorrectionPending, releaseHistoryAnchor]);
   const finishScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     cancelReaderSettle();
     if (returningToBottomRef.current) {
@@ -1065,8 +1166,13 @@ export function ThreadView({
     const list = timelineRef.current;
     loadedTimelineRef.current = list;
     uiFollowRef.current = Platform.OS === 'android' && uiFollow.bind(list?.getNativeScrollRef?.()) ? uiFollow : null;
-  }, [uiFollow]);
-  const handleScrollBeginDrag = useCallback(() => {
+    observeViewport({ kind: 'list_load' });
+  }, [observeViewport, uiFollow]);
+  const handleScrollBeginDrag = useCallback((event?: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const native = event?.nativeEvent;
+    observeViewport({ kind: 'drag_begin', offset: native?.contentOffset.y, contentHeight: native?.contentSize.height });
+    beginHistoryDrag(historyPagingBusyRef.current, native ? { offset: native.contentOffset.y, height: native.contentSize.height } : undefined);
+    historyDragRef.current?.();
     // The reader's finger takes over any glide in flight.
     cancelReaderSettle();
     cancelBottomFollow();
@@ -1074,22 +1180,43 @@ export function ThreadView({
     returningToBottomRef.current = false;
     readerScrollingRef.current = true;
     followNewMessagesRef.current = false;
-  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide]);
+  }, [beginHistoryDrag, cancelBottomFollow, cancelReaderSettle, endFollowGlide, observeViewport]);
   const handleContentSizeChange = useCallback((_width: number, height: number) => {
+    observeViewport({ kind: 'content_size', contentHeight: height });
     const changed = scrollMetricsRef.current.height !== height;
     scrollMetricsRef.current.height = height;
     if (followNewMessagesRef.current) {
       if (changed) scheduleBottomFollow(false);
-    } else refreshScrollButton();
-  }, [refreshScrollButton, scheduleBottomFollow]);
+    } else {
+      // Native size confirms that a previously clamped prepend can now reach
+      // the same planned offset, even without another JS layout commit.
+      const { viewport } = scrollMetricsRef.current;
+      if (changed || historyCorrectionPending()) restoreHistoryAnchor({
+        nativeMaxOffset: viewport > 0 ? Math.max(0, height - viewport) : undefined,
+        nativeOffset: scrollMetricsRef.current.offset,
+        nativeGeometryCommitted: true,
+        nativeHeight: height, viewport,
+      });
+      refreshScrollButton();
+    }
+  }, [historyCorrectionPending, observeViewport, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   const handleTimelineLayout = useCallback((event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
+    observeViewport({ kind: 'viewport_layout', viewportHeight: height });
     const changed = scrollMetricsRef.current.viewport !== height;
     scrollMetricsRef.current.viewport = height;
     if (followNewMessagesRef.current) {
       if (changed) scheduleBottomFollow(true);
-    } else refreshScrollButton();
-  }, [refreshScrollButton, scheduleBottomFollow]);
+    } else {
+      if (changed || historyCorrectionPending()) restoreHistoryAnchor({
+        nativeMaxOffset: height > 0 ? Math.max(0, scrollMetricsRef.current.height - height) : undefined,
+        nativeOffset: scrollMetricsRef.current.offset,
+        nativeGeometryCommitted: true,
+        nativeHeight: scrollMetricsRef.current.height, viewport: height,
+      });
+      refreshScrollButton();
+    }
+  }, [historyCorrectionPending, observeViewport, refreshScrollButton, restoreHistoryAnchor, scheduleBottomFollow]);
   useLayoutEffect(() => {
     cancelReaderSettle();
     cancelBottomFollow();
@@ -1169,11 +1296,11 @@ export function ThreadView({
   useEffect(() => {
     if (!dockShown || dockPhase.kind === 'approval' || dockPhase.kind === 'offline') setWorkPanelOpen(false);
   }, [dockPhase.kind, dockShown]);
-  const liveWorkRef = useRef(liveWork);
-  liveWorkRef.current = liveWork;
+  const attentionApprovalRef = useRef(attentionApproval);
+  attentionApprovalRef.current = attentionApproval;
   // "Review" takes the user to the approval card, wherever they were reading.
   const attendApproval = useCallback(() => {
-    const approval = liveWorkRef.current.pendingApproval;
+    const approval = attentionApprovalRef.current;
     if (!approval) return;
     const rows = timelineItemsRef.current;
     const index = rows.findIndex((row) => row.key === `message:${renderKeyOf(approval)}`);
@@ -1184,8 +1311,9 @@ export function ThreadView({
     }
     cancelBottomFollow();
     followNewMessagesRef.current = false;
+    observeViewport({ kind: 'index_command', anchorIndex: index });
     void timelineRef.current?.scrollToIndex({ index, animated: !reduceMotion, viewPosition: 0.9 });
-  }, [cancelBottomFollow, reduceMotion, scrollToBottom]);
+  }, [cancelBottomFollow, observeViewport, reduceMotion, scrollToBottom]);
   // The row renderer reads only stable values, so a streamed chunk that changes
   // one row does not hand every visible cell a new renderer.
   const hasMessageActions = Boolean(messageActions);
@@ -1299,6 +1427,11 @@ export function ThreadView({
       isRunEntrancePending,
     ],
   );
+  const renderObservedMessage = useCallback((info: ListRenderItemInfo<ThreadTimelineRow>) => {
+    const content = renderMessage(info);
+    return qaGeometry.enabled && info.target === 'Cell'
+      ? <ChatGeometryQaCell index={info.index} observe={qaGeometry.cell}>{content}</ChatGeometryQaCell> : content;
+  }, [qaGeometry.cell, qaGeometry.enabled, renderMessage]);
   const timelineContentStyle = useMemo(() => [
     styles.timelineContent,
     { paddingTop: timelineTopClearance, paddingBottom: timelineClearance },
@@ -1327,7 +1460,8 @@ export function ThreadView({
     returningToBottomRef.current = false;
     followNewMessagesRef.current = false;
     historyPagingBusyRef.current = true;
-  }, [cancelBottomFollow, cancelReaderSettle, endFollowGlide]);
+    captureHistoryAnchor();
+  }, [cancelBottomFollow, cancelReaderSettle, captureHistoryAnchor, endFollowGlide]);
   const historyPaging = useOlderHistoryPaging({
     scope: historyScope ?? sessionKey ?? '',
     loading: loadingMoreHistory,
@@ -1338,6 +1472,7 @@ export function ThreadView({
     onReadEarlier: pauseHistoryFollow,
   });
   historyPagingBusyRef.current = historyPaging.loading;
+  historyDragRef.current = historyPaging.beginDrag;
   const canPageHistory = !previewUpgrade && Boolean(onLoadMoreHistory || historyPaging.failed || historyPaging.loading);
   const timelineHeader = useMemo(() => (previewUpgrade ? <SessionPreviewNotice onUpgrade={previewUpgrade} /> : canPageHistory ? (
     <View style={styles.historyControl}>
@@ -1357,17 +1492,21 @@ export function ThreadView({
       />
     </View>
   ) : null), [canPageHistory, copy.loadingHistory, copy.retry, historyPaging.failed, historyPaging.loading, historyPaging.manual, previewUpgrade, styles.historyControl, styles.historyErrorCaption, t, testID]);
-  const historyRefreshControl = useMemo(() => canPageHistory ? (
+  // Android wraps the native scroll view when a RefreshControl is present.
+  // Removing it on the last page replaces that host under the loaded list,
+  // losing its offset and leaving UI-thread listeners bound to the old host.
+  const historyRefreshControl = useMemo(() => canPageHistory || Platform.OS === 'android' ? (
     <RefreshControl
       testID={`${testID}-history-refresh`}
-      refreshing={historyPaging.pulling}
-      onRefresh={historyPaging.pull}
+      enabled={canPageHistory}
+      refreshing={canPageHistory && historyPaging.pulling}
+      onRefresh={canPageHistory ? historyPaging.pull : undefined}
       progressViewOffset={timelineTopClearance}
       tintColor={theme.colors.inkSecondary}
       colors={[theme.colors.inkSecondary]}
       progressBackgroundColor={theme.colors.canvas}
       accessibilityLabel={copy.loadingHistory}
-      accessibilityState={{ busy: historyPaging.pulling }}
+      accessibilityState={{ busy: canPageHistory && historyPaging.pulling }}
     />
   ) : undefined, [canPageHistory, copy.loadingHistory, historyPaging.pull, historyPaging.pulling, theme.colors.canvas, theme.colors.inkSecondary, testID, timelineTopClearance]);
 
@@ -1483,6 +1622,8 @@ export function ThreadView({
                 ref={timelineRef}
                 testID={`${testID}-timeline`}
                 data={timelineItems}
+                historyAnchorActive={historyAnchor.managed}
+                drawDistance={historyAnchor.drawDistance}
                 onLoad={handleTimelineLoad}
                 onCommitLayoutEffect={handleCommittedLayout}
                 onScrollBeginDrag={handleScrollBeginDrag}
@@ -1497,7 +1638,7 @@ export function ThreadView({
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                 keyExtractor={getTimelineRowKey}
-                renderItem={renderMessage}
+                renderItem={qaGeometry.enabled ? renderObservedMessage : renderMessage}
                 contentContainerStyle={timelineContentStyle}
                 onStartReached={!canPageHistory || historyPaging.failed ? undefined : historyPaging.automatic}
                 refreshControl={historyRefreshControl}
@@ -1657,7 +1798,7 @@ export function ThreadView({
             ) : null}
             notice={onReviewRuntimeSettings ? <>{selectedSkill}<Banner
               testID="thread-settings-unconfirmed"
-              message={t('Confirm settings before sending.', { ns: 'chat' })}
+              message={t(permissionsNeedConfirmation ? 'Choose permissions again before sending.' : 'Confirm settings before sending.', { ns: 'chat' })}
               actionLabel={t('Review settings', { ns: 'chat' })}
               onAction={onReviewRuntimeSettings}
             /></> : selectedSkill || (composerExpanded && offline ? (
@@ -1789,7 +1930,7 @@ export function ThreadView({
 type ThreadTimelineListProps = Omit<
   FlashListProps<ThreadTimelineRow>,
   'data' | 'initialScrollIndex' | 'initialScrollIndexParams' | 'maintainVisibleContentPosition'
-> & Readonly<{ data: ReadonlyArray<ThreadTimelineRow> }>;
+> & Readonly<{ data: ReadonlyArray<ThreadTimelineRow>; historyAnchorActive: boolean }>;
 
 /**
  * The timeline list: chronological and top-anchored, so a short conversation
@@ -1801,7 +1942,7 @@ type ThreadTimelineListProps = Omit<
  * never hidden, so a first message shows the moment it is sent.
  */
 const ThreadTimelineList = React.forwardRef(function ThreadTimelineList(
-  { data, onLoad, ...props }: ThreadTimelineListProps,
+  { data, onLoad, historyAnchorActive, ...props }: ThreadTimelineListProps,
   ref: React.ForwardedRef<FlashListRef<ThreadTimelineRow>>,
 ): React.JSX.Element {
   const [initialScrollIndex] = useState(() => (data.length > 0 ? data.length - 1 : undefined));
@@ -1839,6 +1980,7 @@ const ThreadTimelineList = React.forwardRef(function ThreadTimelineList(
       <FlashList
         ref={ref}
         data={data}
+        maintainVisibleContentPosition={historyAnchorActive ? HISTORY_ANCHOR_POSITION : undefined}
         initialScrollIndex={initialScrollIndex}
         initialScrollIndexParams={initialScrollIndex === undefined ? undefined : INITIAL_SCROLL_TO_END}
         onLoad={handleLoad}
@@ -2366,9 +2508,13 @@ function approvalCategoryIcon(
 
 /** An approval the person can still answer is on screen (supported kind, not yet expired). */
 function hasPendingApproval(messages: ReadonlyArray<UiMessage>, capabilities: Capabilities, nowMs: number): boolean {
-  return messages.some(({ approval }) => approval?.status === 'pending'
+  return messages.some((message) => isActionableApproval(message, capabilities, nowMs));
+}
+
+function isActionableApproval({ approval }: UiMessage, capabilities: Capabilities, nowMs: number): boolean {
+  return approval?.status === 'pending'
     && (approval.kind === 'pair' ? capabilities.pairRequests : capabilities.execApproval)
-    && (approval.kind === 'pair' || approval.expiresAtMs === null || approval.expiresAtMs > nowMs));
+    && (approval.kind === 'pair' || approval.expiresAtMs === null || approval.expiresAtMs > nowMs);
 }
 
 function approvalOutcome(
@@ -2623,7 +2769,10 @@ function AssistantBubble({
       joinsNewer={joinsNewer}
     >
       <View>
+        {/* Native Markdown keeps painted text while parsing in the background.
+            A recycled holder must own one stable reply, including its stream. */}
         <EnrichedMarkdownText
+          key={renderKeyOf(message)}
           testID={`thread-markdown-${message.id}`}
           flavor={THREAD_MARKDOWN_FLAVOR}
           markdown={displayText}

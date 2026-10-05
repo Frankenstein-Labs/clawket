@@ -4,7 +4,7 @@ import { validProfileReply } from './profile-reply';
 import { artifactHistoryDisplay, artifactUpdateDisplay } from './artifact-display';
 import type { ArtifactOperations } from '@clawket/agent-protocol';
 import {
-  AdapterError, resolveCapabilities,
+  AdapterError, LocalSendRejectedError, resolveCapabilities,
   type AgentAdapter, type AgentDescriptor, type ConnectionDescriptor, type ConnectionRecord,
   type ConnectionState, type SessionDescriptor, type SessionHistory, type SessionUpdate,
   type AgentQuestion, type PromptStatus, type PromptInput, type ManagementOperations, type ModelSelectionState, type ModelSelectionWriteResult,
@@ -18,6 +18,7 @@ import { bridgeUnavailableDelay } from './bridge-availability';
 import { SessionCatalogConsumer } from './session-catalog';
 import { requiresConnectionAction } from '../recovery-window';
 import type { WebSocketFactory } from '../transports/types';
+import { assertWebSocketFrameWithinLimit, WebSocketFrameTooLargeError } from '../transports/frame-limit';
 
 type Listeners = {
   update: (update: SessionUpdate) => void;
@@ -27,6 +28,22 @@ type Listeners = {
 
 function withNativeModelOrder<T extends ModelSelectionState>(state: T, unencryptedTransport = false): T {
   return { ...state, ...(state.permissions ? { permissions: { ...state.permissions, unencryptedTransport } } : {}), models: state.models.map((model, sortOrder) => ({ ...model, sortOrder })) };
+}
+
+function codexPromptParams(key: string, input: PromptInput): Record<string, unknown> {
+  return { sessionKey: key, ...input, thinkingLevel: input.thinkingLevel === 'off' ? undefined : input.thinkingLevel };
+}
+
+function codexRequest(id: string, method: string, params: Record<string, unknown>): string {
+  const frame = JSON.stringify({ type: 'req', id, method, params });
+  if (method === 'chat.send') {
+    try { assertWebSocketFrameWithinLimit(frame); }
+    catch (error) {
+      if (error instanceof WebSocketFrameTooLargeError) throw new LocalSendRejectedError();
+      throw error;
+    }
+  }
+  return frame;
 }
 
 /** Project-scoped Codex sessions, native history and extension questions over the authenticated Bridge. */
@@ -67,7 +84,7 @@ export class CodexAdapter implements AgentAdapter {
   private previouslyReady = false;
   private connectPromise: Promise<void> | null = null;
   private cancelConnect: (() => void) | null = null;
-  private pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason: Error) => void; cancelTimeout: () => void }>();
+  private pending = new Map<string, { method: string; resolve: (value: unknown) => void; reject: (reason: Error) => void; cancelTimeout: () => void }>();
   private listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { update: new Set(), state: new Set(), sessions: new Set() };
 
   constructor(private readonly record: ConnectionRecord, options: { isFreeSlot?: boolean; webSocketFactory?: WebSocketFactory } = {}) {
@@ -237,11 +254,16 @@ export class CodexAdapter implements AgentAdapter {
     this.sessionCatalog.invalidate();
   }
   loadSession(key: string, options?: { limit?: number; cursor?: string }): Promise<SessionHistory> {
-    return this.rpc<SessionHistory>('chat.history', { sessionKey: key, cursor: options?.cursor }).then(artifactHistoryDisplay);
+    return this.rpc<SessionHistory>('chat.history', { sessionKey: key, cursor: options?.cursor })
+      .then(history => artifactHistoryDisplay({ ...history, pagination: 'cursor' }));
+  }
+  validatePrompt(key: string, input: PromptInput): void {
+    // generateId() produces 32 hex characters. Use the same complete UTF-8 envelope without allocating a request.
+    codexRequest('0'.repeat(32), 'chat.send', codexPromptParams(key, input));
   }
   prompt(key: string, input: PromptInput): Promise<{ runId: string }> {
     if (this.state !== 'ready') throw new AdapterError('bridge_offline', 'Codex Bridge is offline');
-    return this.rpc('chat.send', { sessionKey: key, ...input, thinkingLevel: input.thinkingLevel === 'off' ? undefined : input.thinkingLevel });
+    return this.rpc('chat.send', codexPromptParams(key, input));
   }
   async getPromptStatus(key: string, idempotencyKey: string): Promise<PromptStatus> {
     if (!this.capabilities.promptStatus) return { status: 'unknown' };
@@ -272,9 +294,12 @@ export class CodexAdapter implements AgentAdapter {
     // must never resolve a different request on the same saved connection.
     const id = generateId();
     return new Promise<T>((resolve, reject) => {
+      let frame: string;
+      try { frame = codexRequest(id, method, params); }
+      catch (error) { reject(error); return; }
       const cancelTimeout = scheduleRequestTimeout(this.transport, timeoutMs, () => { this.pending.delete(id); reject(new AdapterError('timeout', 'Codex request timed out')); });
-      this.pending.set(id, { resolve: value => resolve(value as T), reject, cancelTimeout });
-      try { this.transport.send(JSON.stringify({ type: 'req', id, method, params })); }
+      this.pending.set(id, { method, resolve: value => resolve(value as T), reject, cancelTimeout });
+      try { this.transport.send(frame); }
       catch (error) { cancelTimeout(); this.pending.delete(id); reject(error); }
     });
   }
@@ -286,10 +311,19 @@ export class CodexAdapter implements AgentAdapter {
       const pending = this.pending.get(frame.id); if (!pending) return;
       this.pending.delete(frame.id); pending.cancelTimeout();
       if (frame.ok) pending.resolve(frame.payload);
+      else if (pending.method === 'chat.send' && this.capabilities.sessionPermissions
+        && frame.error?.code === 'codex_error'
+        // Both direct-send refusals precede turn dispatch. A settings response
+        // or a later native error event does not establish that send outcome.
+        && (frame.error.message === 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.'
+          || frame.error.message === 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.')) {
+        pending.reject(new AdapterError('server', frame.error.message, 'confirm_permissions'));
+      }
       else pending.reject(new AdapterError(frame.error?.code === 'BRIDGE_UNAVAILABLE' ? 'bridge_offline' : requiresConnectionAction(frame.error) ? 'unauthorized' : 'server', frame.error?.code === 'BRIDGE_UNAVAILABLE' ? 'Codex Bridge is offline. Keep the Bridge running on your computer.' : frame.error?.message ?? 'Codex request failed'));
     } else if (frame.type === 'event' && frame.event === 'codex.update') {
       let update = artifactUpdateDisplay(frame.payload as SessionUpdate);
       if (!update || typeof update.type !== 'string') return;
+      if (update.type === 'history_reconciled') update = { ...update, history: { ...update.history, pagination: 'cursor' } };
       if (update.type === 'session_activity_update') {
         if (!this.activityEnabled) return;
         const checked = sessionActivityUpdate(update); if (!checked) return; update = checked;

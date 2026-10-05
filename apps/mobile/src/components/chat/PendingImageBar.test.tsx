@@ -1,8 +1,63 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
-import { HitSize, IconSize } from '../../theme/tokens';
+import { HitSize, IconSize, Radius, Space } from '../../theme/tokens';
+import { buildTheme } from '../../theme/theme';
+import { builtInAccents } from '../../theme/accents';
 import { PendingImageBar } from './PendingImageBar';
+
+let mockScheme: 'light' | 'dark' = 'light';
+
+/** Resolve this component's fixed corner geometry; host tests do not run native hit testing. */
+function attachmentTargets(view: ReturnType<typeof render>, index: number) {
+  const content = view.queryByTestId(`pending-attachment-image-${index}`)
+    ?? view.getByTestId(`pending-attachment-file-${index}`);
+  let preview = content.parent!;
+  while (typeof preview.props.onPress !== 'function') preview = preview.parent!;
+  let item = preview.parent!;
+  while (StyleSheet.flatten(item.props.style)?.position !== 'relative') item = item.parent!;
+  const tile = StyleSheet.flatten(preview.props.style({ pressed: false }));
+  const wrapper = StyleSheet.flatten(item.props.style);
+  const remove = view.getByTestId(`pending-attachment-remove-${index}`);
+  const target = StyleSheet.flatten(remove.props.style);
+  // A short filename uses minHeight; the document wrapper takes 75% of a 320pt row.
+  const wrapperWidth = wrapper.width === '75%' ? 320 * 0.75 : undefined;
+  const tileWidth = typeof tile.width === 'number' ? tile.width : wrapperWidth! - wrapper.paddingRight;
+  const tileHeight = typeof tile.height === 'number' ? tile.height : tile.minHeight;
+  const parentWidth = wrapperWidth ?? tileWidth + wrapper.paddingRight;
+  const parentHeight = tileHeight + wrapper.paddingTop;
+  const slop = remove.props.hitSlop;
+  const bounds = {
+    left: Math.max(0, parentWidth - target.right - target.width - slop),
+    right: Math.min(parentWidth, parentWidth - target.right + slop),
+    top: Math.max(0, target.top - slop),
+    bottom: Math.min(parentHeight, target.top + target.height + slop),
+  };
+  return {
+    preview,
+    remove,
+    tile,
+    parentWidth,
+    parentHeight,
+    bounds,
+    center: { x: tileWidth / 2, y: wrapper.paddingTop + tileHeight / 2 },
+    removeCenter: {
+      x: parentWidth - target.right - target.width / 2,
+      y: target.top + target.height / 2,
+    },
+  };
+}
+
+function pressAttachmentPoint(
+  targets: ReturnType<typeof attachmentTargets>,
+  point: { x: number; y: number },
+) {
+  const { bounds } = targets;
+  // The absolute remove sibling has zIndex=1 and wins overlapping presses.
+  const hitsRemove = point.x >= bounds.left && point.x <= bounds.right
+    && point.y >= bounds.top && point.y <= bounds.bottom;
+  fireEvent.press(hitsRemove ? targets.remove : targets.preview);
+}
 
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
@@ -46,16 +101,9 @@ jest.mock('lucide-react-native', () => {
 
 jest.mock('../../theme', () => ({
   useAppTheme: () => ({
-    theme: {
-      colors: {
-        line: '#ddd',
-        bad: '#d00',
-        onAccent: '#fff',
-        surface: '#fff',
-        inkSecondary: '#666',
-        inkTertiary: '#999',
-      },
-    },
+    theme: jest.requireActual('../../theme/theme').buildTheme(
+      mockScheme, mockScheme, jest.requireActual('../../theme/accents').builtInAccents.iceBlue,
+    ),
   }),
 }));
 
@@ -63,13 +111,138 @@ jest.mock('./AttachmentMenu', () => {
   const ReactRuntime = require('react');
   const { View } = require('react-native');
   return {
-    AttachmentMenu: ({ children }: { children: React.ReactNode }) => (
-      ReactRuntime.createElement(View, null, children)
+    AttachmentMenu: ({ children, ...props }: { children: React.ReactNode }) => (
+      ReactRuntime.createElement(View, { ...props, testID: 'attachment-menu' }, children)
     ),
   };
 });
 
 describe('PendingImageBar', () => {
+  afterEach(() => { mockScheme = 'light'; });
+
+  it.each(['light', 'dark'] as const)('uses a low-emphasis add control on the %s composer surface', (scheme) => {
+    mockScheme = scheme;
+    const theme = buildTheme(scheme, scheme, builtInAccents.iceBlue);
+    const actions = { onPickImage: jest.fn(), onTakePhoto: jest.fn(), onChooseFile: jest.fn() };
+    const props = { images: [{ uri: 'file://draft.png', mimeType: 'image/png', base64: 'image-data' }],
+      canAddMore: true, onOpenPreview: jest.fn(), onRemove: jest.fn(), ...actions };
+    const view = render(<PendingImageBar {...props} />);
+    const menu = view.getByTestId('attachment-menu');
+    expect(StyleSheet.flatten(menu.props.style).backgroundColor).toBeUndefined();
+    expect(StyleSheet.flatten(view.getByTestId('pending-attachment-add-visual').props.style)).toMatchObject({
+      width: HitSize.md, height: HitSize.md, borderRadius: Radius.card, borderColor: theme.colors.line,
+    });
+    expect(StyleSheet.flatten(view.getByTestId('pending-attachment-add').props.style)).toMatchObject({ width: 56, height: 56 });
+    for (const action of Object.keys(actions) as Array<keyof typeof actions>) {
+      menu.props[action]();
+      expect(actions[action]).toHaveBeenCalledTimes(1);
+    }
+    view.rerender(<PendingImageBar {...props} attachDisabled />);
+    expect(view.getByTestId('attachment-menu').props.disabled).toBe(true);
+    expect(view.getByTestId('pending-attachment-add-visual').children[0]).toHaveProperty('props.color', theme.colors.inkTertiary);
+  });
+
+  it('wraps six previews with separate remove targets and no capacity add control', () => {
+    const onOpenPreview = jest.fn();
+    const onRemove = jest.fn();
+    const view = render(<PendingImageBar
+      images={Array.from({ length: 6 }, (_, index) => ({ uri: `file://draft-${index}.png`, mimeType: 'image/png', base64: 'image-data' }))}
+      canAddMore={false} onOpenPreview={onOpenPreview} onRemove={onRemove}
+      onPickImage={jest.fn()} onTakePhoto={jest.fn()} />);
+    expect(StyleSheet.flatten(view.getByTestId('pending-attachments').props.style)).toMatchObject({
+      flexWrap: 'wrap', gap: Space.md, paddingTop: 0,
+    });
+    for (let index = 0; index < 6; index += 1) {
+      const targets = attachmentTargets(view, index);
+      expect(targets.bounds.left).toBeGreaterThan(targets.center.x);
+      pressAttachmentPoint(targets, targets.center);
+      pressAttachmentPoint(targets, targets.removeCenter);
+    }
+    expect(onOpenPreview.mock.calls).toEqual(Array.from({ length: 6 }, (_, index) => [index]));
+    expect(onRemove.mock.calls).toEqual(Array.from({ length: 6 }, (_, index) => [index]));
+    expect(view.queryByTestId('pending-attachment-add')).toBeNull();
+  });
+  it.each(['image/gif', 'image/png', 'image/jpeg'])(
+    'opens the %s tile at its center instead of removing it',
+    (mimeType) => {
+      const onOpenPreview = jest.fn();
+      const onRemove = jest.fn();
+      const view = render(
+        <PendingImageBar
+          images={[{ uri: 'file://draft-image', mimeType, base64: 'image-data' }]}
+          canAddMore={false}
+          onOpenPreview={onOpenPreview}
+          onRemove={onRemove}
+          onPickImage={jest.fn()}
+          onTakePhoto={jest.fn()}
+        />,
+      );
+      const targets = attachmentTargets(view, 0);
+
+      pressAttachmentPoint(targets, targets.center);
+
+      expect(onOpenPreview).toHaveBeenCalledWith(0);
+      expect(onRemove).not.toHaveBeenCalled();
+      expect(targets.tile).toMatchObject({ width: 56, height: 56 });
+      expect(targets.bounds.left).toBeGreaterThan(targets.center.x);
+      expect(targets.bounds.right).toBeLessThanOrEqual(targets.parentWidth);
+      expect(targets.bounds.bottom).toBeLessThanOrEqual(targets.parentHeight);
+    },
+  );
+
+  it('keeps preview and remove actions scoped to their own attachment', () => {
+    const onOpenPreview = jest.fn();
+    const onRemove = jest.fn();
+    const view = render(
+      <PendingImageBar
+        images={[0, 1].map((index) => ({
+          uri: `file://draft-${index}.png`, mimeType: 'image/png', base64: 'image-data',
+        }))}
+        canAddMore={true}
+        onOpenPreview={onOpenPreview}
+        onRemove={onRemove}
+        onPickImage={jest.fn()}
+        onTakePhoto={jest.fn()}
+      />,
+    );
+    const first = attachmentTargets(view, 0);
+    const second = attachmentTargets(view, 1);
+
+    pressAttachmentPoint(first, first.center);
+    pressAttachmentPoint(second, second.center);
+    pressAttachmentPoint(second, second.removeCenter);
+
+    expect(onOpenPreview.mock.calls).toEqual([[0], [1]]);
+    expect(onRemove.mock.calls).toEqual([[1]]);
+    expect(view.getByTestId('pending-attachment-add')).toBeTruthy();
+  });
+
+  it('keeps the file tile preview separate from its accessible remove control', () => {
+    const onOpenPreview = jest.fn();
+    const onRemove = jest.fn();
+    const view = render(
+      <PendingImageBar
+        images={[{
+          uri: 'file://draft.pdf', mimeType: 'application/pdf', base64: 'pdf-data', fileName: 'draft.pdf',
+        }]}
+        canAddMore={false}
+        onOpenPreview={onOpenPreview}
+        onRemove={onRemove}
+        onPickImage={jest.fn()}
+        onTakePhoto={jest.fn()}
+      />,
+    );
+    const targets = attachmentTargets(view, 0);
+
+    pressAttachmentPoint(targets, targets.center);
+    expect(onOpenPreview.mock.calls).toEqual([[0]]);
+    expect(onRemove).not.toHaveBeenCalled();
+    pressAttachmentPoint(targets, targets.removeCenter);
+    expect(onRemove.mock.calls).toEqual([[0]]);
+    expect(targets.preview.props).toMatchObject({ accessibilityRole: 'button', accessibilityLabel: 'draft.pdf' });
+    expect(targets.remove.props).toMatchObject({ accessibilityRole: 'button', accessibilityLabel: 'Remove' });
+  });
+
   it('classifies a trimmed case-insensitive image MIME as an image preview', () => {
     const view = render(
       <PendingImageBar

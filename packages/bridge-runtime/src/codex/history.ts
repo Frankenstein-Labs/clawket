@@ -38,22 +38,74 @@ export function codexTurnFailure(turn: any): (Pick<ChatMessage, 'id' | 'text' | 
     ...(typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp >= 0 ? { timestampMs: timestamp * 1000 } : {}) };
 }
 
+/** Canonical End always has an action; Begin has null action/results and no status. */
+function completedWebSearch(item: any): boolean {
+  const action = item.action;
+  if (typeof item.query !== 'string' || !action || typeof action !== 'object' || Array.isArray(action)
+    || (item.results !== undefined && item.results !== null && !Array.isArray(item.results))) return false;
+  const optionalString = (value: unknown) => value === undefined || value === null || typeof value === 'string';
+  switch (action.type) {
+    case 'search': return optionalString(action.query) && (action.queries === undefined || action.queries === null
+      || (Array.isArray(action.queries) && action.queries.every((query: unknown) => typeof query === 'string')));
+    case 'openPage': return optionalString(action.url);
+    case 'findInPage': return optionalString(action.url) && optionalString(action.pattern);
+    case 'other': return true;
+    default: return false;
+  }
+}
+
 export function codexTool(item: any): ChatMessage['tool'] | undefined {
   const names: Record<string, string> = { commandExecution: 'exec', fileChange: 'apply_patch', mcpToolCall: item.tool ?? 'MCP', dynamicToolCall: item.tool ?? 'tool', webSearch: 'web_search', collabAgentToolCall: item.tool ?? 'agent', imageView: 'view_image', imageGeneration: 'image_generation' };
   if (!names[item.type]) return undefined;
   const failed = ['failed', 'declined', 'interrupted'].includes(item.status) || (typeof item.exitCode === 'number' && item.exitCode !== 0) || !!item.error;
-  return { callId: item.id, name: names[item.type], status: failed ? 'error' : item.status === 'inProgress' ? 'running' : item.status === 'completed' || item.type === 'webSearch' ? 'success' : 'unknown',
+  // Native ImageView enters canonical history only after its completed event.
+  // Other tools without an execution status still lack outcome evidence.
+  const implicitCompleted = item.status === undefined && (item.type === 'imageView' || (item.type === 'webSearch' && completedWebSearch(item)));
+  const result = item.type === 'webSearch' && Array.isArray(item.results) && item.results.length > 0 ? item.results : item.result;
+  return { callId: item.id, name: names[item.type], statusReported: true, status: failed ? 'error' : item.status === 'inProgress' ? 'running' : item.status === 'completed' || implicitCompleted ? 'success' : 'unknown',
     input: item.type === 'commandExecution' ? { command: item.command, cwd: item.cwd } : item.type === 'fileChange' ? { changes: item.changes } : item.arguments ?? { query: item.query, path: item.path },
     output: item.type === 'imageGeneration' ? (item.status === 'completed' && !item.failure ? 'Image generated' : '')
-      : String(item.aggregatedOutput ?? (item.result ? JSON.stringify(item.result) : item.error ? JSON.stringify(item.error) : item.type === 'fileChange' ? JSON.stringify(item.changes) : '')).slice(0, 32000) };
+      : String(item.aggregatedOutput ?? (result ? JSON.stringify(result) : item.error ? JSON.stringify(item.error) : item.type === 'fileChange' ? JSON.stringify(item.changes) : '')).slice(0, 32000) };
 }
-export function codexMessages(turns: any[]): ChatMessage[] {
+
+/** Native turn clocks are Unix seconds; only a confirmed successful terminal turn dates its reply. */
+export function codexReplyTimestamp(turn: any): number | undefined {
+  const completed = turn?.completedAt, started = turn?.startedAt;
+  if (turn?.status !== 'completed' || !Number.isSafeInteger(completed) || completed <= 0
+    || !Number.isFinite(new Date(completed * 1000).getTime())
+    || (started != null && (!Number.isSafeInteger(started) || started < 0 || completed < started))) return undefined;
+  return completed * 1000;
+}
+
+/** Mirrors native last_agent_message, retaining phase-less provider compatibility. */
+export function codexFinalReplyId(items: any[], allowLegacy = true): string | undefined {
+  let id: string | undefined;
+  for (const item of items) if (item.type === 'agentMessage' && typeof item.id === 'string'
+    && typeof item.text === 'string' && item.text.trim()
+    && (item.phase === 'final_answer' || (allowLegacy && item.phase == null))) id = item.id;
+  return id;
+}
+
+/** Native millisecond item clocks are optional; malformed or reversed pairs are not evidence. */
+export function codexItemTimestamp(started: unknown, completed?: unknown): number | undefined {
+  const valid = (value: unknown): value is number => typeof value === 'number'
+    && Number.isSafeInteger(value) && value > 0 && value <= 8.64e15;
+  if ((started != null && !valid(started)) || (completed != null && !valid(completed))) return undefined;
+  if (valid(started) && valid(completed) && completed < started) return undefined;
+  return valid(started) ? started : valid(completed) ? completed : undefined;
+}
+
+export function codexMessages(turns: any[], options: { unconfirmedLegacyTurnId?: string } = {}): ChatMessage[] {
   const messages: ChatMessage[] = [];
   for (const turn of turns) {
-    for (const item of turn.items ?? []) {
+    const items = turn.items ?? [];
+    const completedAtMs = codexReplyTimestamp(turn);
+    const finalReplyId = codexFinalReplyId(items,
+      options.unconfirmedLegacyTurnId === undefined || turn.id !== options.unconfirmedLegacyTurnId);
+    for (const item of items) {
       if (typeof item.id !== 'string') continue;
       const timestampMs = typeof turn.startedAt === 'number' ? turn.startedAt * 1000 : undefined;
-      const base = { id: item.id, timestampMs };
+      const base = { id: item.id, timestampMs, ...(typeof turn.id === 'string' && turn.id.length > 0 && turn.id.length <= 256 ? { turnId: turn.id } : {}) };
       if (item.type === 'userMessage') {
         const text = (item.content ?? []).filter((p: any) => p.type === 'text').map((p: any) => p.text).join('\n');
         const attachments: NonNullable<ChatMessage['attachments']> = [];
@@ -62,14 +114,17 @@ export function codexMessages(turns: any[]): ChatMessage[] {
           const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]*={0,2})$/.exec(part.url);
           if (match) attachments.push({ type: 'image', mimeType: match[1], content: match[2] });
         }
-        messages.push({ ...base, role: 'user', text, ...(typeof item.clientId === 'string' && item.clientId && item.clientId.length <= 200 ? { idempotencyKey: item.clientId } : {}), ...(attachments.length ? { attachments } : {}) });
+        messages.push({ ...base, timestampMs: codexItemTimestamp(turn.itemTimestamps instanceof Map ? turn.itemTimestamps.get(item.id) : undefined) ?? timestampMs,
+          role: 'user', text, ...(typeof item.clientId === 'string' && item.clientId && item.clientId.length <= 200 ? { idempotencyKey: item.clientId } : {}), ...(attachments.length ? { attachments } : {}) });
       } else if (item.type === 'agentMessage' || item.type === 'plan') {
-        messages.push({ ...base, role: 'assistant', text: String(item.text ?? '') });
+        messages.push({ ...base, timestampMs: (item.id === finalReplyId ? completedAtMs : undefined)
+          ?? (turn.itemTimestamps instanceof Map ? turn.itemTimestamps.get(item.id) : undefined) ?? timestampMs,
+          role: 'assistant', text: String(item.text ?? '') });
       } else {
         const tool = codexTool(item);
         if (tool) messages.push({ ...base, id: `toolcall_${item.id}`, role: 'tool', text: '', tool });
         const image = codexGeneratedImage(item);
-        if (image) messages.push({ ...image, timestampMs });
+        if (image) messages.push({ ...image, timestampMs: completedAtMs ?? timestampMs, ...(base.turnId ? { turnId: base.turnId } : {}) });
       }
     }
     const failure = codexTurnFailure(turn);

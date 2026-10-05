@@ -1,8 +1,13 @@
+import { useChatHistoryState } from './useChatHistoryState';
+import { resetSessionHistory } from '../connection/session-reset';
+import { ChatCacheService } from '../services/chat-cache';
 import { clearUncertainSends } from './sendRecovery';
-import { act, renderHook } from '@testing-library/react-native';
+import { act, cleanup, renderHook } from '@testing-library/react-native';
 import * as Network from 'expo-network';
 import * as DocumentPicker from 'expo-document-picker';
-import { CAPABILITY_MATRIX } from '@clawket/agent-protocol';
+import * as ImagePicker from 'expo-image-picker';
+import { Alert } from 'react-native';
+import { AdapterError, CAPABILITY_MATRIX } from '@clawket/agent-protocol';
 import { analyticsEvents } from '../services/analytics/events';
 import { recordSuccessfulSendForAutomaticReview } from '../services/auto-app-review';
 import { cacheMessageImages } from '../services/image-cache';
@@ -11,6 +16,8 @@ import { useChatAutoCache } from '../hooks/useChatAutoCache';
 import { useAdapterChatEvents } from './useAdapterChatEvents';
 import { useChatController as useChatControllerImpl } from './useChatController';
 import { resetMessageQueueStore } from './messageQueue';
+import { preserveOptimisticAssistantMessage } from './historyMergePolicy';
+import { readFileAsBase64 } from './chatControllerUtils';
 
 const mockT = (key: string) => key;
 const mockI18n = { language: 'en-US' };
@@ -49,6 +56,7 @@ const historyMock = {
   restoreCachedMessages: jest.fn().mockResolvedValue(undefined),
   loadSessionsAndHistory: jest.fn(),
   reconcileLatestAssistantFromHistory: jest.fn().mockResolvedValue(undefined),
+  captureSessionScope: jest.fn(() => () => true),
   refreshCurrentSessionHistory: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -67,6 +75,7 @@ const modelPickerHookMock = {
   runtimeSettingsBusy: false,
   runtimeSettingsPendingRef: { current: false },
     runtimeSettingsUnconfirmedRef: { current: false },
+  requirePermissionsConfirmation: jest.fn(() => { modelPickerHookMock.runtimeSettingsUnconfirmedRef.current = true; }),
   availableModels: [{ id: 'gpt-5', name: 'gpt-5', provider: 'openai' }],
   modelPickerError: null,
   modelPickerLoading: false,
@@ -96,7 +105,9 @@ const imagePickerHookMock = {
   clearPendingImages: jest.fn(),
   removePendingImage: jest.fn(),
   canAddMoreImages: true,
+  isCurrentAttachmentScope: jest.fn(() => true),
 };
+let mockActualImagePicker = false;
 
 jest.mock('@react-navigation/native', () => ({
   useIsFocused: jest.fn(() => true),
@@ -108,6 +119,8 @@ jest.mock('react-i18next', () => ({
     i18n: mockI18n,
   })),
 }));
+
+jest.mock('../i18n', () => ({ __esModule: true, default: { t: (key: string) => key } }));
 
 jest.mock('expo-document-picker', () => ({
   getDocumentAsync: jest.fn().mockResolvedValue({ canceled: true, assets: [] }),
@@ -130,7 +143,14 @@ jest.mock('../services/storage', () => ({
 }));
 
 jest.mock('../hooks/useChatImagePicker', () => ({
-  useChatImagePicker: jest.fn(() => imagePickerHookMock),
+  useChatImagePicker: jest.fn((...args: unknown[]) => mockActualImagePicker
+    ? jest.requireActual('../hooks/useChatImagePicker').useChatImagePicker(...args)
+    : imagePickerHookMock),
+}));
+
+jest.mock('./chatControllerUtils', () => ({
+  ...jest.requireActual('./chatControllerUtils'),
+  readFileAsBase64: jest.fn().mockResolvedValue('YQ=='),
 }));
 
 jest.mock('../hooks/useChatImagePreview', () => ({
@@ -196,6 +216,7 @@ function resetMockState() {
   historyMock.thinkingLevel = null;
   modelPickerHookMock.hasRuntimeSettings = false;
   modelPickerHookMock.nativeThinkingLevel = null;
+  modelPickerHookMock.runtimeSettingsUnconfirmedRef.current = false;
   historyMock.setMessages.mockClear();
   historyMock.applyReconciledHistory.mockReset().mockReturnValue(false);
   historyMock.setSessions.mockClear();
@@ -244,7 +265,7 @@ jest.mock('../services/analytics/events', () => ({
 
 function createAdapter(
   connectionState: 'ready' | 'connecting' = 'ready',
-  backendKind: 'openclaw' | 'hermes' = 'openclaw',
+  backendKind: keyof typeof CAPABILITY_MATRIX = 'openclaw',
 ) {
   const listeners: Record<string, Set<(...args: any[]) => void>> = {
     update: new Set(),
@@ -310,10 +331,12 @@ function useChatController(options: Record<string, any>) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe('useChatController contract', () => {
@@ -338,6 +361,250 @@ describe('useChatController contract', () => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
     consoleErrorSpy.mockRestore();
+  });
+
+  it.each(['codex', 'hermes', 'pi'] as const)('keeps the chooser available but serializes pending Current acknowledgement for %s', async backend => {
+    const adapter = createAdapter('ready', backend);
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('First guidance');
+    });
+    expect(result.current.canSteer).toBe(true);
+    act(() => result.current.onSteer('active'));
+    expect(result.current.canSteer).toBe(false);
+    expect(result.current.steeringPending).toBe(true);
+    expect(result.current.canChooseRunInput).toBe(true);
+    act(() => result.current.setInput('Next guidance'));
+    act(() => result.current.onSteer('active'));
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(result.current.input).toBe('Next guidance');
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(result.current.steeringPending).toBe(false);
+    expect(result.current.canSteer).toBe(true);
+    expect(result.current.input).toBe('Next guidance');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('retains the normal outbox path when the backend does not advertise Current guidance', async () => {
+    const adapter = createAdapter('ready', 'openclaw');
+    const steer = jest.fn().mockResolvedValue(undefined);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Next task');
+    });
+    expect(result.current.canChooseRunInput).toBe(false);
+    expect(result.current.canSteer).toBe(false);
+    act(() => result.current.onSteer('active'));
+    await act(async () => { result.current.onSend(); });
+    expect(result.current.queuedMessages.map(message => message.text)).toEqual(['Next task']);
+    expect(steer).not.toHaveBeenCalled();
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('preserves a deliberately recomposed identical draft while the previous Current acknowledgement is pending', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn().mockReturnValueOnce(acknowledgement.promise).mockResolvedValue(undefined);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Keep waiting');
+    });
+    act(() => result.current.onSteer('active'));
+    act(() => result.current.setInput(''));
+    act(() => result.current.setInput('Keep waiting'));
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(result.current.input).toBe('Keep waiting');
+    expect(result.current.canChooseRunInput).toBe(true);
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    await act(async () => { jest.advanceTimersByTime(1); result.current.onSteer('active'); await Promise.resolve(); });
+    expect(steer).toHaveBeenCalledTimes(2);
+    expect(historyMock.messages.filter(message => message.text === 'Keep waiting')).toHaveLength(2);
+    expect(result.current.input).toBe('');
+  });
+
+  it('restores Current availability after an uncertain acknowledgement failure without replaying or clearing its draft', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Keep waiting');
+    });
+    act(() => result.current.onSteer('active'));
+    expect(result.current.canSteer).toBe(false);
+    await act(async () => { acknowledgement.reject(new Error('timed out')); await acknowledgement.promise.catch(() => undefined); });
+    expect(result.current.steeringPending).toBe(false);
+    expect(result.current.canSteer).toBe(true);
+    expect(result.current.input).toBe('Keep waiting');
+    expect(result.current.sendFailure).toContain('Sending failed');
+    expect(historyMock.messages.some(message => message.text === 'Keep waiting')).toBe(false);
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it.each(['session', 'adapter'] as const)('does not let a pending Current acknowledgement modify the later %s draft', async change => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    Object.assign(adapter, { steer: jest.fn(() => acknowledgement.promise) });
+    let activeAdapter = adapter;
+    const { result, rerender } = renderHook(() => useChatController({ adapter: activeAdapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('First guidance');
+    });
+    act(() => result.current.onSteer('active'));
+    await act(async () => {
+      if (change === 'session') historyMock.sessionKey = 'other-session';
+      else activeAdapter = createAdapter('ready', 'codex');
+      historyMock.messages = [{ id: 'other-user', role: 'user', text: 'Other conversation' }];
+      rerender({});
+      result.current.setInput('Other draft');
+    });
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(result.current.input).toBe('Other draft');
+    expect(historyMock.messages.map(message => message.text)).toEqual(['Other conversation']);
+    expect(result.current.steeringPending).toBe(false);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('keeps explicit Next and Stop available while a Current acknowledgement is pending', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer });
+    const { result } = renderHook(() => useChatController({ adapter, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('First guidance');
+    });
+    act(() => result.current.onSteer('active'));
+    await act(async () => { result.current.setInput('Next task'); });
+    await act(async () => { result.current.onSend(); });
+    expect(result.current.queuedMessages.map(message => message.text)).toEqual(['Next task']);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    expect(result.current.steeringPending).toBe(true);
+    act(() => result.current.abortCurrentRun());
+    expect(adapter.cancel).toHaveBeenCalledTimes(1);
+    expect(steer).toHaveBeenCalledTimes(1);
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+  });
+
+  it('retires Reset run presentation while retaining the draft, attachments and held queue without sending', async () => {
+    const adapter = { ...createAdapter(), resetSession: jest.fn().mockResolvedValue(undefined) };
+    const removeCache = jest.spyOn(ChatCacheService, 'deleteMessages').mockResolvedValue(undefined);
+    const { result, rerender, unmount } = renderHook(() => useChatController({ adapter, debugMode: false }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const events = () => jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events().onState!('ready'); await Promise.resolve(); });
+    act(() => { events().onUpdate!({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'old-run', activeRunId: 'old-run', isSending: true, startedAtMs: Date.now() }); });
+    act(() => { events().onUpdate!({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'old-run', activeRunId: 'old-run', isSending: true, text: 'old streamed reply', visible: true }); });
+    expect(result.current.isSending).toBe(true);
+    act(() => { result.current.setInput('queued unsent'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(result.current.queuedMessages).toHaveLength(1);
+    act(() => { result.current.setInput('current draft'); });
+    imagePickerHookMock.pendingImages = [{ uri: 'local-image', base64: 'image-bytes', mimeType: 'image/png' }];
+    rerender({});
+    imagePickerHookMock.clearPendingImages.mockClear();
+    await act(async () => { await resetSessionHistory(adapter as any, 'main', 'agent:main:main'); });
+    expect(result.current.isSending).toBe(false);
+    expect(result.current.activeRunId).toBeNull();
+    expect(result.current.listData.some(message => message.text === 'old streamed reply')).toBe(false);
+    expect(result.current.input).toBe('current draft');
+    expect(result.current.pendingImages).toBe(imagePickerHookMock.pendingImages);
+    expect(result.current.queuedMessages).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'queued unsent')?.delivery).toBe('held');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    expect(imagePickerHookMock.clearPendingImages).not.toHaveBeenCalled();
+    unmount(); removeCache.mockRestore();
+  });
+
+  it('rejects a late Reset ACK after same-batch away/back using the real history scope token', async () => {
+    const actualHistory = jest.requireActual('./useChatHistoryState').useChatHistoryState;
+    let state: any;
+    jest.mocked(useChatHistoryState).mockImplementation(options => {
+      state = actualHistory(options);
+      return state;
+    });
+    const ack = deferred<void>();
+    const adapter = { ...createAdapter(), resetSession: jest.fn(() => ack.promise) };
+    const removeCache = jest.spyOn(ChatCacheService, 'deleteMessages').mockResolvedValue(undefined);
+    const key = 'agent:main:main';
+    const { result, unmount } = renderHook(() => useChatController({ adapter, routeSessionKey: key, debugMode: false }));
+    const events = () => jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events().onState!('ready'); await Promise.resolve(); await Promise.resolve(); });
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    act(() => { state.setSessionKey('another'); state.setSessionKey(key); });
+    act(() => { events().onUpdate!({ type: 'run_started', sessionKey: key, runId: 'new-run', activeRunId: 'new-run', isSending: true, startedAtMs: Date.now() }); });
+    act(() => { result.current.setInput('new scope draft'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(result.current.queuedMessages).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('queued');
+    act(() => { result.current.setInput('current draft'); });
+    await act(async () => { ack.resolve(); await reset; });
+    expect(result.current.activeRunId).toBe('new-run');
+    expect(result.current.isSending).toBe(true);
+    expect(result.current.input).toBe('current draft');
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('queued');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    unmount(); removeCache.mockRestore();
+    jest.mocked(useChatHistoryState).mockImplementation(() => historyMock as any);
+  });
+
+  it('retires history and controller together after successful Reset ACK using the real scope token', async () => {
+    const actualHistory = jest.requireActual('./useChatHistoryState').useChatHistoryState;
+    let state: any;
+    jest.mocked(useChatHistoryState).mockImplementation(options => {
+      state = actualHistory(options);
+      return state;
+    });
+    const ack = deferred<void>();
+    const adapter = { ...createAdapter(), resetSession: jest.fn(() => ack.promise) };
+    const removeCache = jest.spyOn(ChatCacheService, 'deleteMessages').mockResolvedValue(undefined);
+    const key = 'agent:main:main';
+    const { result, unmount } = renderHook(() => useChatController({ adapter, routeSessionKey: key, debugMode: false }));
+    const events = () => jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events().onState!('ready'); await Promise.resolve(); await Promise.resolve(); });
+    let reset!: Promise<void>;
+    act(() => { reset = resetSessionHistory(adapter as any, 'main', key); });
+    act(() => { events().onUpdate!({ type: 'run_started', sessionKey: key, runId: 'new-run', activeRunId: 'new-run', isSending: true, startedAtMs: Date.now() }); });
+    act(() => { result.current.setInput('new scope draft'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(result.current.queuedMessages).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('queued');
+    act(() => { result.current.setInput('current draft'); });
+    await act(async () => { ack.resolve(); await reset; });
+    expect(result.current.activeRunId).toBeNull();
+    expect(result.current.isSending).toBe(false);
+    expect(result.current.input).toBe('current draft');
+    expect(result.current.listData.find(message => message.text === 'new scope draft')?.delivery).toBe('held');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    unmount(); removeCache.mockRestore();
+    jest.mocked(useChatHistoryState).mockImplementation(() => historyMock as any);
   });
 
   it('exposes stable public fields and forwards extracted hook outputs', () => {
@@ -676,6 +943,84 @@ describe('useChatController contract', () => {
     expect(adapter.probe).toHaveBeenCalledTimes(1);
     expect(adapter.prompt).toHaveBeenCalledTimes(1);
     expect(recordSuccessfulSendForAutomaticReview).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])('holds an explicitly rejected permission send for review without uncertainty or replay (new draft: %s)', async (hasNewDraft) => {
+    const adapter = createAdapter('ready', 'codex');
+    adapter.capabilities.sessionPermissions = true;
+    let rejectSend!: (error: Error) => void;
+    adapter.prompt.mockImplementation(() => new Promise((_resolve, reject) => { rejectSend = reject; }));
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    await act(async () => { result.current.setInput('Original permission draft'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    if (hasNewDraft) await act(async () => { result.current.setInput('New draft'); });
+    await act(async () => {
+      rejectSend(new AdapterError('server', 'Fixed native permission rejection', 'confirm_permissions'));
+      await Promise.resolve();
+    });
+    expect(modelPickerHookMock.requirePermissionsConfirmation).toHaveBeenCalledWith(adapter, 'agent:main:main');
+    expect(result.current.input).toBe(hasNewDraft ? 'New draft' : '');
+    expect(result.current.listData.filter(message => message.text === 'Original permission draft')).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'Original permission draft')).toMatchObject({ delivery: 'held' });
+    expect(result.current.listData.some(message => message.sendUncertain)).toBe(false);
+    expect(result.current.sendFailure).toBeNull();
+    expect(result.current.sendFailureDetails).toBeNull();
+    expect(result.current.isSending).toBe(false);
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(adapter.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'Codex did not restore the conversation permissions. Select and confirm permissions before sending.',
+    'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.',
+  ])('keeps an immediate permission rejection paused after local submission settles (%s)', async message => {
+    const adapter = createAdapter('ready', 'codex');
+    adapter.capabilities.sessionPermissions = true;
+    adapter.prompt.mockRejectedValue(new AdapterError('server', message, 'confirm_permissions'));
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    await act(async () => { result.current.setInput('Keep this input'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(result.current.listData.filter(message => message.text === 'Keep this input')).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'Keep this input')).toMatchObject({ delivery: 'held' });
+    expect(result.current.listData.some(message => message.sendUncertain)).toBe(false);
+    expect(adapter.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'Codex did not restore the conversation permissions. Select and confirm permissions before sending.',
+    'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.',
+  ])('retains the ordinary uncertain send path when a server error has the permission text without a classified recovery (%s)', async message => {
+    const adapter = createAdapter('ready', 'codex');
+    adapter.capabilities.sessionPermissions = true;
+    adapter.prompt.mockRejectedValue(new AdapterError('server', message));
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    await act(async () => { result.current.setInput('Unknown result'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    expect(modelPickerHookMock.requirePermissionsConfirmation).not.toHaveBeenCalled();
+    expect(result.current.listData.find(message => message.text === 'Unknown result')?.sendUncertain).toBe(true);
+    expect(result.current.listData.find(message => message.text === 'Unknown result')?.delivery).not.toBe('held');
+    expect(result.current.sendFailure).toBe('Sending failed. Check the conversation before trying again.');
+  });
+
+  it('keeps a late explicit rejection in the original held outbox without changing a different session draft', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    adapter.capabilities.sessionPermissions = true;
+    modelPickerHookMock.requirePermissionsConfirmation.mockImplementationOnce(() => {});
+    let rejectSend!: (error: Error) => void;
+    adapter.prompt.mockImplementation(() => new Promise((_resolve, reject) => { rejectSend = reject; }));
+    const { result, rerender } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    await act(async () => { result.current.setInput('Original permission draft'); });
+    await act(async () => { result.current.onSend(); await Promise.resolve(); });
+    historyMock.sessionKey = 'agent:main:other'; historyMock.messages = []; rerender(undefined);
+    await act(async () => { result.current.setInput('Other draft'); });
+    await act(async () => { rejectSend(new AdapterError('server', 'Fixed native permission rejection', 'confirm_permissions')); await Promise.resolve(); });
+    expect(result.current.input).toBe('Other draft');
+    expect(result.current.listData.some(message => message.text === 'Original permission draft')).toBe(false);
+    historyMock.sessionKey = 'agent:main:main'; rerender(undefined);
+    expect(result.current.listData.filter(message => message.text === 'Original permission draft')).toHaveLength(1);
+    expect(result.current.listData.find(message => message.text === 'Original permission draft')).toMatchObject({ delivery: 'held' });
+    expect(result.current.listData.some(message => message.sendUncertain)).toBe(false);
+    expect(adapter.prompt).toHaveBeenCalledTimes(1);
   });
 
   it.each([false, true])('keeps one uncertain bubble without refilling the composer (new draft: %s)', async (hasNewDraft) => {
@@ -1864,6 +2209,37 @@ describe('useChatController contract', () => {
     expect(ExpoHaptics.notificationAsync).not.toHaveBeenCalled();
   });
 
+  it('keeps reported unknown tool updates uncompleted without scheduling settled recovery', async () => {
+    const adapter = createAdapter('ready');
+    const view = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)?.[0];
+    const run = { sessionKey: 'agent:main:main', runId: 'run-unknown', activeRunId: 'run-unknown', isSending: true as const };
+    await act(async () => {
+      events!.onState?.('ready');
+      events!.onUpdate?.({ type: 'run_started', ...run, startedAtMs: 100 });
+      events!.onUpdate?.({ type: 'tool_call', ...run, toolCallId: 'read', merge: false, message: {
+        id: 'toolcall_read', role: 'tool', text: '', toolName: 'read', toolStatus: 'running', toolStartedAt: 100,
+      } });
+    });
+    expect(view.result.current.activityLabel).toBe('Reading file');
+    historyMock.loadHistory.mockClear();
+    historyMock.refreshCurrentSessionHistory.mockClear();
+    historyMock.reconcileLatestAssistantFromHistory.mockClear();
+    await act(async () => {
+      events!.onUpdate?.({ type: 'tool_call_update', ...run, toolCallId: 'read', merge: true, message: {
+        id: 'toolcall_read', role: 'tool', text: '', toolStatus: 'unknown', toolStatusReported: true, toolFinishedAt: undefined,
+      } });
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+    });
+    expect(view.result.current.isSending).toBe(true);
+    expect(view.result.current.activityLabel).toBeNull();
+    expect(historyMock.loadHistory).not.toHaveBeenCalled();
+    expect(historyMock.refreshCurrentSessionHistory).not.toHaveBeenCalled();
+    expect(historyMock.reconcileLatestAssistantFromHistory).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it('stops labelling the turn with a tool once that tool settles', async () => {
     const adapter = createAdapter('ready');
     const { result } = renderHook(() =>
@@ -2351,6 +2727,306 @@ it('does not restore an old history snapshot after a live terminal event', async
   expect(result.current.listData.some(message => message.text === 'stale')).toBe(false);
 });
 
+  it.each([false, true])('does not append a late steering acknowledgement after its canonical echo or a newer turn (%s)', async nextTurn => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer });
+    const { result, rerender } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    const timestampMs = Date.now() - 120_000;
+    const initial = [{ id: 'native-prompt', historyMessageId: 'native-prompt', role: 'user', text: 'Initial task', timestampMs }];
+    historyMock.messages = initial;
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: timestampMs });
+      result.current.setInput('Change course');
+    });
+    act(() => result.current.onSteer('active'));
+    expect(steer).toHaveBeenCalledWith('agent:main:main', 'active', 'Change course');
+    // Native input is committed and a tool-result/history read wins the RPC response race.
+    const canonical = [...initial, { id: 'native-steer', historyMessageId: 'native-steer', role: 'user', text: 'Change course', timestampMs }];
+    await act(async () => {
+      historyMock.messages = canonical;
+      if (nextTurn) {
+        events.onUpdate?.({ type: 'run_finished', sessionKey: 'agent:main:main', runId: 'active', activeRunId: null, isSending: false,
+          stopReason: 'end_turn', finalMessage: { id: 'native-final', role: 'assistant', text: 'Done', timestampMs: timestampMs + 1000 } });
+        historyMock.messages.push({ id: 'native-next-user', historyMessageId: 'native-next-user', role: 'user', text: 'Next task', timestampMs: Date.now() });
+        events.onUpdate?.({ type: 'run_started', runId: 'next', sessionKey: 'agent:main:main', activeRunId: 'next', isSending: true, startedAtMs: Date.now() });
+      }
+      rerender({});
+      acknowledgement.resolve();
+      await acknowledgement.promise;
+    });
+    expect(historyMock.messages.filter(message => message.text === 'Change course')).toHaveLength(1);
+    expect(historyMock.messages.find(message => message.text === 'Change course')?.historyMessageId).toBe('native-steer');
+    if (nextTurn) expect(historyMock.messages.at(-1).text).toBe('Next task');
+    // A further canonical reload must not preserve a duplicate as an unrelated older user.
+    const next = nextTurn ? [...canonical, ...historyMock.messages.filter(message => message.id === 'native-final' || message.id === 'native-next-user')] : canonical;
+    expect(preserveOptimisticAssistantMessage(historyMock.messages, next).filter(message => message.text === 'Change course')).toHaveLength(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('places accepted steering before a later turn when its canonical echo has not reached the phone', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    Object.assign(adapter, { steer: jest.fn(() => acknowledgement.promise) });
+    const initial = [{ id: 'native-prompt', historyMessageId: 'native-prompt', role: 'user', text: 'Initial task' }];
+    historyMock.messages = initial;
+    const { result, rerender } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Change course');
+    });
+    const dispatchedAt = Date.now();
+    act(() => result.current.onSteer('active'));
+    await act(async () => {
+      events.onUpdate?.({ type: 'run_finished', sessionKey: 'agent:main:main', runId: 'active', activeRunId: null, isSending: false,
+        stopReason: 'end_turn', finalMessage: { id: 'native-final', role: 'assistant', text: 'Done' } });
+      historyMock.messages.push({ id: 'native-next-user', historyMessageId: 'native-next-user', idempotencyKey: 'next-send', role: 'user', text: 'Next task' });
+      events.onUpdate?.({ type: 'run_started', runId: 'next', sessionKey: 'agent:main:main', activeRunId: 'next', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('New draft');
+      rerender({});
+      jest.advanceTimersByTime(250);
+      acknowledgement.resolve();
+      await acknowledgement.promise;
+    });
+    expect(historyMock.messages.map(message => message.text)).toEqual(['Initial task', 'Change course', 'Done', 'Next task']);
+    expect(historyMock.messages[1].timestampMs).toBe(dispatchedAt);
+    expect(result.current.acceptedSubmission).toBeNull();
+    expect(result.current.input).toBe('New draft');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('recognizes a canonical steering echo from the actual adapter recovery mapper without a history alias', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    Object.assign(adapter, { steer: jest.fn(() => acknowledgement.promise) });
+    historyMock.messages = [{ id: 'native-prompt', role: 'user', text: 'Initial task', timestampMs: Date.now() - 120_000 }];
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() - 120_000 });
+      result.current.setInput('Change course');
+    });
+    act(() => result.current.onSteer('active'));
+    const { mapAdapterSessionUpdate } = jest.requireActual<typeof import('./useAdapterChatEvents')>('./useAdapterChatEvents');
+    await act(async () => {
+      events.onUpdate?.(mapAdapterSessionUpdate({ type: 'history_reconciled', sessionKey: 'agent:main:main', history: {
+        key: 'agent:main:main', hasActiveRun: true, messages: [
+          { id: 'native-prompt', role: 'user', text: 'Initial task', timestampMs: Date.now() - 120_000 },
+          { id: 'native-steer', role: 'user', text: 'Change course', timestampMs: Date.now() - 120_000 },
+        ],
+      } }));
+      acknowledgement.resolve();
+      await acknowledgement.promise;
+    });
+    const guide = historyMock.messages.filter(message => message.text === 'Change course');
+    expect(guide).toHaveLength(1);
+    expect(guide[0].id).toBe('native-steer');
+    expect(guide[0].historyMessageId).toBeUndefined();
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('keeps two intentional same-clock steering submissions distinct until their native echoes arrive', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    Object.assign(adapter, { steer: jest.fn().mockResolvedValue(undefined) });
+    historyMock.messages = [{ id: 'native-prompt', historyMessageId: 'native-prompt', role: 'user', text: 'Initial task' }];
+    const { result, rerender } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+    });
+    for (let index = 0; index < 2; index++) {
+      await act(async () => { result.current.setInput('Change course'); rerender({}); });
+      await act(async () => { result.current.onSteer('active'); await Promise.resolve(); });
+    }
+    const local = historyMock.messages.filter(message => message.text === 'Change course');
+    expect(local).toHaveLength(2);
+    expect(new Set(local.map(message => message.id)).size).toBe(2);
+    expect((adapter as any).steer).toHaveBeenCalledTimes(2);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('reads post-acknowledgement history only while the send scope remains current (%s)', async retireScope => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const staleRead = deferred<number>();
+    Object.assign(adapter, { steer: jest.fn(() => acknowledgement.promise) });
+    historyMock.loadHistory.mockReturnValueOnce(staleRead.promise);
+    historyMock.messages = [{ id: 'native-prompt', historyMessageId: 'native-prompt', role: 'user', text: 'Initial task' }];
+    let activeAdapter = adapter;
+    const { result, rerender } = renderHook(() => useChatController({ adapter: activeAdapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Change course');
+    });
+    expect(historyMock.loadHistory).toHaveBeenCalledTimes(1);
+    await act(async () => { result.current.onSteer('active'); acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(historyMock.loadHistory).toHaveBeenCalledTimes(1);
+    if (retireScope) await act(async () => { activeAdapter = createAdapter('ready', 'codex'); rerender(undefined); });
+    await act(async () => { staleRead.resolve(0); await staleRead.promise; });
+    expect(historyMock.loadHistory).toHaveBeenCalledTimes(retireScope ? 1 : 2);
+    expect(historyMock.loadHistory).toHaveBeenLastCalledWith('agent:main:main', 50);
+  });
+
+  it.each(['session', 'adapter'] as const)('ignores a late steering acknowledgement after the %s changes', async change => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    Object.assign(adapter, { steer: jest.fn(() => acknowledgement.promise) });
+    let activeAdapter = adapter;
+    const { result, rerender } = renderHook(() => useChatController({ adapter: activeAdapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Change course');
+    });
+    act(() => result.current.onSteer('active'));
+    await act(async () => {
+      if (change === 'session') historyMock.sessionKey = 'other-session';
+      historyMock.messages = [{ id: 'other-user', role: 'user', text: 'Other conversation' }];
+      if (change === 'adapter') activeAdapter = createAdapter('ready', 'codex');
+      rerender(undefined);
+      result.current.setInput('Other draft');
+    });
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(historyMock.messages.map(message => message.text)).toEqual(['Other conversation']);
+    expect(result.current.input).toBe('Other draft');
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('coalesces two accepted steering reads that waited for the same stale history request', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const staleRead = deferred<number>();
+    Object.assign(adapter, { steer: jest.fn().mockResolvedValue(undefined) });
+    historyMock.loadHistory.mockReturnValueOnce(staleRead.promise);
+    historyMock.messages = [{ id: 'native-prompt', historyMessageId: 'native-prompt', role: 'user', text: 'Initial task' }];
+    const { result, rerender } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+    });
+    for (let index = 0; index < 2; index++) {
+      await act(async () => { result.current.setInput(`Guidance ${index}`); rerender({}); });
+      await act(async () => { result.current.onSteer('active'); await Promise.resolve(); });
+    }
+    expect(historyMock.loadHistory).toHaveBeenCalledTimes(1);
+    await act(async () => { staleRead.resolve(0); await staleRead.promise; });
+    expect(historyMock.loadHistory).toHaveBeenCalledTimes(2);
+    expect((adapter as any).steer).toHaveBeenCalledTimes(2);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('preserves the steering draft after uncertain acknowledgement failure without replay or an accepted row', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    Object.assign(adapter, { steer: jest.fn(() => acknowledgement.promise) });
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Change course');
+    });
+    await act(async () => { result.current.onSteer('active'); acknowledgement.reject(new Error('timed out')); await acknowledgement.promise.catch(() => undefined); });
+    expect(result.current.input).toBe('Change course');
+    expect(result.current.sendFailure).toContain('Sending failed');
+    expect(historyMock.messages.some(message => message.text === 'Change course')).toBe(false);
+    expect((adapter as any).steer).toHaveBeenCalledTimes(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it.each(['openclaw', 'hermes', 'pi'] as const)('preserves the existing steering capability and acceptance path for %s', async backend => {
+    const adapter = createAdapter('ready', backend);
+    Object.assign(adapter, { steer: jest.fn().mockResolvedValue(undefined) });
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', runId: 'active', sessionKey: 'agent:main:main', activeRunId: 'active', isSending: true, startedAtMs: Date.now() });
+      result.current.setInput('Change course');
+    });
+    await act(async () => { result.current.onSteer('active'); await Promise.resolve(); });
+    const supported = backend !== 'openclaw';
+    expect(historyMock.messages.filter(message => message.text === 'Change course')).toHaveLength(supported ? 1 : 0);
+    expect(result.current.input).toBe(supported ? '' : 'Change course');
+    expect(result.current.acceptedSubmission?.text).toBe(supported ? 'Change course' : undefined);
+    expect((adapter as any).steer).toHaveBeenCalledTimes(supported ? 1 : 0);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('recovers a cold active Codex transcript across two same-turn user guides', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    historyMock.messages = [{ id: 'main', role: 'user', text: 'Task', turnId: 'native-turn' },
+      { id: 'a', role: 'assistant', text: 'First paragraph.', turnId: 'native-turn', timestampMs: 1000 },
+      { id: 'toolcall_1', role: 'tool', text: '', toolName: 'exec', turnId: 'native-turn', toolStatus: 'success' },
+      { id: 'guide1', role: 'user', text: 'Same guide', turnId: 'native-turn' },
+      { id: 'b', role: 'assistant', text: 'Second paragraph.', turnId: 'native-turn', timestampMs: 2000 },
+      { id: 'toolcall_2', role: 'tool', text: '', toolName: 'exec', turnId: 'native-turn', toolStatus: 'running' },
+      { id: 'guide2', role: 'user', text: 'Same guide', turnId: 'native-turn' },
+      { id: 'c', role: 'assistant', text: 'Live tail.', turnId: 'native-turn', timestampMs: 3000 }];
+    historyMock.activitySnapshot = { key: 'agent:main:main', hasActiveRun: true, requestedAtMs: Date.now(), messages: [],
+      activeRun: { runId: 'run', text: 'First paragraph.\n\nSecond paragraph.\n\nLive tail.',
+        startedAtMs: 1000, turnId: 'native-turn', inputMessageId: 'main' } } as any;
+    const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true }));
+    await act(async () => { await Promise.resolve(); });
+    const rows = [...result.current.listData].reverse();
+    expect(rows.filter(row => row.role === 'user').map(row => row.id)).toEqual(['main', 'guide1', 'guide2']);
+    expect(rows.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['toolcall_1', 'toolcall_2']);
+    expect(rows.filter(row => row.role === 'assistant').map(row => row.text)).toEqual(['First paragraph.', 'Second paragraph.', 'Live tail.']);
+    expect(new Set(rows.map(row => row.renderKey ?? row.id)).size).toBe(rows.length);
+    expect(result.current.runWorkIdentity).toMatchObject({ sessionKey: 'agent:main:main', runId: 'run', turnId: 'native-turn', inputMessageId: 'main', startedAt: 1000 });
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    await act(async () => { events.onUpdate?.({ type: 'run_finished', sessionKey: 'agent:main:main', runId: 'run', activeRunId: null, isSending: false, stopReason: 'end_turn', finalMessage: { id: 'final', role: 'assistant', text: 'Live tail.' } }); });
+    expect(result.current.runWorkIdentity).toBeUndefined();
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('keeps a live Codex run intact when its native anchor arrives after tools and stamps a delayed guide with the captured turn', async () => {
+    const adapter = createAdapter('ready', 'codex');
+    const acknowledgement = deferred<void>();
+    const steer = jest.fn(() => acknowledgement.promise);
+    Object.assign(adapter, { steer, capabilities: { ...adapter.capabilities, steer: true } });
+    historyMock.messages = [{ id: 'main', role: 'user', text: 'Main task', idempotencyKey: 'original-key' }];
+    const { result, rerender } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true }));
+    const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+    const run = { sessionKey: 'agent:main:main', runId: 'run', activeRunId: 'run', isSending: true as const };
+    await act(async () => {
+      events.onState?.('ready');
+      events.onUpdate?.({ type: 'run_started', ...run, startedAtMs: 1000 });
+      events.onUpdate?.({ type: 'agent_message_chunk', ...run, visible: true, textMode: 'snapshot', text: 'Before the tool.' });
+      events.onUpdate?.({ type: 'tool_call', ...run, toolCallId: 'tool', merge: false,
+        message: { id: 'toolcall_tool', role: 'tool', text: '', toolName: 'exec', toolStatus: 'running' } });
+      events.onUpdate?.({ type: 'run_started', ...run, startedAtMs: 2000, turnId: 'native-turn', inputMessageId: 'native-input', inputMessageKey: 'original-key' });
+      events.onUpdate?.({ type: 'agent_message_chunk', ...run, visible: true, textMode: 'snapshot', text: 'Before the tool.\n\nAfter the tool.' });
+      result.current.setInput('Same guide');
+    });
+    await act(async () => { result.current.onSteer('run'); });
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(result.current.listData.filter(row => row.id === 'toolcall_tool')).toHaveLength(1);
+    expect(result.current.listData.filter(row => row.text === 'Before the tool.')).toHaveLength(1);
+    await act(async () => { acknowledgement.resolve(); await acknowledgement.promise; });
+    expect(historyMock.messages.find(row => row.text === 'Same guide')).toMatchObject({ role: 'user', turnId: 'native-turn' });
+    // A same-run snapshot from an older Bridge lacks additive metadata. It
+    // cannot erase the already proven native anchor or reset the accumulated body.
+    historyMock.activitySnapshot = { key: 'agent:main:main', hasActiveRun: true,
+      requestedAtMs: Date.now() + 1, messages: [], activeRun: { runId: 'run', text: 'Before the tool.\n\nAfter the tool.', startedAtMs: 1000 } } as any;
+    rerender({});
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.listData.filter(row => row.id === 'toolcall_tool')).toHaveLength(1);
+    expect(result.current.listData.filter(row => row.text === 'Before the tool.')).toHaveLength(1);
+    expect(result.current.listData.filter(row => row.text === 'Same guide')).toHaveLength(1);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
   it('restores unused steering only for the active run without replaying it', async () => {
     const adapter = createAdapter('ready', 'hermes');
     const { result } = renderHook(() => useChatController({ adapter: adapter as any, debugMode: false, showAgentAvatar: true } as any));
@@ -2412,6 +3088,107 @@ it('does not restore an old history snapshot after a live terminal event', async
     expect(historyMock.loadHistory).toHaveBeenCalledTimes(newRun ? 1 : 2);
   });
 
+it('reconciles actual aborted controller output after ACK-first guidance and a late canonical head', async () => {
+  const runAt = Date.UTC(2026, 9, 5, 0, 0, 0);
+  jest.setSystemTime(runAt);
+  const adapter = createAdapter('ready', 'codex');
+  const acknowledgement = deferred<void>();
+  const steer = jest.fn(() => acknowledgement.promise);
+  Object.assign(adapter, { steer, capabilities: { ...adapter.capabilities, steer: true } });
+  const { mapAdapterSessionUpdate } = jest.requireActual<typeof import('./useAdapterChatEvents')>('./useAdapterChatEvents');
+  const realPresentation = jest.requireActual<typeof import('./liveRunThread')>('./liveRunThread');
+  const finishSpy = jest.spyOn(realPresentation, 'finishLiveRunPresentation'); // calls actual implementation
+  const key = 'agent:main:main', runId = 'aborted-run', turnId = 'native-turn';
+  const main = { id: 'native-main', role: 'user' as const, text: 'Synthetic main', turnId,
+    idempotencyKey: 'main-send', timestampMs: runAt };
+  historyMock.messages = [main];
+  historyMock.applyReconciledHistory.mockReturnValue(false);
+  const { result, rerender, unmount } = renderHook(() => useChatController({ adapter: adapter as any,
+    debugMode: false, showAgentAvatar: true }));
+  const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+  const identity = { sessionKey: key, runId, turnId, inputMessageId: main.id, inputMessageKey: main.idempotencyKey };
+  const receive = (update: any, at: number) => {
+    jest.setSystemTime(at);
+    events.onUpdate?.(mapAdapterSessionUpdate(update, { now: () => at }));
+  };
+  const s = 'Before tool.', a = 'Commentary A.', b = 'Commentary B.', guide = 'Synthetic guide';
+  try {
+    await act(async () => {
+      events.onState?.('ready');
+      receive({ type: 'run_started', ...identity }, runAt);
+      receive({ type: 'agent_message_chunk', ...identity, textMode: 'snapshot', text: s, timestampMs: runAt + 1_000 }, runAt + 1_000);
+      receive({ type: 'tool_call', ...identity, toolCallId: 'synthetic-tool', title: 'exec', status: 'running' }, runAt + 2_000);
+      receive({ type: 'agent_message_chunk', ...identity, textMode: 'snapshot', text: s + '\n\n' + a,
+        timestampMs: runAt + 10_000 }, runAt + 10_000);
+    });
+    const firstSegmentKey = result.current.listData.find(row => row.text === s)?.renderKey;
+    expect(firstSegmentKey).toBeTruthy();
+    expect(result.current.runWorkIdentity).toMatchObject({ runId, turnId, inputMessageId: main.id });
+    await act(async () => { jest.setSystemTime(runAt + 20_000); result.current.setInput(guide); });
+    act(() => result.current.onSteer(runId));
+    expect(steer).toHaveBeenCalledTimes(1);
+    // A new paragraph arrives while ACK is pending. It must never be cut at
+    // ACK time merely because the local dispatch happened before this chunk.
+    await act(async () => {
+      receive({ type: 'agent_message_chunk', ...identity, textMode: 'snapshot', text: [s, a, b].join('\n\n'),
+        timestampMs: runAt + 30_000 }, runAt + 30_000);
+      acknowledgement.resolve();
+      await acknowledgement.promise;
+    });
+    const accepted = historyMock.messages.find(row => row.role === 'user' && row.text === guide);
+    expect(accepted).toMatchObject({ sentLocally: true, turnId, timestampMs: runAt + 20_000 });
+    expect(accepted?.id).toMatch(/^usr_\d+_steer_aborted-run_/);
+    const tailKey = result.current.listData.find(row => row.id === 'streaming')?.renderKey;
+    expect(tailKey).toBeTruthy();
+    // Actual mapping uses cancelled; Native turn abortion is not a new wire enum.
+    await act(async () => {
+      receive({ type: 'run_finished', sessionKey: key, runId, stopReason: 'cancelled' }, runAt + 40_000);
+      rerender({});
+    });
+    expect(finishSpy).toHaveBeenLastCalledWith(expect.objectContaining({ runId, turnId, cancelled: true, tail: a + '\n\n' + b }));
+    const produced = finishSpy.mock.results.at(-1)?.value as import('../types/chat').UiMessage[];
+    expect(produced.find(row => row.id === 'abort_aborted-run')).toMatchObject({ role: 'assistant', text: a + '\n\n' + b,
+      turnId, presentationRunId: runId, renderKey: tailKey });
+    // The head has not arrived yet; retaining this unknown rollup is correct.
+    expect(historyMock.messages.find(row => row.id === 'abort_aborted-run')?.turnId).toBe(turnId);
+    expect(result.current.isSending).toBe(false);
+    expect(result.current.runWorkIdentity).toBeUndefined();
+
+    const canonical = [main,
+      { id: 'native-s', role: 'assistant' as const, text: s, turnId, timestampMs: runAt + 1_000 },
+      { id: 'toolcall_synthetic-tool', role: 'tool' as const, text: '', turnId, timestampMs: runAt + 2_000,
+        tool: { name: 'exec', callId: 'synthetic-tool', status: 'success' as const } },
+      { id: 'native-a', role: 'assistant' as const, text: a, turnId, timestampMs: runAt + 10_000 },
+      { id: 'native-guide', role: 'user' as const, text: guide, turnId, timestampMs: runAt + 20_000 },
+      { id: 'native-b', role: 'assistant' as const, text: b, turnId, timestampMs: runAt + 30_000 }];
+    for (let pass = 0; pass < 2; pass++) {
+      await act(async () => {
+        receive({ type: 'history_reconciled', sessionKey: key, history: { key, hasActiveRun: false, messages: canonical } }, runAt + 41_000 + pass);
+        rerender({});
+      });
+      const rows = historyMock.messages.filter(row => row.role !== 'system');
+      expect(rows.map(row => row.text)).toEqual([main.text, s, '', a, guide, b]);
+      expect(rows.filter(row => row.id === 'native-a')).toHaveLength(1);
+      expect(rows.filter(row => row.id === 'native-b')).toHaveLength(1);
+      expect(rows.some(row => row.id === 'abort_aborted-run')).toBe(false);
+      // Local origin survives a confirmed native echo; it is not evidence
+      // that this row still lacks canonical native identity.
+      expect(rows.find(row => row.id === 'native-guide')).toMatchObject({ sentLocally: true, renderKey: accepted.renderKey });
+      expect(rows.find(row => row.text === s)?.renderKey).toBe(firstSegmentKey);
+      expect(rows.find(row => row.id === 'native-a')?.renderKey).toBe(tailKey);
+      expect(new Set(rows.map(row => row.renderKey ?? row.id)).size).toBe(rows.length);
+      expect(result.current.listData.filter(row => row.role === 'assistant').reverse().map(row => row.text)).toEqual([s, a, b]);
+      expect(result.current.listData.some(row => row.id === 'streaming')).toBe(false);
+    }
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    expect(adapter.cancel).not.toHaveBeenCalled();
+    expect(steer).toHaveBeenCalledTimes(1);
+  } finally {
+    unmount();
+    finishSpy.mockRestore();
+  }
+});
+
 });
 
 it('puts external input in the chosen chat without switching to an empty main key', async () => {
@@ -2428,4 +3205,186 @@ it('puts external input in the chosen chat without switching to an empty main ke
   expect(result.current.input).toBe('Review this');
   expect(historyMock.setSessionKey).not.toHaveBeenCalledWith('');
   expect(mockAppContext.clearPendingMainSessionSwitch).toHaveBeenCalled();
+});
+
+describe('mounted controller attachment scope', () => {
+  const image = { uri: 'file:///qa-current.jpg', base64: 'YQ==', mimeType: 'image/jpeg', width: 10, height: 10 };
+  const pasted = { uri: 'file:///qa-paste.png', fileName: 'qa-paste.png', fileSize: 1, type: 'image/png' };
+  const library = jest.mocked(ImagePicker.launchImageLibraryAsync);
+  const camera = jest.mocked(ImagePicker.launchCameraAsync);
+  const permission = jest.mocked(ImagePicker.requestCameraPermissionsAsync);
+  const document = jest.mocked(DocumentPicker.getDocumentAsync);
+  const readFile = jest.mocked(readFileAsBase64);
+  let alert: jest.SpyInstance;
+  let consoleError: jest.SpyInstance;
+
+  function mount(backend: keyof typeof CAPABILITY_MATRIX = 'openclaw') {
+    const adapter = createAdapter('ready', backend);
+    const view = renderHook(({ key, selectedAdapter }: { key: string; selectedAdapter: any }) => useChatController({
+      adapter: selectedAdapter,
+      routeConnectionId: adapter.connection.id,
+      routeAgentId: 'main',
+      routeSessionKey: key,
+      debugMode: false,
+    }), { initialProps: { key: 'session-a', selectedAdapter: adapter } });
+    return { adapter, view, switchTo: (key: string, selectedAdapter: any = adapter) => view.rerender({ key, selectedAdapter }) };
+  }
+
+  async function select(view: ReturnType<typeof mount>['view']) {
+    library.mockResolvedValueOnce({ canceled: false, assets: [image] } as any);
+    await act(async () => { await view.result.current.pickImage(); });
+    expect(view.result.current.pendingImages).toEqual([image]);
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    resetMessageQueueStore();
+    resetMockState();
+    mockActualImagePicker = true;
+    library.mockReset(); camera.mockReset(); permission.mockReset(); document.mockReset(); readFile.mockReset();
+    library.mockResolvedValue({ canceled: true, assets: null } as any);
+    camera.mockResolvedValue({ canceled: false, assets: [image] } as any);
+    permission.mockResolvedValue({ granted: true } as any);
+    document.mockResolvedValue({ canceled: true, assets: null } as any);
+    readFile.mockResolvedValue('YQ==');
+    alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    mockActualImagePicker = false;
+    jest.runOnlyPendingTimers();
+    jest.useRealTimers();
+    alert.mockRestore();
+    consoleError.mockRestore();
+  });
+
+  it.each(['openclaw', 'hermes', 'codex', 'pi', 'claude-code'] as const)('retires the selected tray on same-Agent %s A→B→A session changes', async backend => {
+    const { adapter, view, switchTo } = mount(backend);
+    await select(view);
+    switchTo('session-b');
+    expect(view.result.current.pendingImages).toEqual([]);
+    expect(view.result.current.canAddMoreImages).toBe(true);
+    switchTo('session-a');
+    expect(view.result.current.pendingImages).toEqual([]);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('preserves the same logical scope through reconnect, a missing adapter and history reload', async () => {
+    const { adapter, view, switchTo } = mount();
+    await select(view);
+    switchTo('session-a', { ...adapter, state: 'connecting' });
+    expect(view.result.current.pendingImages).toEqual([image]);
+    switchTo('session-a', null);
+    expect(view.result.current.pendingImages).toEqual([image]);
+    switchTo('session-a');
+    await act(async () => { view.result.current.reloadSession({ key: 'session-a', kind: 'direct' }); });
+    expect(view.result.current.pendingImages).toEqual([image]);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('rejects a library result from the first A visit after A→B→A, preserving the new A selection', async () => {
+    const { adapter, view, switchTo } = mount();
+    const late = deferred<any>(); library.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>;
+    act(() => { task = view.result.current.pickImage(); });
+    switchTo('session-b'); switchTo('session-a');
+    await select(view);
+    await act(async () => { late.resolve({ canceled: false, assets: [{ ...image, uri: 'file:///old-a.jpg' }] }); await task; });
+    expect(view.result.current.pendingImages).toEqual([image]);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('rejects a recent-photo conversion from an earlier A visit', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>();
+    jest.requireMock('expo-image-manipulator').manipulateAsync.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>;
+    await act(async () => { task = view.result.current.attachLocalImages(['file:///old.heic']); });
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve({ ...image, uri: 'file:///old.jpg' }); await task; });
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('does not read a file selected after its conversation has departed', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>(); document.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>; act(() => { task = view.result.current.pickFile(); });
+    switchTo('session-b');
+    await act(async () => { late.resolve({ canceled: false, assets: [{ uri: 'file:///old.pdf', name: 'old.pdf', mimeType: 'application/pdf' }] }); await task; });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('rejects a file read that completes after A→B→A', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<string>(); readFile.mockReturnValueOnce(late.promise);
+    document.mockResolvedValueOnce({ canceled: false, assets: [{ uri: 'file:///old.pdf', name: 'old.pdf', mimeType: 'application/pdf' }] } as any);
+    let task!: Promise<void>; await act(async () => { task = view.result.current.pickFile(); });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve('YQ=='); await task; });
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('does not launch the camera after an old permission callback survives A→B→A', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>(); permission.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>; await act(async () => { task = view.result.current.takePhoto(); });
+    expect(permission).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve({ granted: true }); await task; });
+    expect(camera).not.toHaveBeenCalled();
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('rejects an old camera result after A→B→A', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>(); camera.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>; await act(async () => { task = view.result.current.takePhoto(); });
+    expect(camera).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve({ canceled: false, assets: [image] }); await task; });
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('retires a native paste without poisoning the next scope capacity or reporting old failure', async () => {
+    const { adapter, view, switchTo } = mount();
+    const late = deferred<string>(); readFile.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>;
+    await act(async () => { task = view.result.current.onPasteFiles([pasted, { ...pasted, type: 'unsupported/private' }]); });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    let currentPaste!: Promise<void>;
+    await act(async () => { currentPaste = view.result.current.onPasteFiles(Array.from({ length: 6 }, (_, i) => ({ ...pasted, uri: `file:///new-${i}.png` }))); });
+    const currentCountBeforeOldRead = view.result.current.pendingImages.length;
+    await act(async () => { late.resolve('YQ=='); await Promise.all([task, currentPaste]); });
+    expect(currentCountBeforeOldRead).toBe(6);
+    expect(alert).not.toHaveBeenCalled();
+    expect(view.result.current.pendingImages).toHaveLength(6);
+    expect(view.result.current.pendingImages.every(attachment => attachment.uri.startsWith('file:///new-'))).toBe(true);
+    expect(view.result.current.canAddMoreImages).toBe(false);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('rejects retained setters and paste callbacks from the departed scope', async () => {
+    const { view, switchTo } = mount();
+    const old = view.result.current;
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => {
+      old.setPendingImages([image]);
+      old.onPasteFailed();
+      await old.onPasteFiles([pasted]);
+      await old.pickImage();
+    });
+    expect(view.result.current.pendingImages).toEqual([]);
+    expect(alert).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+    expect(library).not.toHaveBeenCalled();
+    view.unmount();
+    await act(async () => { await old.pickFile(); });
+    expect(document).not.toHaveBeenCalled();
+  });
 });

@@ -311,6 +311,8 @@ function ThreadScreenContent({
   const previewSnapshot = useRef<SessionPreviewSnapshot | null>(null);
   const controller = useChatController({
     adapter,
+    routeConnectionId: connectionId,
+    routeAgentId: agentId,
     routeSessionKey: sessionKey,
     readOnly: sessionPreview || nativeReadOnly,
     debugMode: app.debugMode,
@@ -838,13 +840,13 @@ function ThreadScreenContent({
     if (!adapter || !focused || locked || sessionPreview || branchBusy.current || !branchScope.active) return;
     branchBusy.current = true;
     controller.composerRef.current?.blur();
-    void createReplyConversation(adapter, agentId, sessionKey, message).then(session => {
+    void createReplyConversation(adapter, agentId, sessionKey, message, rosterSession?.project?.id).then(session => {
       if (!branchScope.active || getConnectionRuntime().getSnapshot().activeAdapter !== adapter) return;
       navigation.push('Thread', { connectionId, agentId, sessionKey: session.key, from: 'panel' });
     }).catch(() => {
       if (branchScope.active) Alert.alert(t('Error', { ns: 'common' }), t('Unable to start a new chat'));
     }).finally(() => { branchBusy.current = false; });
-  }, [adapter, focused, locked, sessionPreview, branchScope, controller.composerRef, agentId, sessionKey, connectionId, navigation, t]);
+  }, [adapter, focused, locked, sessionPreview, branchScope, controller.composerRef, agentId, sessionKey, rosterSession?.project?.id, connectionId, navigation, t]);
 
   const messageActions = useMemo(() => ({
     onCopy: handleCopyMessage,
@@ -979,6 +981,7 @@ function ThreadScreenContent({
         model={controller.currentModelHeaderLabel}
         modelDisplayName={controller.currentModelDisplayName}
         activityLabel={controller.activityLabel}
+        runWorkIdentity={controller.runWorkIdentity}
         interactionAttention={rosterSession ? rosterSession.attention : currentSession?.attention}
         capabilities={timelineCapabilities}
         readOnlyFooter={nativeReadOnly && !sessionPreview ? <View style={{ padding: Space.lg, paddingBottom: Math.max(insets.bottom, Space.lg), gap: Space.md }}>
@@ -1045,6 +1048,7 @@ function ThreadScreenContent({
         loadingMoreHistory={!sessionPreview && controller.loadingMoreHistory}
         historyPagingBlocked={controller.refreshing}
         historyScope={`${connectionId}:${agentId}:${sessionKey}`}
+        qaGeometryActive={focused && routeIsActive && !locked && controller.sessionKey === sessionKey}
         historyLoadMoreError={!sessionPreview && controller.historyLoadMoreError}
         onRetryHistory={!sessionPreview ? controller.retryLoadMoreHistory : undefined}
         topInset={insets.top}
@@ -1059,7 +1063,7 @@ function ThreadScreenContent({
           if (!value) { setSelectedSkill(null); controller.setInput(''); }
           else controller.setInput(activeSkill ? `${activeSkill.prefix}${value}` : value);
         }}
-        onSend={sessionPreview ? openSessionPaywall : controller.canSteer ? () => { controller.composerRef.current?.blur(); setRunInputId(controller.activeRunId); } : controller.onSend}
+        onSend={sessionPreview ? openSessionPaywall : controller.canChooseRunInput ? () => { controller.composerRef.current?.blur(); Keyboard.dismiss(); setRunInputId(controller.activeRunId); } : controller.onSend}
         onCancel={requestCancelCurrentRun}
         onOpenAddMenu={addMenuAvailable ? handleOpenAddMenu : undefined}
         onVoice={controller.voiceInputSupported ? controller.toggleVoiceInput : undefined}
@@ -1107,6 +1111,7 @@ function ThreadScreenContent({
         showSlashSuggestions={controller.showSlashSuggestions}
         onSelectSlashCommand={controller.onSelectSlashCommand}
         onDismissSlashSuggestions={controller.dismissSlashSuggestions}
+        permissionsNeedConfirmation={controller.permissions?.requiresConfirmation === true}
         onReviewRuntimeSettings={controller.runtimeSettingsUnconfirmed && !controller.runtimeSettingsBusy ? () => {
           controller.composerRef.current?.blur();
           Keyboard.dismiss();
@@ -1118,7 +1123,8 @@ function ThreadScreenContent({
         onResolveApproval={controller.resolveApproval}
       />
       <RunInputSheet visible={Boolean(runInputId) && !sessionPreview} scope={`${connectionId}:${agentId}:${sessionKey}`}
-        onClose={() => setRunInputId(null)} onCurrent={() => { if (runInputId) controller.onSteer(runInputId); }} onNext={controller.onSend} canSteer={controller.canSteer && controller.activeRunId === runInputId} />
+        onClose={() => setRunInputId(null)} onCurrent={() => { if (runInputId) controller.onSteer(runInputId); }} onNext={controller.onSend}
+        canSteer={controller.canSteer && controller.activeRunId === runInputId} steeringPending={controller.steeringPending} />
       <SessionFilesSheet visible={sessionFilesVisible && focused && !locked && !sessionPreview && routeIsActive} adapter={adapter} sessionKey={sessionKey}
         online={adapter?.state === 'ready'} onClose={() => setSessionFilesVisible(false)} />
       <SkillPickerSheet visible={skillPickerVisible && !sessionPreview} adapter={adapter} agentId={agentId} sessionKey={sessionKey}

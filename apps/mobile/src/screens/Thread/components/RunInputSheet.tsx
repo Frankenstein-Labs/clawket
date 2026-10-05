@@ -7,8 +7,9 @@ import { IconSize } from '../../../theme/tokens';
 import { useAppTheme } from '../../../theme';
 
 const SNAP_POINTS = ['32%'];
-export function RunInputSheet({ visible, scope, onClose, onCurrent, onNext, canSteer }: Readonly<{
+export function RunInputSheet({ visible, scope, onClose, onCurrent, onNext, canSteer, steeringPending = false }: Readonly<{
   visible: boolean; scope: string; onClose: () => void; onCurrent: () => void; onNext: () => void; canSteer: boolean;
+  steeringPending?: boolean;
 }>) {
   const { t } = useTranslation(['chat', 'common']);
   const { theme } = useAppTheme();
@@ -19,6 +20,7 @@ export function RunInputSheet({ visible, scope, onClose, onCurrent, onNext, canS
     closeAccessibilityLabel={t('Close', { ns: 'common' })} snapPoints={SNAP_POINTS} testID="run-input-sheet"
     onAfterClose={() => { const action = pending.current; pending.current = null; action?.(); }}>
     <SettingsRow title={t('Current task')} leading={<CornerUpLeft color={theme.colors.ink} size={IconSize.md} />}
+      value={steeringPending ? t('Sending…') : undefined}
       disabled={!canSteer} onPress={() => choose(onCurrent)} testID="run-input-current" />
     <SettingsRow title={t('Next message')} leading={<ListPlus color={theme.colors.ink} size={IconSize.md} />}
       onPress={() => choose(onNext)} testID="run-input-next" />

@@ -205,6 +205,8 @@ export interface ChatMessage {
   artifactDisplayText?: string;
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
+  /** Optional backend-authored execution group; never inferred from prose or clocks. */
+  turnId?: string;
   text: string;
   timestampMs?: number;
   idempotencyKey?: string;
@@ -226,6 +228,8 @@ export interface ChatMessage {
   tool?: {
     name: string;
     status: 'running' | 'success' | 'error' | 'unknown';
+    /** Adapter-reported state, including unknown; do not infer a live start from it. */
+    statusReported?: true;
     callId?: string;
     summary?: string;
     input?: unknown;
@@ -241,10 +245,14 @@ export interface SessionHistory {
   toolCallAliases?: Readonly<Record<string, string>>;
   key: string;
   messages: ChatMessage[];
+  /** Adapter-declared cursor semantics: an absent nextCursor is a complete page,
+   * including the first empty page. Omission preserves legacy limit/local paging. */
+  pagination?: 'cursor';
   nextCursor?: string;
   hasActiveRun: boolean;
   /** Backend recovery snapshot; absent on peers that do not expose live runs. */
-  activeRun?: { runId: string; text: string; startedAtMs?: number; sessionAbortable?: boolean };
+  activeRun?: { runId: string; text: string; startedAtMs?: number; messageTimestampMs?: number; sessionAbortable?: boolean;
+    turnId?: string; inputMessageId?: string; inputMessageKey?: string };
   sessionId?: string;
   thinkingLevel?: string;
 }
@@ -253,6 +261,8 @@ export interface FinalMessage {
   artifactDisplayText?: string;
   role: 'assistant';
   content: string;
+  /** Native final-reply clock in milliseconds; absent keeps receipt-time presentation. */
+  timestampMs?: number;
   attachments?: ChatMessage['attachments'];
   provider?: string;
   model?: string;

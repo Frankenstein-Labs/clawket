@@ -1,3 +1,4 @@
+import { validTurnIdentity } from '../chat/turnIdentity';
 import { normalizeMessageAttribution } from '../chat/messageAttribution';
 import { isTranscriptBoundaryNotice } from '../chat/agentSystemNotice';
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -12,6 +13,7 @@ import { sanitizeSilentPreviewText, shouldHideMessage } from "../utils/chat-mess
 export type CachedMessage = {
   id: string;
   historyMessageId?: string;
+  turnId?: string;
   role: "user" | "assistant" | "system" | "tool";
   text: string;
   attribution?: UiMessage["attribution"];
@@ -138,7 +140,7 @@ function sanitizeCachedMessages(messages: unknown[]): CachedMessage[] {
   return messages
     .filter(isStoredCachedMessage)
     .filter(isCacheableMessage)
-    .map(message => ({ ...message, attribution: normalizeMessageAttribution(message.attribution), sentLocally: message.sentLocally === true ? true as const : undefined }))
+    .map(message => ({ ...message, turnId: validTurnIdentity(message.turnId), attribution: normalizeMessageAttribution(message.attribution), sentLocally: message.sentLocally === true ? true as const : undefined }))
     .filter((message) => !shouldHideMessage(message));
 }
 
@@ -151,6 +153,7 @@ function toSlim(msg: UiMessage): CachedMessage {
   if (msg.attribution) slim.attribution = normalizeMessageAttribution(msg.attribution);
   if (msg.sentLocally) slim.sentLocally = true;
   if (msg.sendUncertain) slim.sendUncertain = true;
+  if (validTurnIdentity(msg.turnId)) slim.turnId = msg.turnId;
   if (msg.historyMessageId) slim.historyMessageId = msg.historyMessageId;
   if (msg.idempotencyKey) slim.idempotencyKey = msg.idempotencyKey;
   if (msg.timestampMs) slim.timestampMs = msg.timestampMs;
@@ -610,7 +613,7 @@ export const ChatCacheService = {
         // Cache user, assistant and tool messages and transcript boundaries; skip other system noise.
         const cacheable = messages
           .filter(isCacheableMessage)
-          .map(message => ({ ...message, attribution: normalizeMessageAttribution(message.attribution), sentLocally: message.sentLocally === true ? true as const : undefined }))
+          .map(message => ({ ...message, turnId: validTurnIdentity(message.turnId), attribution: normalizeMessageAttribution(message.attribution), sentLocally: message.sentLocally === true ? true as const : undefined }))
           .filter((message) => !shouldHideMessage(message))
           .map(toSlim);
 

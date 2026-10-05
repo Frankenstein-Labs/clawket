@@ -1,4 +1,5 @@
 import { isIncomingParticipant } from '../../chat/messageAttribution';
+import { isNewUserTurn, originalRunUserIndex, type RunWorkIdentity } from '../../chat/turnIdentity';
 import type { UiMessage } from '../../types/chat';
 
 /**
@@ -17,6 +18,39 @@ import type { UiMessage } from '../../types/chat';
  */
 export function opensTurn(message: UiMessage): boolean {
   return message.role === 'user' && !isIncomingParticipant(message) && message.delivery === undefined;
+}
+
+/** Same native execution guides do not open another work record. Legacy users still do. */
+function workBoundaries(messages: ReadonlyArray<UiMessage>, active?: RunWorkIdentity): boolean[] {
+  const boundaries = new Array<boolean>(messages.length).fill(false);
+  let original: UiMessage | undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (!opensTurn(message)) continue;
+    if (!original || isNewUserTurn(message, original)) {
+      original = message;
+      boundaries[index] = true;
+    }
+  }
+  if (active) {
+    const originalIndex = originalRunUserIndex(messages, active.turnId, active.inputMessageId, active.inputMessageKey);
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index]!;
+      if (opensTurn(message) && message.turnId === active.turnId && index !== originalIndex
+        && !message.idempotencyKey) boundaries[index] = false;
+    }
+  }
+  return boundaries;
+}
+
+/** A partial page may supply a run clock, but cannot nominate its first guide as the input. */
+export function liveTurnMessages(messages: ReadonlyArray<UiMessage>, active?: RunWorkIdentity): ReadonlyArray<UiMessage> {
+  const boundaries = workBoundaries(messages, active);
+  let end = 0;
+  while (end < messages.length && !boundaries[end]) end += 1;
+  const turn = messages.slice(0, end);
+  return active && originalRunUserIndex(messages, active.turnId, active.inputMessageId, active.inputMessageKey) < 0
+    ? turn.filter(message => message.turnId === active.turnId) : turn;
 }
 
 /** A tool call the turn made. Approval requests ask the user; they are not steps. */
@@ -78,8 +112,8 @@ export const EMPTY_TURN_WORK: TurnWork = Object.freeze({ entries: [], steps: [],
 /**
  * Builds a turn from its messages, newest first. In the running turn a step
  * whose result is not recorded yet can read `unknown` (Claude Code and Pi
- * history reloads mid-run): when nothing else runs, the newest such step is
- * the one still working.
+ * history reloads mid-run): when nothing else runs, the newest such legacy
+ * step is still working. Explicit unknown state is never execution evidence.
  */
 function buildTurnWork(turn: ReadonlyArray<UiMessage>, live = false): TurnWork {
   if (turn.length === 0) return EMPTY_TURN_WORK;
@@ -114,7 +148,7 @@ function buildTurnWork(turn: ReadonlyArray<UiMessage>, live = false): TurnWork {
   }
   if (steps.length === 0 && !pendingApproval) return EMPTY_TURN_WORK;
   // `steps` is still newest-first here.
-  if (live && !current && steps[0]?.toolStatus === 'unknown') {
+  if (live && !current && steps[0]?.toolStatus === 'unknown' && !steps[0].toolStatusReported) {
     current = steps[0];
     running = 1;
   }
@@ -124,10 +158,8 @@ function buildTurnWork(turn: ReadonlyArray<UiMessage>, live = false): TurnWork {
 }
 
 /** The newest turn: everything after the latest prompt the Agent received. */
-export function collectLiveTurnWork(messages: ReadonlyArray<UiMessage>): TurnWork {
-  let end = 0;
-  while (end < messages.length && !opensTurn(messages[end]!)) end += 1;
-  return buildTurnWork(messages.slice(0, end), true);
+export function collectLiveTurnWork(messages: ReadonlyArray<UiMessage>, active?: RunWorkIdentity): TurnWork {
+  return buildTurnWork(liveTurnMessages(messages, active), true);
 }
 
 /**
@@ -137,10 +169,11 @@ export function collectLiveTurnWork(messages: ReadonlyArray<UiMessage>): TurnWor
 export function collectTurnWorkAround(messages: ReadonlyArray<UiMessage>, anchorKey: string): TurnWork {
   const anchor = messages.findIndex((message) => renderKeyOf(message) === anchorKey);
   if (anchor < 0) return EMPTY_TURN_WORK;
+  const boundaries = workBoundaries(messages);
   let newest = anchor;
-  while (newest > 0 && !opensTurn(messages[newest - 1]!)) newest -= 1;
+  while (newest > 0 && !boundaries[newest - 1]) newest -= 1;
   let oldest = anchor;
-  while (oldest < messages.length - 1 && !opensTurn(messages[oldest + 1]!)) oldest += 1;
+  while (oldest < messages.length - 1 && !boundaries[oldest + 1]) oldest += 1;
   return buildTurnWork(messages.slice(newest, oldest + 1));
 }
 
@@ -173,16 +206,26 @@ const NO_RECEIPTS: ReadonlyMap<string, TurnReceipt> = new Map();
  * turn (`liveTurnOpen`) shows nothing for its steps: the dock does. Approvals
  * and everything said stay where they are.
  */
-export function foldTurnSteps(messages: ReadonlyArray<UiMessage>, liveTurnOpen: boolean): FoldedTurns {
+export function foldTurnSteps(messages: ReadonlyArray<UiMessage>, liveTurnOpen: boolean, active?: RunWorkIdentity): FoldedTurns {
   if (!messages.some(isTurnStep)) return { messages, receipts: NO_RECEIPTS, standalone: NO_RECEIPTS };
+  if (liveTurnOpen && active
+    && originalRunUserIndex(messages, active.turnId, active.inputMessageId, active.inputMessageKey) < 0) {
+    // Without the input, only exact execution-tagged rows belong to its dock.
+    // Keep older/unreported work in its own legacy record, never under this run's reply.
+    const older = foldTurnSteps(messages.filter(message => message.turnId !== active.turnId), false);
+    const retained = new Set(older.messages);
+    return { ...older, messages: messages.filter(message => message.turnId === active.turnId
+      ? !isTurnStep(message) : retained.has(message)) };
+  }
   const shown: UiMessage[] = [];
   const receipts = new Map<string, TurnReceipt>();
   const standalone = new Map<string, TurnReceipt>();
+  const boundaries = workBoundaries(messages, liveTurnOpen ? active : undefined);
   let index = 0;
   let newestTurn = true;
   while (index < messages.length) {
     const start = index;
-    while (index < messages.length && !opensTurn(messages[index]!)) index += 1;
+    while (index < messages.length && !boundaries[index]) index += 1;
     const turn = messages.slice(start, index);
     const live = newestTurn && liveTurnOpen;
     newestTurn = false;

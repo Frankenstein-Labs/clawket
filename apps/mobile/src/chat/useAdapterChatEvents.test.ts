@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react-native';
+import { preserveCompletedRunPresentation } from './historyMergePolicy';
 import {
   createMockAdapter,
   type ConnectionDescriptor,
@@ -38,6 +39,35 @@ const session: SessionDescriptor = {
 };
 
 describe('mapAdapterChatMessage', () => {
+  it.each(['unknown', 'running'] as const)('clears prior completion clocks when a gap reload merges reported %s into the active turn', status => {
+    const user = { id: 'user', role: 'user' as const, text: 'inspect' };
+    const recovered = mapAdapterChatMessage({ id: 'tool', role: 'tool', text: '', tool: { name: 'read', status, statusReported: true } })!;
+    const live = { ...recovered, presentationRunId: 'run', toolStatus: 'success' as const, toolStartedAt: 100, toolFinishedAt: 200, toolDurationMs: 100 };
+    const merged = preserveCompletedRunPresentation([user, live], [user, recovered], { live: true });
+    expect(merged[1]).toMatchObject({ toolStatus: status, toolStatusReported: true });
+    expect(merged[1].toolFinishedAt).toBeUndefined();
+    expect(merged[1].toolDurationMs).toBeUndefined();
+  });
+
+  it('retains explicitly reported unknown history without treating it as a live start', () => {
+    const message = mapAdapterChatMessage({ id: 'unknown', role: 'tool', text: '', tool: { name: 'read', status: 'unknown', statusReported: true, durationMs: 50, finishedAtMs: 200 } });
+    expect(message)
+      .toMatchObject({ toolStatus: 'unknown', toolStatusReported: true });
+    expect(message?.toolDurationMs).toBeUndefined();
+    expect(message?.toolFinishedAt).toBeUndefined();
+  });
+  it('preserves valid native turn identity for users, paragraphs and tools and rejects malformed metadata', () => {
+    for (const role of ['user', 'assistant', 'tool'] as const) {
+      expect(mapAdapterChatMessage({ id: role, role, text: '', turnId: 'native-turn' })?.turnId).toBe('native-turn');
+      for (const turnId of ['', ' padded ', 'x'.repeat(257), 42]) {
+        expect(mapAdapterChatMessage({ id: role, role, text: '', turnId } as any)?.turnId).toBeUndefined();
+      }
+    }
+    const message = mapAdapterSessionUpdate({ type: 'tool_call', sessionKey: 'chat', runId: 'run',
+      turnId: 'native-turn', inputMessageId: 'original', toolCallId: 'tool', title: 'exec' });
+    expect(message).toMatchObject({ turnId: 'native-turn', inputMessageId: 'original', message: { turnId: 'native-turn' } });
+  });
+
   it('preserves normalized history content in the existing UiMessage shape', () => {
     expect(mapAdapterChatMessage({
       id: 'message-1',
@@ -128,6 +158,25 @@ describe('mapAdapterChatMessage', () => {
 });
 
 describe('mapAdapterSessionUpdate', () => {
+  it.each([undefined, null, NaN, Infinity, -1, 0, 1e20, '900'])('retains receipt-time presentation for omitted or invalid final clock %j', timestampMs => {
+    const update = mapAdapterSessionUpdate({
+      type: 'run_finished', sessionKey: session.key, runId: 'legacy-final', stopReason: 'end_turn',
+      message: { role: 'assistant', content: 'Done', timestampMs },
+    } as any, { now: () => 1000 });
+    expect(update.type).toBe('run_finished');
+    if (update.type === 'run_finished') expect(update.finalMessage?.timestampMs).toBe(1000);
+  });
+  it('uses an authoritative final clock without retiming a cancellation notice', () => {
+    const update = mapAdapterSessionUpdate({
+      type: 'run_finished', sessionKey: session.key, runId: 'clock-final', stopReason: 'cancelled',
+      message: { role: 'assistant', content: 'Partial reply', timestampMs: 900 },
+    }, { now: () => 1000 });
+    expect(update.type).toBe('run_finished');
+    if (update.type === 'run_finished') {
+      expect(update.finalMessage?.timestampMs).toBe(900);
+      expect(update.systemMessage?.timestampMs).toBe(1000);
+    }
+  });
   const options = {
     now: () => 1_000,
     translate: (key: string) => `translated:${key}`,
@@ -251,6 +300,18 @@ describe('mapAdapterSessionUpdate', () => {
         toolFinishedAt: 1_000,
       },
     });
+
+    for (const status of ['running', 'unknown', 'success', 'error'] as const) {
+      const start = mapAdapterSessionUpdate({ type: 'tool_call', sessionKey: session.key, runId: 'run-1', toolCallId: status, title: 'Read file', status }, options);
+      expect(start).toMatchObject({ message: { toolStatus: status, toolStatusReported: true } });
+      if (start.type !== 'tool_call') throw new Error('Missing tool call');
+      expect(start.message.toolStartedAt).toBe(status === 'running' ? 1_000 : undefined);
+      expect(start.message.toolFinishedAt).toBeUndefined();
+      const change = mapAdapterSessionUpdate({ type: 'tool_call_update', sessionKey: session.key, runId: 'run-1', toolCallId: status, status }, options);
+      if (change.type !== 'tool_call_update') throw new Error('Missing tool update');
+      expect(change.message.toolStatus).toBe(status);
+      expect(change.message.toolFinishedAt).toBe(status === 'success' || status === 'error' ? 1_000 : undefined);
+    }
 
     expect(mapAdapterSessionUpdate({
       type: 'run_finished',

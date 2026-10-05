@@ -52,6 +52,8 @@ type WorkletEventHandle = {
   };
 };
 
+const EMPTY_QA_RAW = { enabled: false, sequence: 0, at: 0, event: 'none', offset: 0, contentHeight: 0, viewportHeight: 0 };
+
 export type UiThreadFollow = Readonly<{
   /** Attaches the list's native scroll view; false when it cannot be followed this way. */
   bind: (scroller: unknown) => boolean;
@@ -65,6 +67,12 @@ export type UiThreadFollow = Readonly<{
   snap: () => void;
   /** Ends a glide in flight where it is. */
   stop: () => void;
+  /** Passive development sampling of the already registered raw event path. */
+  qaGeometry: Readonly<{
+    enable: (enabled: boolean) => void;
+    sample: (receive: (value: unknown) => void) => void;
+    bindingRevision: () => number;
+  }>;
 }>;
 
 /**
@@ -91,6 +99,9 @@ export function useUiThreadFollow(callbacks: Readonly<{
   const readerTouching = useSharedValue(false);
   const readerFlinging = useSharedValue(false);
   const readerEventAt = useSharedValue(0);
+  const qaRaw = useSharedValue(EMPTY_QA_RAW);
+  const qaRegistered = useRef(false);
+  const qaBindingRevision = useRef(0);
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
   const settled = useCallback((generation: number) => callbacksRef.current.onSettled(generation), []);
@@ -100,6 +111,20 @@ export function useUiThreadFollow(callbacks: Readonly<{
     'worklet';
     offset.value = event.contentOffset.y;
     const name = event.eventName;
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && qaRaw.value.enabled) {
+      qaRaw.value = {
+        enabled: true,
+        sequence: Math.min(100_000_000, qaRaw.value.sequence + 1),
+        at: Date.now(),
+        event: name.endsWith('onScrollBeginDrag') ? 'drag_begin'
+          : name.endsWith('onScrollEndDrag') ? 'drag_end'
+            : name.endsWith('onMomentumScrollBegin') ? 'momentum_begin'
+              : name.endsWith('onMomentumScrollEnd') ? 'momentum_end' : 'scroll',
+        offset: event.contentOffset.y,
+        contentHeight: event.contentSize?.height,
+        viewportHeight: event.layoutMeasurement?.height,
+      };
+    }
     const dragBegins = name.endsWith('onScrollBeginDrag');
     const flingBegins = name.endsWith('onMomentumScrollBegin');
     if (dragBegins) readerTouching.value = true;
@@ -124,7 +149,13 @@ export function useUiThreadFollow(callbacks: Readonly<{
     const unsubscribe = scrollRef.observe((tag) => {
       if (!tag) return undefined;
       handler.registerForEvents?.(tag);
-      return () => handler.unregisterFromEvents?.(tag);
+      qaRegistered.current = true;
+      qaBindingRevision.current += 1;
+      return () => {
+        qaRegistered.current = false;
+        qaBindingRevision.current += 1;
+        handler.unregisterFromEvents?.(tag);
+      };
     }) as unknown;
     return typeof unsubscribe === 'function' ? unsubscribe as () => void : undefined;
   }, [scrollEvents, scrollRef]);
@@ -200,5 +231,25 @@ export function useUiThreadFollow(callbacks: Readonly<{
     })();
   }, [gliding, position]);
 
-  return useMemo(() => ({ bind, glide, snap, stop }), [bind, glide, snap, stop]);
+  const qaGeometry = useMemo(() => ({
+    bindingRevision: () => qaBindingRevision.current,
+    enable: (enabled: boolean) => {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) qaRaw.value = { ...EMPTY_QA_RAW, enabled };
+    },
+    sample: (receive: (value: unknown) => void) => {
+      if (typeof __DEV__ === 'undefined' || !__DEV__) { receive({ available: false }); return; }
+      const available = qaRegistered.current;
+      runOnUI(() => {
+        'worklet';
+        const value = qaRaw.value;
+        runOnJS(receive)(value.enabled && value.sequence > 0 ? {
+          available, sequence: value.sequence, ageMs: Math.max(0, Date.now() - value.at),
+          event: value.event, offset: value.offset,
+          contentHeight: value.contentHeight, viewportHeight: value.viewportHeight,
+        } : { available, sequence: 0, event: 'none' });
+      })();
+    },
+  }), [qaRaw]);
+
+  return useMemo(() => ({ bind, glide, snap, stop, qaGeometry }), [bind, glide, snap, stop, qaGeometry]);
 }

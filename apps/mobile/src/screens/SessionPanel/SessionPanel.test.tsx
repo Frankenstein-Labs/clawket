@@ -75,6 +75,7 @@ jest.mock('react-native', () => {
     ),
   );
   return {
+    ...require('../../../__mocks__/native-animated'),
     Platform: { OS: 'android', select: (options: Record<string, unknown>) => options.android ?? options.default },
     Keyboard: { dismiss: jest.fn() },
     AppState: { currentState: 'active', addEventListener: () => ({ remove: jest.fn() }) },
@@ -586,6 +587,92 @@ describe('SessionPanelView', () => {
     expect(view.getByTestId('session-panel-action-export')).toBeTruthy();
   });
 
+  it.each(['reset', 'delete'] as const)('shows a rejected %s and leaves its conversation available for retry', async (action) => {
+    const onSessionAction = jest.fn().mockRejectedValueOnce(new Error('Stop the task and wait for it to finish first'))
+      .mockResolvedValueOnce(undefined);
+    const row = { ...rowById('agent:main:main'), hasActiveRun: true };
+    const view = render(<SessionPanelView {...props({ rows: [row], platform: 'codex', onSessionAction })} />);
+    const confirm = async () => {
+      fireEvent(view.getByTestId(`session-panel-row-${row.id}`), 'longPress');
+      chooseAfterDismiss(view, action);
+      await act(async () => { fireEvent.press(view.getByLabelText(action === 'reset' ? 'Reset' : 'Delete')); });
+    };
+    await confirm();
+    expect(onSessionAction).toHaveBeenCalledWith(row, action);
+    expect(view.getByText('Save Failed')).toBeTruthy();
+    expect(view.getByTestId(`session-panel-row-${row.id}`)).toBeTruthy();
+    await confirm();
+    expect(onSessionAction).toHaveBeenCalledTimes(2);
+    expect(view.queryByText('Save Failed')).toBeNull();
+  });
+
+  it.each(['reset', 'delete'] as const)('discards an old %s failure after changing the connection scope', async (action) => {
+    let reject!: (reason: Error) => void;
+    const onSessionAction = jest.fn(() => new Promise<void>((_resolve, rejectResult) => { reject = rejectResult; }));
+    const row = rowById('agent:main:main');
+    const view = render(<SessionPanelView {...props({ rows: [row], archiveScope: 'before', onSessionAction })} />);
+    fireEvent(view.getByTestId(`session-panel-row-${row.id}`), 'longPress');
+    chooseAfterDismiss(view, action);
+    await act(async () => { fireEvent.press(view.getByLabelText(action === 'reset' ? 'Reset' : 'Delete')); });
+    view.rerender(<SessionPanelView {...props({ rows: [row], archiveScope: 'after', onSessionAction })} />);
+    await act(async () => { reject(new Error('Old connection rejected the action')); });
+    expect(view.queryByText('Save Failed')).toBeNull();
+    expect(view.getByTestId(`session-panel-row-${row.id}`)).toBeTruthy();
+  });
+
+  it('keeps a newer successful confirmation when an earlier action rejects later', async () => {
+    let reject!: (reason: Error) => void;
+    const onSessionAction = jest.fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, rejectResult) => { reject = rejectResult; }))
+      .mockResolvedValueOnce(undefined);
+    const row = rowById('agent:main:main');
+    const view = render(<SessionPanelView {...props({ rows: [row], onSessionAction })} />);
+    for (const action of ['reset', 'delete'] as const) {
+      fireEvent(view.getByTestId(`session-panel-row-${row.id}`), 'longPress');
+      chooseAfterDismiss(view, action);
+      await act(async () => { fireEvent.press(view.getByLabelText(action === 'reset' ? 'Reset' : 'Delete')); });
+    }
+    expect(onSessionAction).toHaveBeenCalledTimes(2);
+    await act(async () => { reject(new Error('The old reset failed after delete succeeded')); });
+    expect(view.queryByText('Save Failed')).toBeNull();
+  });
+
+  it('honors Codex action restrictions until its native terminal descriptor restores them', () => {
+    const row = { ...rowById('agent:main:main'), hasActiveRun: true,
+      allowedActions: { pin: true, rename: true, reset: false, delete: false } };
+    const view = render(<SessionPanelView {...props({ rows: [row], platform: 'codex' })} />);
+    const openActions = () => fireEvent(view.getByTestId(`session-panel-row-${row.id}`), 'longPress');
+    openActions();
+    expect(view.queryByTestId('session-panel-action-reset')).toBeNull();
+    expect(view.queryByTestId('session-panel-action-delete')).toBeNull();
+    view.rerender(<SessionPanelView {...props({ rows: [{ ...row, hasActiveRun: false }], platform: 'codex' })} />);
+    openActions();
+    expect(view.queryByTestId('session-panel-action-reset')).toBeNull();
+    view.rerender(<SessionPanelView {...props({ rows: [{ ...row, hasActiveRun: false,
+      allowedActions: { ...row.allowedActions, reset: true, delete: true } }], platform: 'codex' })} />);
+    openActions();
+    expect(view.getByTestId('session-panel-action-reset')).toBeTruthy();
+    expect(view.getByTestId('session-panel-action-delete')).toBeTruthy();
+  });
+
+  it.each(['openclaw', 'hermes', 'pi'] as const)('retains backend-authorized active actions for %s', (platform) => {
+    const row = { ...rowById('agent:main:main'), hasActiveRun: true };
+    const view = render(<SessionPanelView {...props({ rows: [row], platform })} />);
+    fireEvent(view.getByTestId(`session-panel-row-${row.id}`), 'longPress');
+    expect(view.getByTestId('session-panel-action-reset')).toBeTruthy();
+    expect(view.getByTestId('session-panel-action-delete')).toBeTruthy();
+  });
+
+  it('shows a synchronous reset failure through the same retryable notice', async () => {
+    const onSessionAction = jest.fn(() => { throw new Error('Unavailable'); });
+    const row = rowById('agent:main:main');
+    const view = render(<SessionPanelView {...props({ rows: [row], onSessionAction })} />);
+    fireEvent(view.getByTestId(`session-panel-row-${row.id}`), 'longPress');
+    chooseAfterDismiss(view, 'reset');
+    await act(async () => { fireEvent.press(view.getByLabelText('Reset')); });
+    expect(view.getByText('Save Failed')).toBeTruthy();
+  });
+
   it('runs home toggle, reset and delete after the action sheet dismisses and labels shown rows as Hide', async () => {
     const onSessionAction = jest.fn(async () => undefined);
     const view = render(<SessionPanelView {...props({ onSessionAction })} />);
@@ -790,6 +877,18 @@ it('does not offer session creation without a handler or an Agent', () => {
    await act(async () => finish());
    expect(onClose).toHaveBeenCalledTimes(1);
  });
+
+it('does not dismiss or show a failure when creation belongs to a retired presentation', async () => {
+  const onCreateSession = jest.fn(() => Promise.resolve(false as const));
+  const onClose = jest.fn();
+  const view = render(<SessionPanelView {...props({ onCreateSession, onClose })} />);
+  fireEvent.press(view.getByTestId('session-panel-create'));
+  await act(async () => Promise.resolve());
+  expect(onCreateSession).toHaveBeenCalledTimes(1);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(view.queryByText('Save Failed')).toBeNull();
+  expect(view.getByTestId('session-panel-create').props.disabled).toBe(false);
+});
 
 
 describe('project refresh lifecycle', () => {

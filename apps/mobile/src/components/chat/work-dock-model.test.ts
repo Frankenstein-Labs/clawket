@@ -14,6 +14,15 @@ describe('resolveWorkDockPhase', () => {
     expect(phaseOf([step('a', 'success'), prompt])).toBe('thinking');
   });
 
+  it('keeps replying across same-turn guidance while a genuine next input returns to thinking', () => {
+    const main = { ...prompt, turnId: 'turn', idempotencyKey: 'main-key' };
+    const guide: UiMessage = { id: 'guide', role: 'user', text: 'Continue', turnId: 'turn' };
+    const words: UiMessage = { id: 'words', role: 'assistant', text: 'Working', streaming: true, turnId: 'turn' };
+    expect(phaseOf([guide, words, main])).toBe('replying');
+    expect(phaseOf([{ ...guide, idempotencyKey: 'next-key' }, words, main])).toBe('thinking');
+    expect(phaseOf([{ ...guide, turnId: undefined }, words, main])).toBe('thinking');
+  });
+
   it('lets a pending approval outrank the step, and a lost connection outrank everything', () => {
     const approval: UiMessage = {
       id: 'approval_1', role: 'system', text: '',
@@ -77,6 +86,16 @@ describe('liveTurnHasWords', () => {
     expect(liveTurnHasWords([prompt, earlier])).toBe(false);
     expect(liveTurnHasWords([{ id: 's', role: 'assistant', text: '  ', streaming: true }, prompt, earlier])).toBe(false);
     expect(liveTurnHasWords([{ id: 's', role: 'assistant', text: 'On it', streaming: true }, prompt])).toBe(true);
+  });
+
+  it('keeps known same-run words across guidance and excludes unreported older words on a partial page', () => {
+    const identity = { scope: {}, sessionKey: 'session', runId: 'run', turnId: 'turn', inputMessageId: 'main', startedAt: 1000 };
+    const guide: UiMessage = { id: 'guide', role: 'user', text: 'Continue', turnId: 'turn' };
+    const words: UiMessage = { id: 'words', role: 'assistant', text: 'Working', turnId: 'turn' };
+    const earlier: UiMessage = { id: 'earlier', role: 'assistant', text: 'Old answer' };
+    expect(liveTurnHasWords([guide, words, { ...prompt, id: 'main', turnId: 'turn' }], identity)).toBe(true);
+    expect(liveTurnHasWords([guide, words, earlier], identity)).toBe(true);
+    expect(liveTurnHasWords([guide, earlier], identity)).toBe(false);
   });
 
   it('keeps counting through a queued follow-up, which has not opened a turn', () => {

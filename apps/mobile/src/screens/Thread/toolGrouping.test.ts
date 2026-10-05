@@ -41,6 +41,17 @@ it('puts the receipt on words said before the last step, red when the turn ended
   expect(failed.some((item) => item.type === 'receipt')).toBe(false);
 });
 
+it('keeps the newest step as the receipt placement when an earlier native page supplies its oldest call', () => {
+  const latest = tool('toolresult_c', 'success', { renderKey: 'toolcall_c' });
+  const initial = timeline(newestFirst(tool('b'), latest));
+  const paged = timeline(newestFirst(prompt('ask'), tool('a'), tool('b'), latest));
+  expect(initial[0]?.key).toBe('receipt:b');
+  expect(paged[0]?.key).toBe('receipt:a');
+  expect(initial[0]?.type === 'receipt' ? initial[0].anchorKey : null).toBe('toolcall_c');
+  expect(paged[0]?.type === 'receipt' ? [paged[0].anchorKey, paged[0].receipt.steps.map(message => message.id)] : null)
+    .toEqual(['toolcall_c', ['a', 'b', 'toolresult_c']]);
+});
+
 it('shows nothing for the running turn steps: the work dock does', () => {
   const items = timeline(newestFirst(prompt('ask'), tool('a'), reply('said'), tool('b', 'running')), true);
   expect(keys(items)).toEqual(['message:said', 'message:ask']);

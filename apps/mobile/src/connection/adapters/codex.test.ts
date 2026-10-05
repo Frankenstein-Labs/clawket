@@ -1,5 +1,5 @@
 import { CodexAdapter } from './codex';
-import type { ConnectionRecord } from '@clawket/agent-protocol';
+import { LocalSendRejectedError, type ConnectionRecord } from '@clawket/agent-protocol';
 import type { WebSocketLike } from '../transports/types';
 
 class Socket implements WebSocketLike {
@@ -24,15 +24,67 @@ const record: ConnectionRecord = { id: 'phone', backendKind: 'codex', transportK
 let adapter: CodexAdapter;
 let sockets: Socket[];
 beforeEach(() => {
-  jest.useFakeTimers(); jest.spyOn(Math, 'random').mockReturnValue(0);
+  jest.useFakeTimers();
   sockets = [];
-  adapter = new CodexAdapter(record, { webSocketFactory: () => { const socket = new Socket(); sockets.push(socket); return socket; } });
+  const actualRandom = Math.random;
+  // The transport captures this function; stack symbolication needs real randomness.
+  Math.random = () => 0;
+  try {
+    adapter = new CodexAdapter(record, { webSocketFactory: () => { const socket = new Socket(); sockets.push(socket); return socket; } });
+  } finally {
+    Math.random = actualRandom;
+  }
 });
 afterEach(() => { adapter.disconnect(); jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 it('uses health for Relay authentication without starting an OpenClaw challenge', async () => {
   const connected = adapter.connect(); sockets[0].open();
   expect(JSON.parse(sockets[0].sent[0]).method).toBe('health');
   sockets[0].reply(); await connected;
+});
+
+it.each([{ messages: [] }, { messages: [{ id: 'u', role: 'user', text: 'Hello' }, { id: 'a', role: 'assistant', text: 'Hello again' }] }])
+  ('marks a complete first history page as cursor based even on a Bridge without a pagination marker (%j)', async ({ messages }) => {
+    const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+    const loaded = adapter.loadSession('new-session');
+    const request = JSON.parse(sockets[0].sent.at(-1)!);
+    expect(request).toMatchObject({ method: 'chat.history', params: { sessionKey: 'new-session' } });
+    const history = { key: 'new-session', messages, hasActiveRun: false };
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true, payload: history }) });
+    expect(await loaded).toEqual({ ...history, pagination: 'cursor' });
+  });
+
+it('marks a terminal reconciled history event with the same cursor semantics', async () => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const listener = jest.fn(); adapter.on('update', listener);
+  const history = { key: 'new-session', messages: [], hasActiveRun: false };
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'event', event: 'codex.update',
+    payload: { type: 'history_reconciled', sessionKey: 'new-session', history } }) });
+  expect(listener).toHaveBeenCalledWith({ type: 'history_reconciled', sessionKey: 'new-session',
+    history: { ...history, pagination: 'cursor' } });
+});
+
+it.each([
+  [true, 'chat.send', 'codex_error', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', 'confirm_permissions'],
+  [true, 'chat.send', 'codex_error', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', 'confirm_permissions'],
+  [true, 'chat.send', 'codex_error', 'A different native send failure', undefined],
+  [true, 'chat.send', 'server', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', undefined],
+  [true, 'chat.history', 'codex_error', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', undefined],
+  [false, 'chat.send', 'codex_error', 'Codex did not restore the conversation permissions. Select and confirm permissions before sending.', undefined],
+  [true, 'chat.send', 'server', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', undefined],
+  [true, 'chat.history', 'codex_error', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', undefined],
+  [false, 'chat.send', 'codex_error', 'The previous conversation permissions cannot be verified safely. Select and confirm permissions before sending.', undefined],
+])('classifies only the negotiated, exact pre-dispatch permission send rejection (%s, %s, %s)', async (sessionPermissions, method, code, message, recoveryAction) => {
+  const connected = adapter.connect(); sockets[0].open();
+  let request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true,
+    payload: { backend: 'codex', sessionPermissions, models: [] } }) });
+  await connected;
+  const rejected = (method === 'chat.send' ? adapter.prompt('s', { text: 'Review this draft', idempotencyKey: 'rejected-draft' }) : adapter.loadSession('s')).catch(error => error);
+  request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: false, error: { code, message } }) });
+  expect(await rejected).toMatchObject({ code: 'server', recoveryAction });
+  expect(adapter.state).toBe('ready');
+  expect(sockets[0].sent.map(frame => JSON.parse(frame).method)).toEqual(['health', method]);
 });
 it('keeps token-authenticated connect for direct sockets', async () => {
   adapter.disconnect();
@@ -242,4 +294,65 @@ it('reports authenticated Bridge-version evidence and replaces it after reconnec
   reply(sockets[0], '3.1.10'); await first; expect(adapter.getConnectionRuntimeMetadata().bridgeVersion).toBe('3.1.10');
   adapter.disconnect(); const next = adapter.connect(); sockets.at(-1)!.open(); expect(adapter.getConnectionRuntimeMetadata().bridgeVersion).toBeUndefined();
   reply(sockets.at(-1)!, '3.1.11'); await next; expect(adapter.getConnectionRuntimeMetadata().bridgeVersion).toBe('3.1.11');
+});
+
+
+it('proves an oversized image batch is rejected locally before socket dispatch', async () => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const before = sockets[0].sent.length;
+  const input = { text: 'QA image batch', idempotencyKey: 'capacity-only', attachments: [
+    { type: 'image' as const, mimeType: 'image/gif', content: 'A'.repeat(4 * 1024 * 1024) },
+    { type: 'image' as const, mimeType: 'image/gif', content: 'A'.repeat(4 * 1024 * 1024) },
+  ] };
+  const failure = await adapter.prompt('qa', input).catch(error => error);
+  expect(sockets[0].sent).toHaveLength(before);
+  expect(failure).toMatchObject({ code: 'frame_too_large', dispatchOutcome: 'not_sent' });
+  expect(adapter.state).toBe('ready');
+});
+
+
+it.each([-1, 0, 1])('uses the exact full request UTF-8 size at the 8 MiB boundary (%s)', async extra => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const input = { text: '', idempotencyKey: 'wire-boundary' };
+  const overhead = new TextEncoder().encode(JSON.stringify({ type: 'req', id: '0'.repeat(32), method: 'chat.send', params: { sessionKey: 'qa', ...input } })).byteLength;
+  input.text = 'a'.repeat(8 * 1024 * 1024 - overhead + extra);
+  const before = sockets[0].sent.length;
+  if (extra > 0) {
+    expect(() => adapter.validatePrompt('qa', input)).toThrow(LocalSendRejectedError);
+    await expect(adapter.prompt('qa', input)).rejects.toBeInstanceOf(LocalSendRejectedError);
+    expect(sockets[0].sent).toHaveLength(before);
+  } else {
+    expect(() => adapter.validatePrompt('qa', input)).not.toThrow();
+    const pending = adapter.prompt('qa', input);
+    const request = JSON.parse(sockets[0].sent.at(-1)!);
+    expect(new TextEncoder().encode(sockets[0].sent.at(-1)!).byteLength).toBe(8 * 1024 * 1024 + extra);
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true, payload: { runId: 'boundary-run' } }) });
+    expect(await pending).toEqual({ runId: 'boundary-run' });
+  }
+});
+
+it('keeps a 5 MiB single image within the same envelope and counts multibyte text', async () => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const input = { text: 'QA one image', idempotencyKey: 'one-image', attachments: [{ type: 'image' as const, mimeType: 'image/gif',
+    content: 'A'.repeat(4 * Math.ceil(5 * 1024 * 1024 / 3) - 1) + '=' }] };
+  expect(() => adapter.validatePrompt('qa', input)).not.toThrow();
+  const pending = adapter.prompt('qa', input);
+  const request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: true, payload: { runId: 'single-image' } }) });
+  expect(await pending).toEqual({ runId: 'single-image' });
+  const before = sockets[0].sent.length;
+  await expect(adapter.prompt('qa', { text: '图'.repeat(3 * 1024 * 1024), idempotencyKey: 'utf8' })).rejects.toBeInstanceOf(LocalSendRejectedError);
+  expect(sockets[0].sent).toHaveLength(before);
+});
+
+it('does not infer local rejection from a socket exception or a remote frame code', async () => {
+  const connected = adapter.connect(); sockets[0].open(); sockets[0].reply(); await connected;
+  const send = jest.spyOn(sockets[0], 'send').mockImplementationOnce(() => { throw Object.assign(new Error('frame_too_large'), { code: 'frame_too_large', name: 'WebSocketFrameTooLargeError' }); });
+  const thrown = await adapter.prompt('qa', { text: 'small', idempotencyKey: 'socket-unknown' }).catch(error => error);
+  expect(thrown).not.toBeInstanceOf(LocalSendRejectedError);
+  send.mockRestore();
+  const pending = adapter.prompt('qa', { text: 'small', idempotencyKey: 'remote-unknown' }).catch(error => error);
+  const request = JSON.parse(sockets[0].sent.at(-1)!);
+  sockets[0].onmessage?.({ data: JSON.stringify({ type: 'res', id: request.id, ok: false, error: { code: 'frame_too_large', message: 'frame_too_large' } }) });
+  expect(await pending).not.toBeInstanceOf(LocalSendRejectedError);
 });

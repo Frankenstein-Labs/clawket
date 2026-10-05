@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Animated as NativeAnimated, AppState, Easing as NativeEasing, Platform, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import Animated, {
   cancelAnimation,
@@ -38,26 +38,10 @@ export type PresenceRingProps = Readonly<{
  * you. Only the UI thread animates it; reduced motion holds it still.
  */
 export function PresenceRing({ tone, avatarSize, color, testID }: PresenceRingProps): React.JSX.Element {
-  const reduceMotion = useReducedMotion();
-  const progress = useSharedValue(0);
   const size = avatarSize + (PRESENCE_RING_GAP + PRESENCE_RING_STROKE) * 2;
   const center = size / 2;
   const radius = center - PRESENCE_RING_STROKE / 2;
-
-  useEffect(() => {
-    cancelAnimation(progress);
-    progress.value = 0;
-    if (!reduceMotion) {
-      progress.value = tone === 'working'
-        ? withRepeat(withTiming(1, { duration: SPIN_MS, easing: Easing.linear }), -1, false)
-        : withRepeat(withTiming(1, { duration: Motion.avatarWorkingLoop, easing: Easing.inOut(Easing.quad) }), -1, true);
-    }
-    return () => cancelAnimation(progress);
-  }, [progress, reduceMotion, tone]);
-
-  const animatedStyle = useAnimatedStyle(() => (tone === 'working'
-    ? { transform: [{ rotate: `${progress.value * 360}deg` }] }
-    : { opacity: 1 - (1 - BREATH_LOW) * progress.value }), [tone]);
+  const RingMotion = Platform.OS === 'android' ? AndroidRingMotion : ReanimatedRingMotion;
 
   return (
     <View
@@ -65,7 +49,7 @@ export function PresenceRing({ tone, avatarSize, color, testID }: PresenceRingPr
       pointerEvents="none"
       style={[styles.ring, { width: size, height: size, marginLeft: -size / 2, marginTop: -size / 2 }]}
     >
-      <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]}>
+      <RingMotion tone={tone}>
         <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           {tone === 'working' ? (
             <>
@@ -82,9 +66,65 @@ export function PresenceRing({ tone, avatarSize, color, testID }: PresenceRingPr
             <Circle cx={center} cy={center} r={radius} fill="none" stroke={color} strokeWidth={PRESENCE_RING_STROKE} />
           )}
         </Svg>
-      </Animated.View>
+      </RingMotion>
     </View>
   );
+}
+
+type RingMotionProps = Readonly<{ tone: PresenceRingTone; children: React.ReactNode }>;
+
+function AndroidRingMotion({ tone, children }: RingMotionProps): React.JSX.Element {
+  const reduceMotion = useReducedMotion();
+  const [progress] = useState(() => new NativeAnimated.Value(0));
+  const [foreground, setForeground] = useState(AppState.currentState === 'active');
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => setForeground(state === 'active'));
+    setForeground(AppState.currentState === 'active');
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    progress.setValue(0);
+    if (reduceMotion || !foreground) return;
+    const ease = NativeEasing.inOut(NativeEasing.quad);
+    // One precomputed native cycle includes both halves of the original breath.
+    // Animated.sequence would restart each cycle through JavaScript.
+    const loop = NativeAnimated.loop(NativeAnimated.timing(progress, {
+      toValue: 1,
+      duration: tone === 'working' ? SPIN_MS : Motion.avatarWorkingLoop * 2,
+      easing: tone === 'working' ? NativeEasing.linear : value => ease(value <= 0.5 ? value * 2 : (1 - value) * 2),
+      useNativeDriver: true,
+      isInteraction: false,
+    }), { iterations: -1 });
+    loop.start();
+    return () => loop.stop();
+  }, [foreground, progress, reduceMotion, tone]);
+
+  // Keep both native properties explicit when a mounted dock changes tone.
+  const animatedStyle = {
+    transform: [{ rotate: progress.interpolate({ inputRange: [0, 1], outputRange: ['0deg', tone === 'working' ? '360deg' : '0deg'] }) }],
+    opacity: progress.interpolate({ inputRange: [0, 1], outputRange: [1, tone === 'working' ? 1 : BREATH_LOW] }),
+  };
+  return <NativeAnimated.View style={[StyleSheet.absoluteFill, animatedStyle]}>{children}</NativeAnimated.View>;
+}
+
+function ReanimatedRingMotion({ tone, children }: RingMotionProps): React.JSX.Element {
+  const reduceMotion = useReducedMotion();
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    cancelAnimation(progress);
+    progress.value = 0;
+    if (!reduceMotion) {
+      progress.value = tone === 'working'
+        ? withRepeat(withTiming(1, { duration: SPIN_MS, easing: Easing.linear }), -1, false)
+        : withRepeat(withTiming(1, { duration: Motion.avatarWorkingLoop, easing: Easing.inOut(Easing.quad) }), -1, true);
+    }
+    return () => cancelAnimation(progress);
+  }, [progress, reduceMotion, tone]);
+  const animatedStyle = useAnimatedStyle(() => (tone === 'working'
+    ? { transform: [{ rotate: `${progress.value * 360}deg` }] }
+    : { opacity: 1 - (1 - BREATH_LOW) * progress.value }), [tone]);
+  return <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]}>{children}</Animated.View>;
 }
 
 const styles = StyleSheet.create({

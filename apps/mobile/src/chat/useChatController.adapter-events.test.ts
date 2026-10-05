@@ -10,6 +10,7 @@ import { routeGatewayEvent } from '../connection/protocol/events';
 import { mapGatewayAdapterEvent, type GatewayAdapterEvent } from '../connection/adapters/gateway-session-update';
 import { buildChildSessionActivityCards } from './childSessionActivity';
 import { useChildRunRecords } from './useChildRunRecords';
+import { buildThreadTimelineItems } from '../screens/Thread/model';
 
 const historyMock = {
   sessionKey: 'agent:main:main' as string | null,
@@ -19,6 +20,7 @@ const historyMock = {
   hasMoreHistory: false,
   loadingMoreHistory: false,
   historyLoaded: true,
+  activitySnapshot: null as (import('@clawket/agent-protocol').SessionHistory & { requestedAtMs: number }) | null,
   messages: [] as any[],
   thinkingLevel: null as string | null,
   historyLimitRef: { current: 50 },
@@ -43,6 +45,7 @@ const historyMock = {
   restoreCachedMessages: jest.fn().mockResolvedValue(undefined),
   loadSessionsAndHistory: jest.fn().mockResolvedValue(undefined),
   reconcileLatestAssistantFromHistory: jest.fn().mockResolvedValue(undefined),
+  captureSessionScope: jest.fn(() => () => true),
   refreshCurrentSessionHistory: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -253,6 +256,7 @@ describe('useChatController adapter event migration', () => {
     historyMock.sessions = [{ key: 'agent:main:main', kind: 'direct' as const }];
     historyMock.messages = [];
     historyMock.historyLoaded = true;
+    historyMock.activitySnapshot = null;
     historyMock.hasMoreHistory = false;
     historyMock.loadSessionsAndHistory.mockResolvedValue(undefined);
     mockAppContext.currentAgentId = 'main';
@@ -267,6 +271,150 @@ describe('useChatController adapter event migration', () => {
     });
     jest.useRealTimers();
     consoleErrorSpy.mockRestore();
+  });
+
+  it('dates each Codex commentary segment independently across two tool boundaries', () => {
+    const runAt = Date.UTC(2026, 9, 3, 20, 13, 35);
+    jest.setSystemTime(runAt);
+    const { result, handlers } = renderController('codex');
+    const receive = (update: any, receivedAt: number) => {
+      jest.setSystemTime(receivedAt);
+      act(() => handlers.onUpdate?.(mapAdapterSessionUpdate(update, { now: () => receivedAt })));
+    };
+    act(() => handlers.onState?.('ready'));
+    receive({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'clock-run' }, runAt);
+    const firstAt = runAt + 4_000, secondAt = runAt + 94_000, thirdAt = runAt + 162_000;
+    const texts = ['I will run the first command.', 'The first command is still running.', 'The second command is now running.'];
+    for (const [index, at] of [firstAt, secondAt, thirdAt].entries()) {
+      receive({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run',
+        textMode: 'snapshot', text: texts.slice(0, index + 1).join('\n\n'), timestampMs: at }, at + 2_000);
+      const tail = result.current.listData.find(message => message.id === 'streaming');
+      expect(tail).toMatchObject({ text: texts[index], timestampMs: at });
+      const renderKey = tail?.renderKey;
+      // Later tokens cannot advance this paragraph's first observed clock or its identity.
+      receive({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run',
+        textMode: 'snapshot', text: texts.slice(0, index + 1).join('\n\n') + ' More.', timestampMs: at + 1_000 }, at + 3_000);
+      expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({ timestampMs: at, renderKey });
+      if (index < 2) receive({ type: 'tool_call', sessionKey: 'agent:main:main', runId: 'clock-run',
+        toolCallId: `tool-${index}`, title: 'exec' }, at + 10_000);
+      // The Native cumulative stream includes the committed paragraph's last tokens.
+      texts[index] += ' More.';
+    }
+    expect(result.current.listData.filter(message => message.role === 'assistant').reverse()
+      .map(message => message.timestampMs)).toEqual([firstAt, secondAt, thirdAt]);
+  });
+
+  it.each([undefined, null, 0, -1, NaN, Infinity, 1e20, '123'])('keeps a fixed first-receipt Codex paragraph clock when Native omits or corrupts it: %j', timestampMs => {
+    jest.setSystemTime(1_000);
+    const { result, handlers } = renderController('codex');
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'clock-run' }));
+    });
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run', text: 'A new paragraph is arriving.', timestampMs } as any)));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(20_000);
+    jest.setSystemTime(30_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run', text: ' More.', timestampMs } as any)));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(20_000);
+  });
+
+  it.each(['openclaw', 'hermes', 'pi'] as const)('retains the existing %s live clock when its stream has no stage metadata', backend => {
+    jest.setSystemTime(1_000);
+    const { result, handlers } = renderController(backend);
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'clock-run' }));
+    });
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main', runId: 'clock-run', text: 'A paragraph is arriving.' })));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(1_000);
+  });
+
+  it('restores the same Codex paragraph clock after transport disconnect without advancing it on later tokens', () => {
+    jest.setSystemTime(1_000);
+    const { result, handlers } = renderController('codex');
+    act(() => handlers.onState?.('ready'));
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main',
+      runId: 'clock-run', text: 'A paragraph in progress.', timestampMs: 19_000 })));
+    act(() => handlers.onState?.('offline'));
+    jest.setSystemTime(30_000);
+    act(() => handlers.onState?.('ready'));
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main',
+      runId: 'clock-run', text: ' More.', timestampMs: 29_000 })));
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(19_000);
+  });
+
+  it('keeps a noncurrent Codex paragraph first clock and isolates it from the previous selected conversation', () => {
+    jest.setSystemTime(10_000);
+    const { result, rerender, handlers } = renderController('codex');
+    act(() => handlers.onState?.('ready'));
+    const receive = (sessionKey: string, text: string, timestampMs: number) => act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({
+      type: 'agent_message_chunk', sessionKey, runId: sessionKey, text, timestampMs,
+    })));
+    receive('agent:main:main', 'The selected conversation paragraph.', 9_000);
+    receive('agent:main:other', 'Another conversation paragraph.', 11_000);
+    receive('agent:main:other', ' More.', 12_000);
+    historyMock.sessionKey = 'agent:main:other';
+    rerender({});
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({
+      text: 'Another conversation paragraph. More.', timestampMs: 11_000,
+    });
+    receive('agent:main:main', ' Later.', 15_000);
+    expect(result.current.listData.find(message => message.id === 'streaming')?.timestampMs).toBe(11_000);
+  });
+
+  it.each([true, false])('recovers a later Codex paragraph from active history (explicit tail clock: %s)', reported => {
+    jest.setSystemTime(30_000);
+    const { result, rerender } = renderController('codex');
+    historyMock.messages = [
+      { id: 'user', role: 'user', text: 'Request', timestampMs: 1_000 },
+      { id: 'first', role: 'assistant', text: 'Earlier paragraph.', timestampMs: 5_000 },
+      { id: 'toolcall_exec', role: 'tool', text: '', toolName: 'exec', toolCallId: 'exec', toolStatus: 'running', timestampMs: 7_000 },
+      { id: 'second', role: 'assistant', text: 'A later paragraph.', timestampMs: 19_000 },
+    ];
+    historyMock.activitySnapshot = { key: 'agent:main:main', messages: [], hasActiveRun: true, requestedAtMs: 30_000,
+      activeRun: { runId: 'clock-run', text: 'Earlier paragraph.\n\nA later paragraph.', startedAtMs: 1_000,
+        ...(reported ? { messageTimestampMs: 19_000 } : {}) } };
+    rerender({});
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({ text: 'A later paragraph.', timestampMs: 19_000 });
+    expect(result.current.listData.find(message => message.text === 'Earlier paragraph.')).toMatchObject({ timestampMs: 5_000 });
+  });
+
+  it('recovers the first clock of consecutive Codex assistant items merged into one tail without a tool', () => {
+    jest.setSystemTime(30_000);
+    const { result, rerender } = renderController('codex');
+    historyMock.messages = [
+      { id: 'user', role: 'user', text: 'Request', timestampMs: 1_000 },
+      { id: 'first', role: 'assistant', text: 'First paragraph.', timestampMs: 13_000 },
+      { id: 'second', role: 'assistant', text: 'Second paragraph.', timestampMs: 15_000 },
+    ];
+    historyMock.activitySnapshot = { key: 'agent:main:main', messages: [], hasActiveRun: true, requestedAtMs: 30_000,
+      activeRun: { runId: 'clock-run', text: 'First paragraph.\n\nSecond paragraph.', startedAtMs: 1_000, messageTimestampMs: 15_000 } };
+    rerender({});
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({
+      text: 'First paragraph.\n\nSecond paragraph.', timestampMs: 13_000,
+    });
+  });
+
+  it.each([false, true])('does not borrow an empty recovered Codex tail clock (previous tool: %s)', previousTool => {
+    jest.setSystemTime(10_000);
+    const { result, rerender, handlers } = renderController('codex');
+    act(() => handlers.onState?.('ready'));
+    historyMock.messages = previousTool ? [
+      { id: 'user', role: 'user', text: 'Request', timestampMs: 1_000 },
+      { id: 'first', role: 'assistant', text: 'Earlier paragraph.', timestampMs: 5_000 },
+      { id: 'toolcall_exec', role: 'tool', text: '', toolName: 'exec', toolCallId: 'exec', toolStatus: 'running', timestampMs: 7_000 },
+    ] : [];
+    historyMock.activitySnapshot = { key: 'agent:main:main', messages: [], hasActiveRun: true, requestedAtMs: 10_000,
+      activeRun: { runId: 'clock-run', text: previousTool ? 'Earlier paragraph.' : '', startedAtMs: 1_000,
+        ...(previousTool ? { messageTimestampMs: 5_000 } : {}) } };
+    rerender({});
+    jest.setSystemTime(20_000);
+    act(() => handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'agent_message_chunk', sessionKey: 'agent:main:main',
+      runId: 'clock-run', textMode: 'snapshot', text: `${previousTool ? 'Earlier paragraph.\n\n' : ''}A later paragraph.`, timestampMs: 19_000 })));
+    expect(result.current.listData.find(message => message.id === 'streaming')).toMatchObject({ text: 'A later paragraph.', timestampMs: 19_000 });
   });
 
   it.each(['NO', 'NO_'])('does not adopt silent reply prefix %s as the active visible run', (text) => {
@@ -309,6 +457,92 @@ describe('useChatController adapter event migration', () => {
 
     expect(result.current.isSending).toBe(false);
     expect(historyMock.messages).toEqual([]);
+  });
+
+  it.each(['missing', 'recent'])('keeps the latest reply after its user when an earlier matching reply has a %s timestamp', (timestampKind) => {
+    const previousMessages = [
+      { id: 'old-user', role: 'user', text: 'First question' },
+      { id: 'native-old-reply', role: 'assistant', text: 'OK', timestampMs: timestampKind === 'recent' ? Date.now() : undefined },
+      { id: 'current-user', role: 'user', text: 'Next question' },
+    ];
+    historyMock.messages = previousMessages;
+    const { result, handlers } = renderController('codex');
+
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'run_started', sessionKey: 'agent:main:main', runId: 'current-run',
+      }));
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'run_finished', sessionKey: 'agent:main:main', runId: 'current-run',
+        stopReason: 'end_turn', message: { role: 'assistant', content: 'OK' },
+      }));
+    });
+
+    expect(result.current.isSending).toBe(false);
+    expect(historyMock.messages).toEqual([
+      ...previousMessages,
+      expect.objectContaining({ role: 'assistant', text: 'OK' }),
+    ]);
+  });
+
+  it('still merges a matching recovered reply after the latest user', () => {
+    historyMock.messages = [
+      { id: 'current-user', role: 'user', text: 'Question' },
+      { id: 'native-current-reply', role: 'assistant', text: 'OK' },
+    ];
+    const { handlers } = renderController('codex');
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'run_started', sessionKey: 'agent:main:main', runId: 'current-run',
+      }));
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'run_finished', sessionKey: 'agent:main:main', runId: 'current-run',
+        stopReason: 'end_turn', message: { role: 'assistant', content: 'OK' },
+      }));
+    });
+    expect(historyMock.messages).toHaveLength(2);
+    expect(historyMock.messages[1]).toEqual(expect.objectContaining({ role: 'assistant', text: 'OK' }));
+    });
+
+  it.each([false, true])('retains the final reply completion clock and separator through repeated canonical reloads (tool: %s)', withTool => {
+    const { result, adapter, handlers } = renderController('codex');
+    const startedAt = 1727996280000, completedAt = startedAt + 31 * 60_000;
+    const user = { id: 'native-user', role: 'user' as const, text: 'Wait for my answer', timestampMs: startedAt };
+    historyMock.messages = [user];
+    act(() => {
+      handlers.onState?.('ready');
+      handlers.onUpdate?.(mapAdapterSessionUpdate({ type: 'run_started', sessionKey: 'agent:main:main', runId: 'clock-run' }, { now: () => startedAt }));
+      if (withTool) handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'tool_call', sessionKey: 'agent:main:main', runId: 'clock-run', toolCallId: 'clock-tool', title: 'exec',
+      }, { now: () => startedAt + 1000 }));
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'run_finished', sessionKey: 'agent:main:main', runId: 'clock-run', stopReason: 'end_turn',
+        message: { role: 'assistant', content: 'Done', timestampMs: completedAt },
+      }, { now: () => completedAt + 20_000 }));
+    });
+    const final = historyMock.messages.find(message => message.role === 'assistant');
+    expect(final).toMatchObject({ text: 'Done', timestampMs: completedAt });
+    const dates = () => buildThreadTimelineItems({ messages: [...historyMock.messages].reverse(), runs: [], nowMs: completedAt })
+      .filter(item => item.type === 'date').map(item => item.timestampMs);
+    expect(dates()).toContain(completedAt);
+    for (let count = 0; count < 2; count++) act(() => {
+      handlers.onUpdate?.(mapAdapterSessionUpdate({
+        type: 'history_reconciled', sessionKey: 'agent:main:main', history: {
+          key: 'agent:main:main', hasActiveRun: false, messages: [user,
+            ...(withTool ? [{ id: 'toolcall_clock-tool', role: 'tool' as const, text: '', timestampMs: startedAt,
+              tool: { name: 'exec', callId: 'clock-tool', status: 'success' as const } }] : []),
+            { id: 'native-final', role: 'assistant' as const, text: 'Done', timestampMs: completedAt }],
+        },
+      }));
+    });
+    expect(historyMock.messages.filter(message => message.role === 'assistant')).toEqual([
+      expect.objectContaining({ text: 'Done', timestampMs: completedAt, renderKey: final.renderKey }),
+    ]);
+    expect(dates()).toContain(completedAt);
+    expect(result.current.isSending).toBe(false);
+    expect(adapter.prompt).not.toHaveBeenCalled();
   });
 
   it('keeps one failed native-turn notice after live completion and repeated history recovery', () => {
