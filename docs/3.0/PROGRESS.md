@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 Android Reanimated 缺失 view 的同步 props 安装补丁（负责人授权，原生验收待独立 QA 构建）。
+  - 固定旧 QA 日志中的 2,629 次失败分属三个短 burst：SVG 绘制布局事件和页面转场重放保留 props，对缺失 tag 反复产生完整异常栈；不称连续动画泄漏、Surface 整体退出或空白根因。
+  - 仅精确 Reanimated 4.5.5 / RN 0.86.3，在现有同步更新 try 内复用 `preserveMountedTags`；明确缺失/预分配 view 跳过本次，保 registry 后续挂载可用；非 UI 线程 false 与未知异常保持旧 invoke/warn 行为。双 postinstall 从 Mobile 实际 package consumer 解析原生目标，根传递 4.2.1 不改；必需单文件门覆盖漂移/幂等/standalone、hoisted、linked 解析与最近工程规则。
+  - 首次独立 bootstrap 错误纳入根传递 4.2.1 的旧 Java source，exit1/0 tests 原件保留；修为 Mobile consumer 后独立 bootstrap exit0、原生目标 4.5.5 / 0.86.3，冻结实际上游 source。单 Node 文件 no-op 基线新增守卫/源码拒绝合同 3 红、其余 3 绿，恢复候选 6/6 绿；同进程 resolve 缓存的 RN fixture 错误已按实际失败仅改首次解析前建立本地 RN，旧失败证据保留。文档门 7 对指令文件 / 5 用例和 whitespace 通过，heavy 已释放。没有类型检查、Native 构建/手机操作；安装源码验证不等于 APK、缺失后挂载运行或 blank 修复。
+
 - 2026-10-03 配对首页直出命令与自动检测强调（负责人选定平台在上方案，并要求完整落地）。
   - 保留六个平台与官方品牌图标，改为两列紧凑入口；下方独立强调「自动检测电脑上的 Agent」，命令 `npx @p697/clawket@latest pair choose` 与复制直接展示，删除只为复制/扫码而进入的中间页面。该命令仍仅 Production 显示，不改变 CLI 或 Preview 范围。
   - 首页直接扫码、相册与原地展开输码；手输码先用临时平台弹层选定后端，保持各后端校验、现有单次认领和环境检查。收起保留草稿，平台/环境变化清空；配对进度回传或失败不把首页推入平台指引，迟到粘贴不能覆盖新表单或认领旧平台邀请。平台专属 Agent/终端默认、Pi 项目提示、本地模型引擎、键盘避让与连接遮罩保留。
