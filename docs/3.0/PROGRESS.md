@@ -1,5 +1,9 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 Android Reanimated 缺失 view 的同步 props 安装补丁（负责人授权，原生验收待独立 QA 构建）。
+  - 固定旧 QA 日志中的 2,629 次失败分属三个短 burst：SVG 绘制布局事件和页面转场重放保留 props，对缺失 tag 反复产生完整异常栈；不称连续动画泄漏、Surface 整体退出或空白根因。
+  - 仅精确 Reanimated 4.5.5 / RN 0.86.3，在现有同步更新 try 内复用 `preserveMountedTags`；明确缺失/预分配 view 跳过本次，保 registry 后续挂载可用；非 UI 线程 false 与未知异常保持旧 invoke/warn 行为。双 postinstall 从 Mobile 实际 package consumer 解析原生目标，根传递 4.2.1 不改；必需单文件门覆盖漂移/幂等/standalone、hoisted、linked 解析与最近工程规则。
+  - 首次独立 bootstrap 错误纳入根传递 4.2.1 的旧 Java source，exit1/0 tests 原件保留；修为 Mobile consumer 后独立 bootstrap exit0、原生目标 4.5.5 / 0.86.3，冻结实际上游 source。单 Node 文件 no-op 基线新增守卫/源码拒绝合同 3 红、其余 3 绿，恢复候选 6/6 绿；同进程 resolve 缓存的 RN fixture 错误已按实际失败仅改首次解析前建立本地 RN，旧失败证据保留。文档门 7 对指令文件 / 5 用例和 whitespace 通过，heavy 已释放。没有类型检查、Native 构建/手机操作；安装源码验证不等于 APK、缺失后挂载运行或 blank 修复。
 - 2026-10-05 安卓 Codex 未发送草稿与附件跨会话实测，发现图片串入另一会话；独立修复待组合真机复验。
   - R5U 的单次 ADB 长文注入计划1338字符，实际仅446字符准确前缀；命令成功不证明逐键投递，保留失败现场，不将自动化或输入链未知原因冒称产品截断。实际446字符草稿后台返回及保数据冷进程14311恢复准确；只读模型页确认Read-only/Low/Standard，无设置写入、发送或凭据操作。
   - 自有纯色图片经系统照片选择器完成后，R5U准确446字符及1附件成立。切到独立H6C后三份稳定层级均正文40、输入仅提示而无草稿、1附件仍在，截图亲见同一图片；这是实际会话附件串入。返回R5U仍446字符，随后明确移除图片并清空草稿；两个自有Native文件均未改变，清空后的冷保存验证仍待。旧时间点的过渡层级和提示文本断言失败分别保留，不用其代替稳定证据。
