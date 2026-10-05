@@ -3,6 +3,8 @@ import type { AgentAdapter } from '@clawket/agent-protocol';
 export type ChatControllerOptions = {
   readOnly?: boolean;
   adapter: AgentAdapter | null;
+  routeConnectionId?: string;
+  routeAgentId?: string;
   routeSessionKey?: string;
   debugMode?: boolean;
   showAgentAvatar?: boolean;

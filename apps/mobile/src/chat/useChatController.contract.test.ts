@@ -2,9 +2,11 @@ import { useChatHistoryState } from './useChatHistoryState';
 import { resetSessionHistory } from '../connection/session-reset';
 import { ChatCacheService } from '../services/chat-cache';
 import { clearUncertainSends } from './sendRecovery';
-import { act, renderHook } from '@testing-library/react-native';
+import { act, cleanup, renderHook } from '@testing-library/react-native';
 import * as Network from 'expo-network';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { Alert } from 'react-native';
 import { AdapterError, CAPABILITY_MATRIX } from '@clawket/agent-protocol';
 import { analyticsEvents } from '../services/analytics/events';
 import { recordSuccessfulSendForAutomaticReview } from '../services/auto-app-review';
@@ -15,6 +17,7 @@ import { useAdapterChatEvents } from './useAdapterChatEvents';
 import { useChatController as useChatControllerImpl } from './useChatController';
 import { resetMessageQueueStore } from './messageQueue';
 import { preserveOptimisticAssistantMessage } from './historyMergePolicy';
+import { readFileAsBase64 } from './chatControllerUtils';
 
 const mockT = (key: string) => key;
 const mockI18n = { language: 'en-US' };
@@ -102,7 +105,9 @@ const imagePickerHookMock = {
   clearPendingImages: jest.fn(),
   removePendingImage: jest.fn(),
   canAddMoreImages: true,
+  isCurrentAttachmentScope: jest.fn(() => true),
 };
+let mockActualImagePicker = false;
 
 jest.mock('@react-navigation/native', () => ({
   useIsFocused: jest.fn(() => true),
@@ -138,7 +143,14 @@ jest.mock('../services/storage', () => ({
 }));
 
 jest.mock('../hooks/useChatImagePicker', () => ({
-  useChatImagePicker: jest.fn(() => imagePickerHookMock),
+  useChatImagePicker: jest.fn((...args: unknown[]) => mockActualImagePicker
+    ? jest.requireActual('../hooks/useChatImagePicker').useChatImagePicker(...args)
+    : imagePickerHookMock),
+}));
+
+jest.mock('./chatControllerUtils', () => ({
+  ...jest.requireActual('./chatControllerUtils'),
+  readFileAsBase64: jest.fn().mockResolvedValue('YQ=='),
 }));
 
 jest.mock('../hooks/useChatImagePreview', () => ({
@@ -253,7 +265,7 @@ jest.mock('../services/analytics/events', () => ({
 
 function createAdapter(
   connectionState: 'ready' | 'connecting' = 'ready',
-  backendKind: 'openclaw' | 'hermes' | 'pi' | 'codex' = 'openclaw',
+  backendKind: keyof typeof CAPABILITY_MATRIX = 'openclaw',
 ) {
   const listeners: Record<string, Set<(...args: any[]) => void>> = {
     update: new Set(),
@@ -3193,4 +3205,186 @@ it('puts external input in the chosen chat without switching to an empty main ke
   expect(result.current.input).toBe('Review this');
   expect(historyMock.setSessionKey).not.toHaveBeenCalledWith('');
   expect(mockAppContext.clearPendingMainSessionSwitch).toHaveBeenCalled();
+});
+
+describe('mounted controller attachment scope', () => {
+  const image = { uri: 'file:///qa-current.jpg', base64: 'YQ==', mimeType: 'image/jpeg', width: 10, height: 10 };
+  const pasted = { uri: 'file:///qa-paste.png', fileName: 'qa-paste.png', fileSize: 1, type: 'image/png' };
+  const library = jest.mocked(ImagePicker.launchImageLibraryAsync);
+  const camera = jest.mocked(ImagePicker.launchCameraAsync);
+  const permission = jest.mocked(ImagePicker.requestCameraPermissionsAsync);
+  const document = jest.mocked(DocumentPicker.getDocumentAsync);
+  const readFile = jest.mocked(readFileAsBase64);
+  let alert: jest.SpyInstance;
+  let consoleError: jest.SpyInstance;
+
+  function mount(backend: keyof typeof CAPABILITY_MATRIX = 'openclaw') {
+    const adapter = createAdapter('ready', backend);
+    const view = renderHook(({ key, selectedAdapter }: { key: string; selectedAdapter: any }) => useChatController({
+      adapter: selectedAdapter,
+      routeConnectionId: adapter.connection.id,
+      routeAgentId: 'main',
+      routeSessionKey: key,
+      debugMode: false,
+    }), { initialProps: { key: 'session-a', selectedAdapter: adapter } });
+    return { adapter, view, switchTo: (key: string, selectedAdapter: any = adapter) => view.rerender({ key, selectedAdapter }) };
+  }
+
+  async function select(view: ReturnType<typeof mount>['view']) {
+    library.mockResolvedValueOnce({ canceled: false, assets: [image] } as any);
+    await act(async () => { await view.result.current.pickImage(); });
+    expect(view.result.current.pendingImages).toEqual([image]);
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    resetMessageQueueStore();
+    resetMockState();
+    mockActualImagePicker = true;
+    library.mockReset(); camera.mockReset(); permission.mockReset(); document.mockReset(); readFile.mockReset();
+    library.mockResolvedValue({ canceled: true, assets: null } as any);
+    camera.mockResolvedValue({ canceled: false, assets: [image] } as any);
+    permission.mockResolvedValue({ granted: true } as any);
+    document.mockResolvedValue({ canceled: true, assets: null } as any);
+    readFile.mockResolvedValue('YQ==');
+    alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    mockActualImagePicker = false;
+    jest.runOnlyPendingTimers();
+    jest.useRealTimers();
+    alert.mockRestore();
+    consoleError.mockRestore();
+  });
+
+  it.each(['openclaw', 'hermes', 'codex', 'pi', 'claude-code'] as const)('retires the selected tray on same-Agent %s A→B→A session changes', async backend => {
+    const { adapter, view, switchTo } = mount(backend);
+    await select(view);
+    switchTo('session-b');
+    expect(view.result.current.pendingImages).toEqual([]);
+    expect(view.result.current.canAddMoreImages).toBe(true);
+    switchTo('session-a');
+    expect(view.result.current.pendingImages).toEqual([]);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('preserves the same logical scope through reconnect, a missing adapter and history reload', async () => {
+    const { adapter, view, switchTo } = mount();
+    await select(view);
+    switchTo('session-a', { ...adapter, state: 'connecting' });
+    expect(view.result.current.pendingImages).toEqual([image]);
+    switchTo('session-a', null);
+    expect(view.result.current.pendingImages).toEqual([image]);
+    switchTo('session-a');
+    await act(async () => { view.result.current.reloadSession({ key: 'session-a', kind: 'direct' }); });
+    expect(view.result.current.pendingImages).toEqual([image]);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('rejects a library result from the first A visit after A→B→A, preserving the new A selection', async () => {
+    const { adapter, view, switchTo } = mount();
+    const late = deferred<any>(); library.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>;
+    act(() => { task = view.result.current.pickImage(); });
+    switchTo('session-b'); switchTo('session-a');
+    await select(view);
+    await act(async () => { late.resolve({ canceled: false, assets: [{ ...image, uri: 'file:///old-a.jpg' }] }); await task; });
+    expect(view.result.current.pendingImages).toEqual([image]);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('rejects a recent-photo conversion from an earlier A visit', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>();
+    jest.requireMock('expo-image-manipulator').manipulateAsync.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>;
+    await act(async () => { task = view.result.current.attachLocalImages(['file:///old.heic']); });
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve({ ...image, uri: 'file:///old.jpg' }); await task; });
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('does not read a file selected after its conversation has departed', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>(); document.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>; act(() => { task = view.result.current.pickFile(); });
+    switchTo('session-b');
+    await act(async () => { late.resolve({ canceled: false, assets: [{ uri: 'file:///old.pdf', name: 'old.pdf', mimeType: 'application/pdf' }] }); await task; });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('rejects a file read that completes after A→B→A', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<string>(); readFile.mockReturnValueOnce(late.promise);
+    document.mockResolvedValueOnce({ canceled: false, assets: [{ uri: 'file:///old.pdf', name: 'old.pdf', mimeType: 'application/pdf' }] } as any);
+    let task!: Promise<void>; await act(async () => { task = view.result.current.pickFile(); });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve('YQ=='); await task; });
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('does not launch the camera after an old permission callback survives A→B→A', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>(); permission.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>; await act(async () => { task = view.result.current.takePhoto(); });
+    expect(permission).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve({ granted: true }); await task; });
+    expect(camera).not.toHaveBeenCalled();
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('rejects an old camera result after A→B→A', async () => {
+    const { view, switchTo } = mount();
+    const late = deferred<any>(); camera.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>; await act(async () => { task = view.result.current.takePhoto(); });
+    expect(camera).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => { late.resolve({ canceled: false, assets: [image] }); await task; });
+    expect(view.result.current.pendingImages).toEqual([]);
+  });
+
+  it('retires a native paste without poisoning the next scope capacity or reporting old failure', async () => {
+    const { adapter, view, switchTo } = mount();
+    const late = deferred<string>(); readFile.mockReturnValueOnce(late.promise);
+    let task!: Promise<void>;
+    await act(async () => { task = view.result.current.onPasteFiles([pasted, { ...pasted, type: 'unsupported/private' }]); });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    switchTo('session-b'); switchTo('session-a');
+    let currentPaste!: Promise<void>;
+    await act(async () => { currentPaste = view.result.current.onPasteFiles(Array.from({ length: 6 }, (_, i) => ({ ...pasted, uri: `file:///new-${i}.png` }))); });
+    const currentCountBeforeOldRead = view.result.current.pendingImages.length;
+    await act(async () => { late.resolve('YQ=='); await Promise.all([task, currentPaste]); });
+    expect(currentCountBeforeOldRead).toBe(6);
+    expect(alert).not.toHaveBeenCalled();
+    expect(view.result.current.pendingImages).toHaveLength(6);
+    expect(view.result.current.pendingImages.every(attachment => attachment.uri.startsWith('file:///new-'))).toBe(true);
+    expect(view.result.current.canAddMoreImages).toBe(false);
+    expect(adapter.prompt).not.toHaveBeenCalled();
+  });
+
+  it('rejects retained setters and paste callbacks from the departed scope', async () => {
+    const { view, switchTo } = mount();
+    const old = view.result.current;
+    switchTo('session-b'); switchTo('session-a');
+    await act(async () => {
+      old.setPendingImages([image]);
+      old.onPasteFailed();
+      await old.onPasteFiles([pasted]);
+      await old.pickImage();
+    });
+    expect(view.result.current.pendingImages).toEqual([]);
+    expect(alert).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+    expect(library).not.toHaveBeenCalled();
+    view.unmount();
+    await act(async () => { await old.pickFile(); });
+    expect(document).not.toHaveBeenCalled();
+  });
 });

@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 共享 composer 附件按会话进入退休（负责人授权独立修复；待候选手机复验）。
+  - 负责人在旧 QA 包实际确认：从自有 Codex 草稿会话切到另一自有长历史会话，正文已清空但已选 PNG 仍在托盘；没有 Send。源码确认同连接/Agent 复用 Thread 控制器时未退休托盘，字符串范围也不能拒绝 A→B→A 的迟到结果。
+  - 将附件托盘、setter、图库/最近照片/相机/文件/原生粘贴回调绑定到每次会话进入的代际；新会话粘贴不等待已离开的读取。同范围重连、短暂缺失 adapter 和 history reload/Reset 保持附件；不重挂原生输入框，不改变编码、能力、wire 或发送规则。
+  - 自有依赖安装后、heavy 租约下串行验证：真实 controller 和真实 picker/paste 单文件干净基线 13 红/1 兼容通过，修复后整文件 74/74 通过（新组 14 项，托盘退休覆盖 OpenClaw/Hermes/Codex/Pi/Claude Code）；原生选择/文件字节、历史等外围依赖受控，未把五后端参数用例称为真机验收。首轮卸载 fixture 的 Hook 顺序警告已纠正，独立重跑基线与完整绿没有该警告。Mobile 类型、文档 7 对 AGENTS/CLAUDE 与 5 检查器用例、UI 246 文件及设计系统 11 组件/10 token families 均串行通过。
+  - Bootstrap/首次基线期间与负责人恢复 Metro 的短暂交接观察竞态另留私有时间事实；随后负责人暂停 Metro 至本轮验证结束。不操作手机、Native、服务或账号，不发布。
 - 2026-10-05 Android Reanimated 缺失 view 的同步 props 安装补丁（负责人授权，原生验收待独立 QA 构建）。
   - 固定旧 QA 日志中的 2,629 次失败分属三个短 burst：SVG 绘制布局事件和页面转场重放保留 props，对缺失 tag 反复产生完整异常栈；不称连续动画泄漏、Surface 整体退出或空白根因。
   - 仅精确 Reanimated 4.5.5 / RN 0.86.3，在现有同步更新 try 内复用 `preserveMountedTags`；明确缺失/预分配 view 跳过本次，保 registry 后续挂载可用；非 UI 线程 false 与未知异常保持旧 invoke/warn 行为。双 postinstall 从 Mobile 实际 package consumer 解析原生目标，根传递 4.2.1 不改；必需单文件门覆盖漂移/幂等/standalone、hoisted、linked 解析与最近工程规则。

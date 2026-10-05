@@ -34,6 +34,10 @@ npm run check:docs
 
 The repository required gate is intentionally broader than the focused commands and also covers relay and bridge workspaces. It runs only self-contained checks suitable for a clean CI host. The broader `npm test` command additionally includes bridge tests that require the external read-only Hermes checkout; run `npm run test:hermes-integration --workspace @clawket/bridge-runtime` directly when diagnosing that boundary.
 
+## Composer attachment scope
+
+Composer attachment ownership uses the route's connection/Agent/session, with a new in-memory generation on each scope entry. The mounted controller's real image-picker and paste consumers are covered in `src/chat/useChatController.contract.test.ts`: selected trays retire on session changes; gallery/recent/camera/file/paste completions and retained setters cannot survive A→B→A. Same-scope adapter reconnect and history reload retain the tray. These deferred-consumer tests do not prove native picker timing or physical navigation acceptance. Text draft persistence, held outbox recovery, encoding and backend wire contracts remain independent.
+
 ## Native synchronization
 
 After changing Expo, React Native, an Expo module, or another native dependency:
