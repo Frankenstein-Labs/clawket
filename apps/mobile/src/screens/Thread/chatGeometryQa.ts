@@ -1,4 +1,6 @@
 import { createViewportQaRecorder, type ViewportQaInput, type ViewportQaSnapshot, type ViewportQaObservation } from './chatViewportQa';
+import type { NativeViewportQaSnapshot } from './chatNativeViewportQa';
+import type { NativeViewportQaSession } from './nativeViewportQa';
 /** Local, opt-in QA evidence. Never contains transcript or transport identities. */
 const INTERVAL_MS = 1_000;
 const LIFETIME_MS = 20 * 60_000;
@@ -41,6 +43,7 @@ export type ChatGeometryQaSource = Readonly<{
   enableRaw: (enabled: boolean) => void;
   readRaw: (receive: (value: unknown) => void) => void;
   readSdk: () => unknown;
+  nativeViewport?: NativeViewportQaSession;
 }>;
 type GeometrySnapshot = {
   version: 1; status: 'idle' | 'capturing' | 'stopped'; reason: StopReason | null;
@@ -50,6 +53,9 @@ export type ChatGeometryQaApi = Readonly<{
   start: () => 'started' | 'already_active' | 'unavailable';
   stop: () => void;
   read: () => GeometrySnapshot | (Omit<GeometrySnapshot, 'version'> & { version: 2; viewport: ViewportQaSnapshot });
+  readForCache?: () => Promise<Omit<GeometrySnapshot, 'version'> & {
+    version: 2 | 3; viewport: ViewportQaSnapshot; nativeViewport?: NativeViewportQaSnapshot;
+  }>;
 }>;
 
 function object(value: unknown): Record<string, unknown> {
@@ -102,6 +108,7 @@ export function createChatGeometryQa(enabled: boolean, now: () => number = () =>
   queryGate: QueryGate = { busy: false, request: 0 }) {
   let open: (() => ChatGeometryQaSource | null) | null = null;
   let source: ChatGeometryQaSource | null = null;
+  let nativeViewport: NativeViewportQaSession | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
   let startedAt = 0;
@@ -127,6 +134,7 @@ export function createChatGeometryQa(enabled: boolean, now: () => number = () =>
     const previous = source;
     source = null;
     try { previous?.enableRaw(false); } catch { /* QA cannot change application behavior. */ }
+    try { previous?.nativeViewport?.stop(); } catch { /* No native error text or recovery. */ }
   };
   const current = (captured: ChatGeometryQaSource) => {
     if (source !== captured || status !== 'capturing') return false;
@@ -183,6 +191,10 @@ export function createChatGeometryQa(enabled: boolean, now: () => number = () =>
       viewportCapture = {};
       generation += 1;
       try { next.enableRaw(true); } catch { stop('unavailable'); return 'unavailable'; }
+      nativeViewport = next.nativeViewport ?? null;
+      try { nativeViewport?.start(); } catch {
+        try { nativeViewport?.stop(); } catch { /* Observation cannot change sampler acceptance. */ }
+      }
       deadlineTimer = setTimeout(() => stop('expired'), LIFETIME_MS);
       sample();
       return 'started';
@@ -196,6 +208,17 @@ export function createChatGeometryQa(enabled: boolean, now: () => number = () =>
         viewport: viewport.read(),
       };
     },
+    get readForCache() { return nativeViewport?.hasModule() ? async () => {
+      const captured = nativeViewport;
+      // Read first so an expired/replaced JS source retires its native binding before the ring copy.
+      api.read();
+      const native = await captured?.read();
+      if (captured !== nativeViewport) throw new Error('qa_capture_retired');
+      const snapshot = api.read();
+      // The collector currently emits V2; an old APK without the optional module stays exact V2.
+      if (snapshot.version !== 2) throw new Error('qa_snapshot_unavailable');
+      return native ? { ...snapshot, version: 3 as const, nativeViewport: native } : snapshot;
+    } : undefined; },
   });
   return {
     api,

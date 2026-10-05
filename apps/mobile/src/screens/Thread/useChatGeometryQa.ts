@@ -6,6 +6,7 @@ import { createChatGeometryQa, type ChatGeometryQaApi, type ChatGeometryQaSource
 import { registerChatGeometryQaCache, qaGeometryCacheEnabled } from './registerChatGeometryQaCache';
 import type { ViewportQaObserver } from './chatViewportQa';
 import type { UiThreadFollow } from './useUiThreadFollow';
+import { createNativeViewportQaSession } from './nativeViewportQa';
 
 const QUERY_GATE = Symbol.for('clawket.chatGeometryQa.queryGate');
 type QaGlobal = typeof globalThis & { __CLAWKET_CHAT_GEOMETRY_QA__?: ChatGeometryQaApi & {
@@ -96,10 +97,16 @@ export function useChatGeometryQa<T>(options: Readonly<{
       mounted.current.clear(); mountState.current = { observed: false, truncated: false };
       let lastRows = latest.current.rows;
       let dataRevision = 0;
+      const isCurrent = () => latest.current.active && latest.current.scope === expectedScope
+        && latest.current.list.current === list && raw.bindingRevision() === bindingRevision
+        && AppState.currentState === 'active';
       return {
-        isCurrent: () => latest.current.active && latest.current.scope === expectedScope
-          && latest.current.list.current === list && raw.bindingRevision() === bindingRevision
-          && AppState.currentState === 'active',
+        isCurrent,
+        ...(viewportEnabled ? { nativeViewport: createNativeViewportQaSession({ current: isCurrent,
+          nativeRef: () => list.getNativeScrollRef(),
+          enabled: () => qaGeometryCacheEnabled(typeof __DEV__ !== 'undefined' && __DEV__, Platform.OS,
+            Application.applicationId, process.env.EXPO_PUBLIC_CHAT_GEOMETRY_QA_CACHE),
+        }) } : {}),
         enableRaw: raw.enable,
         readRaw: raw.sample,
         readSdk: () => {
