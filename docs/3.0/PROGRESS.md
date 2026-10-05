@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 原生 QA viewport 有界观察器（负责人明确授权；窄 JS 验证通过，Native 待编译/实测）。
+  - fresh-main 独立 worktree 证明 ancestry 后仅 fast-forward 到负责人已审完整 `2ad22664` 前置树；本任务新增补丁只含 Clawket 自有 Android Expo module、accepted-Start 消费者、V3 纯标量 encoder/回归源码及最近说明。原来的 anchor/scroll/render、V1/V2 与五后端行为保持。
+  - 四 JS opt-in 门及 native `.qa`/debug/RN0.86.3/Fabric 门后，捕获实际 scroll host/直接 child 的 layout/scroll 与 manager mount 阶段；64事件 ring、序列/丢失/拒绝计数、px/density 和本次 Android uptime 明确。弱对象/代际逐回调校验；后台/销毁/离开 scope 退休，晚绑定仅清原代，没有计时器、事件推送、measure/scroll/React 状态或原生文件写入。
+  - 旧 APK 缺模块继续 exact V2/原 JS sampler acceptance；新 cache V3 只异步复制既有 ring，保持 one-flight/10秒/122次/20分钟/256KiB 与固定文件名。真实 collector/cache 的 deferred bind/旧 Stop、未知结果、strict corrupt schema 与兼容回归已经串行运行：nativeViewportQa 22、chatGeometryQaCache 17、useChatGeometryQa 15 全通过；本树独立 bootstrap 与 Mobile types 通过。首次类型检查发现测试 mock 的零参数推断，仅补 generation 参数类型后重跑受影响文件及 types 通过，生产源码没有变化。尚未编译 Native 或执行设备动作。
+  - parent child-layout/didMount 不等于所有 cell/paint ACK；native 与 JS 时钟未同步，Read 不查询当前几何/liveness。首 prepend 瞬跳和 idle 滚动恢复原因仍未确定，本任务不是恢复 API 或空白修复。完整源码审查后按资源交接完成窄验证；native QA 构建与真机回调验收另行串行，普通已授权验证不列为 human-only 审批。
+
 - 2026-10-05 图片 UI 录像复核完成；同候选抓到新的历史加载后持久跳位，按负责人要求在后续2–3小时收敛。
   - 072 自然EOF解码396帧/33contact全部独立亲看，实际容器120.683767秒；单图、键盘、三行输入及自动增高可见，换行初段短暂底部裁切后完整显示。没有录到展开/预览/Remove/六图/切会话，其通过仍基于独立实机截图；VFR间隔不是连续paint。编码子进程全退出、独立确认不存在后释放heavy。
   - 已载 `4398d15a` 的原QA5560进入自有H6C；六次真实阅读drag依次看到37–40、34–37、32–35、29–33、27–31、25–27，随后截图仍25–27/loading。无新增手势的后续两截图却固定为8–11，历史已81行/两页，阅读位置未保留。V2样本与最后32事件保留，但408个旧事件已被覆盖，不能据尾窗指认最早原因；原idle大面积空白仍独立未关闭。

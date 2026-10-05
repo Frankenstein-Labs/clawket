@@ -1,12 +1,13 @@
 import type { ChatGeometryQaApi } from './chatGeometryQa';
 import { validViewportQaEvent } from './chatViewportQa';
+import { sanitizeNativeViewportQa } from './chatNativeViewportQa';
 
 const INTERVAL_MS = 10_000;
 const LIFETIME_MS = 20 * 60_000;
 const MAX_WRITES = 122;
 const MAX_BYTES = 256 * 1024;
 const MAX_NUMBER = 100_000_000;
-type Snapshot = ReturnType<ChatGeometryQaApi['read']>;
+type Snapshot = ReturnType<ChatGeometryQaApi['read']> | Awaited<ReturnType<NonNullable<ChatGeometryQaApi['readForCache']>>>;
 export type QaCacheGate = { used: boolean; busy: boolean; starting: boolean; blocked: boolean };
 
 function keys(value: unknown, names: readonly string[]): value is Record<string, unknown> {
@@ -27,8 +28,9 @@ const SAMPLE_KEYS = ['elapsedMs', 'rawAvailable', 'rawSequence', 'rawAgeMs', 'ra
 export function encodeQaGeometryCache(value: unknown): string | null {
   try {
     const version = value !== null && typeof value === 'object' ? (value as Record<string, unknown>).version : null;
-    if (!keys(value, ['version', 'status', 'reason', 'inFlight', 'elapsedMs', 'dropped', 'samples', ...(version === 2 ? ['viewport'] : [])])
-      || !(version === 1 || version === 2) || !['idle', 'capturing', 'stopped'].includes(value.status as string)
+    if (!keys(value, ['version', 'status', 'reason', 'inFlight', 'elapsedMs', 'dropped', 'samples',
+      ...(version === 2 || version === 3 ? ['viewport'] : []), ...(version === 3 ? ['nativeViewport'] : [])])
+      || !(version === 1 || version === 2 || version === 3) || !['idle', 'capturing', 'stopped'].includes(value.status as string)
       || !(value.reason === null || ['manual', 'background', 'scope', 'expired', 'unavailable', 'replaced'].includes(value.reason as string))
       || typeof value.inFlight !== 'boolean' || !number(value.elapsedMs, 0, LIFETIME_MS)
       || !number(value.dropped, 0, MAX_NUMBER, true) || !Array.isArray(value.samples) || value.samples.length > 256) return null;
@@ -50,7 +52,7 @@ export function encodeQaGeometryCache(value: unknown): string | null {
       samples.push({ ...Object.fromEntries(SAMPLE_KEYS.filter(key => key !== 'layouts').map(key => [key, sample[key]])), layouts });
     }
     let viewport;
-    if (version === 2) {
+    if (version === 2 || version === 3) {
       const stage = value.viewport;
       if (!keys(stage, ['sequence', 'dropped', 'throttled', 'rejected', 'initialIncomplete', 'events'])
         || stage.initialIncomplete !== true || !['sequence', 'dropped', 'throttled', 'rejected'].every(key => number(stage[key], 0, MAX_NUMBER, true))
@@ -69,8 +71,11 @@ export function encodeQaGeometryCache(value: unknown): string | null {
       viewport = { sequence: stage.sequence, dropped: stage.dropped, throttled: stage.throttled,
         rejected: stage.rejected, initialIncomplete: true, events };
     }
+    const nativeViewport = version === 3 ? sanitizeNativeViewportQa(value.nativeViewport) : null;
+    if (version === 3 && nativeViewport === null) return null;
     const json = JSON.stringify({ version, status: value.status, reason: value.reason, inFlight: value.inFlight,
-      elapsedMs: value.elapsedMs, dropped: value.dropped, samples, ...(viewport ? { viewport } : {}) });
+      elapsedMs: value.elapsedMs, dropped: value.dropped, samples, ...(viewport ? { viewport } : {}),
+      ...(nativeViewport ? { nativeViewport } : {}) });
     // Allowed fields contain only ASCII enum/field names and JSON scalar syntax.
     return json.length <= MAX_BYTES ? json : null;
   } catch { return null; }
@@ -108,12 +113,18 @@ export function createQaGeometryCache(options: Readonly<{
     if (time === deadline) stopApi();
     let snapshot: Snapshot;
     let json: string | null;
-    try { snapshot = options.api.read(); json = encodeQaGeometryCache(snapshot); }
-    catch { retire(); return; }
-    if (json === null) { retire(); return; }
-    writes += 1;
+    // Include the optional async memory-ring copy in the existing shared one-flight gate.
     options.gate.busy = true;
-    try { await options.replace(json); }
+    try {
+      snapshot = options.api.readForCache ? await options.api.readForCache() : options.api.read();
+      if (!active) return;
+      const readyAt = clock();
+      if (readyAt === null || readyAt > deadline) { retire(); return; }
+      json = encodeQaGeometryCache(snapshot);
+      if (json === null) { retire(); return; }
+      writes += 1;
+      await options.replace(json);
+    }
     catch { retire(); return; }
     finally { options.gate.busy = false; }
     if (!active) return;
