@@ -315,6 +315,8 @@ Store redemption uses the existing Pro entitlement and store identity. The paywa
 
 ## Send acknowledgement and foreground probes
 
+Unsent composer attachments belong to the exact connection, Agent and session entry. Retire the tray and every picker/file/paste callback before another session renders, including A→B→A returns. Same-scope reconnect and history reload/Reset preserve attachments; an absent adapter must not replace the route's connection identity. Keep native paste queues scoped so a departed read cannot block the new conversation or report its errors there. This state is in memory and never submits automatically.
+
 Persist original user/assistant history IDs independently of UI row IDs and display timestamps. Cold history and cached-page reconciliation must remove confirmed replicas without collapsing distinct replies. Migrate legacy projected IDs and `stream_segment_` rows conservatively; known different user turns cannot acknowledge each other's live segments. Keep cache row provenance for older Gateways with page-relative history IDs.
 
 Final-reply recovery is scoped to the current user turn as well as the session. Do not scan past a later prompt, overwrite an earlier terminal row, or append an older final already present before the new prompt in canonical history. Fence pending reconciliation across newer sends; native user envelopes containing only tool results do not create a new human turn.

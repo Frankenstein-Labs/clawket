@@ -247,16 +247,14 @@ function shouldMergeFinalMessage(
 export function useChatController({
   readOnly = false,
   adapter,
+  routeConnectionId,
+  routeAgentId,
   routeSessionKey,
   debugMode,
   showAgentAvatar,
   chatSessionRequest,
   clearChatSessionRequest,
 }: ChatControllerOptions) {
-  const attachmentScope = `${adapter?.connection.id ?? ''}:${routeSessionKey ?? ''}`;
-  const attachmentScopeRef = useRef<string | null>(attachmentScope);
-  attachmentScopeRef.current = attachmentScope;
-  useEffect(() => { attachmentScopeRef.current = attachmentScope; return () => { attachmentScopeRef.current = null; }; }, [attachmentScope]);
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
   const appContext = useAppContext();
@@ -294,88 +292,6 @@ export function useChatController({
     useState(false);
   const [staticThinkPickerVisible, setStaticThinkPickerVisible] =
     useState(false);
-  const {
-    pendingImages,
-    setPendingImages,
-    pickImage,
-    attachLocalImages,
-    clearPendingImages,
-    removePendingImage,
-    canAddMoreImages,
-  } = useChatImagePicker(MAX_IMAGES, attachmentScope);
-  const {
-    onPasteFiles,
-    onPasteFailed,
-  } = useChatPasteAttachments({
-    pendingAttachments: pendingImages,
-    setPendingAttachments: setPendingImages,
-    maxAttachments: MAX_IMAGES,
-    capabilities: adapter?.capabilities,
-  });
-
-  const pickFile = useCallback(async () => {
-    if (!supportsFileAttachments(adapter?.capabilities)) return;
-    const result = await DocumentPicker.getDocumentAsync({
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    if (!asset.uri) return;
-    try {
-      const b64 = await readFileAsBase64(asset.uri);
-      const img = {
-        uri: asset.uri,
-        base64: b64,
-        mimeType: normalizeAttachmentMimeType(asset.mimeType),
-        fileName: asset.name,
-      };
-      setPendingImages((prev: PendingImage[]) =>
-        [...prev, img].slice(0, MAX_IMAGES),
-      );
-    } catch {
-      /* skip */
-    }
-  }, [adapter?.capabilities, setPendingImages]);
-
-  const takePhoto = useCallback(async () => {
-    const IP = await import("expo-image-picker");
-    if (attachmentScopeRef.current !== attachmentScope || !canAddMoreImages) return;
-    const res = isMacCatalyst
-      ? await IP.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsMultipleSelection: false,
-        quality: 0.8,
-        base64: true,
-        exif: false,
-      })
-      : await (async () => {
-        const perm = await IP.requestCameraPermissionsAsync();
-        if (!perm.granted || attachmentScopeRef.current !== attachmentScope) return { canceled: true, assets: [] };
-        return IP.launchCameraAsync({
-          quality: 0.8,
-          base64: true,
-          exif: false,
-        });
-      })();
-    if (attachmentScopeRef.current !== attachmentScope) return;
-    if (!res.canceled && res.assets?.[0]?.base64) {
-      const a = res.assets[0];
-      setPendingImages((prev: PendingImage[]) =>
-        [
-          ...prev,
-          {
-            uri: a.uri,
-            base64: a.base64!,
-            mimeType: normalizeAttachmentMimeType(a.mimeType, "image/jpeg"),
-            width: a.width,
-            height: a.height,
-          },
-        ].slice(0, MAX_IMAGES),
-      );
-    }
-  }, [setPendingImages, attachmentScope, canAddMoreImages]);
-
   const preview = useChatImagePreview();
   const showDebug = debugMode ?? false;
   const { logs: debugLog, appendDebugLog: dbg } = useBufferedDebugLog(showDebug);
@@ -583,6 +499,97 @@ export function useChatController({
     routeSessionKey,
     measuredToolsRef,
   });
+
+  const attachmentScope = JSON.stringify([
+    routeConnectionId ?? gatewayConfigId ?? '',
+    routeAgentId ?? currentAgentId,
+    routeSessionKey ?? history.sessionKey ?? '',
+  ]);
+  const {
+    pendingImages,
+    setPendingImages,
+    pickImage,
+    attachLocalImages,
+    clearPendingImages,
+    removePendingImage,
+    canAddMoreImages,
+    isCurrentAttachmentScope,
+  } = useChatImagePicker(MAX_IMAGES, attachmentScope);
+  const {
+    onPasteFiles,
+    onPasteFailed,
+  } = useChatPasteAttachments({
+    pendingAttachments: pendingImages,
+    setPendingAttachments: setPendingImages,
+    maxAttachments: MAX_IMAGES,
+    capabilities: adapter?.capabilities,
+    isCurrentAttachmentScope,
+  });
+
+  const pickFile = useCallback(async () => {
+    if (!isCurrentAttachmentScope() || !supportsFileAttachments(adapter?.capabilities)) return;
+    const result = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (!isCurrentAttachmentScope() || result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    if (!asset.uri) return;
+    try {
+      const b64 = await readFileAsBase64(asset.uri);
+      if (!isCurrentAttachmentScope()) return;
+      const img = {
+        uri: asset.uri,
+        base64: b64,
+        mimeType: normalizeAttachmentMimeType(asset.mimeType),
+        fileName: asset.name,
+      };
+      setPendingImages((prev: PendingImage[]) =>
+        [...prev, img].slice(0, MAX_IMAGES),
+      );
+    } catch {
+      /* skip */
+    }
+  }, [adapter?.capabilities, isCurrentAttachmentScope, setPendingImages]);
+
+  const takePhoto = useCallback(async () => {
+    if (!isCurrentAttachmentScope() || !canAddMoreImages) return;
+    const IP = await import("expo-image-picker");
+    if (!isCurrentAttachmentScope() || !canAddMoreImages) return;
+    const res = isMacCatalyst
+      ? await IP.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: false,
+        quality: 0.8,
+        base64: true,
+        exif: false,
+      })
+      : await (async () => {
+        const perm = await IP.requestCameraPermissionsAsync();
+        if (!perm.granted || !isCurrentAttachmentScope()) return { canceled: true, assets: [] };
+        return IP.launchCameraAsync({
+          quality: 0.8,
+          base64: true,
+          exif: false,
+        });
+      })();
+    if (!isCurrentAttachmentScope()) return;
+    if (!res.canceled && res.assets?.[0]?.base64) {
+      const a = res.assets[0];
+      setPendingImages((prev: PendingImage[]) =>
+        [
+          ...prev,
+          {
+            uri: a.uri,
+            base64: a.base64!,
+            mimeType: normalizeAttachmentMimeType(a.mimeType, "image/jpeg"),
+            width: a.width,
+            height: a.height,
+          },
+        ].slice(0, MAX_IMAGES),
+      );
+    }
+  }, [setPendingImages, isCurrentAttachmentScope, canAddMoreImages]);
 
   const isFocused = useIsFocused();
   // Conversation haptics (A+) play only for the conversation in front of the user.

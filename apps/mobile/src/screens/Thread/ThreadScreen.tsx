@@ -311,6 +311,8 @@ function ThreadScreenContent({
   const previewSnapshot = useRef<SessionPreviewSnapshot | null>(null);
   const controller = useChatController({
     adapter,
+    routeConnectionId: connectionId,
+    routeAgentId: agentId,
     routeSessionKey: sessionKey,
     readOnly: sessionPreview || nativeReadOnly,
     debugMode: app.debugMode,

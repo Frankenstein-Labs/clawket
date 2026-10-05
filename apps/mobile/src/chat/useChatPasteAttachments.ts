@@ -15,7 +15,9 @@ type Params = {
   setPendingAttachments: Dispatch<SetStateAction<PendingImage[]>>;
   maxAttachments: number;
   capabilities: AttachmentCapabilities | null | undefined;
+  isCurrentAttachmentScope?: () => boolean;
 };
+const alwaysCurrent = () => true;
 
 export type ChatPasteAttachmentBindings = {
   onPasteFiles: (files: readonly PastedFile[]) => Promise<void>;
@@ -27,18 +29,23 @@ export function useChatPasteAttachments({
   setPendingAttachments,
   maxAttachments,
   capabilities,
+  isCurrentAttachmentScope = alwaysCurrent,
 }: Params): ChatPasteAttachmentBindings {
   const { t } = useTranslation(['chat', 'common']);
   const pendingRef = useRef(pendingAttachments);
-  const pasteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pasteQueueRef = useRef({ isCurrentAttachmentScope, promise: Promise.resolve() });
+  if (pasteQueueRef.current.isCurrentAttachmentScope !== isCurrentAttachmentScope) {
+    pasteQueueRef.current = { isCurrentAttachmentScope, promise: Promise.resolve() };
+  }
   pendingRef.current = pendingAttachments;
 
   const onPasteFailed = useCallback(() => {
+    if (!isCurrentAttachmentScope()) return;
     Alert.alert(
       t('Unable to attach file', { ns: 'chat' }),
       t('Please try again later.', { ns: 'common' }),
     );
-  }, [t]);
+  }, [isCurrentAttachmentScope, t]);
 
   const showRejection = useCallback((rejection: PastedAttachmentRejection) => {
     if (rejection === 'limit') {
@@ -69,6 +76,7 @@ export function useChatPasteAttachments({
   }, [maxAttachments, onPasteFailed, t]);
 
   const processPasteFiles = useCallback(async (files: readonly PastedFile[]) => {
+    if (!isCurrentAttachmentScope()) return;
     try {
       const result = await preparePastedAttachments({
         files,
@@ -76,6 +84,7 @@ export function useChatPasteAttachments({
         maxAttachments,
         capabilities,
       });
+      if (!isCurrentAttachmentScope()) return;
       if (result.accepted.length > 0) {
         const remainingSlots = Math.max(0, maxAttachments - pendingRef.current.length);
         const accepted = result.accepted.slice(0, remainingSlots);
@@ -95,16 +104,17 @@ export function useChatPasteAttachments({
     } catch {
       onPasteFailed();
     }
-  }, [capabilities, maxAttachments, onPasteFailed, setPendingAttachments, showRejection]);
+  }, [capabilities, isCurrentAttachmentScope, maxAttachments, onPasteFailed, setPendingAttachments, showRejection]);
 
   const onPasteFiles = useCallback((files: readonly PastedFile[]) => {
-    if (files.length === 0) return Promise.resolve();
+    if (!isCurrentAttachmentScope() || files.length === 0) return Promise.resolve();
     const queuedFiles = [...files];
-    const task = pasteQueueRef.current.then(() => processPasteFiles(queuedFiles));
+    const queue = pasteQueueRef.current;
+    const task = queue.promise.then(() => processPasteFiles(queuedFiles));
     // Keep later pastes moving even if an unexpected task error escapes.
-    pasteQueueRef.current = task.catch(() => undefined);
+    queue.promise = task.catch(() => undefined);
     return task;
-  }, [processPasteFiles]);
+  }, [isCurrentAttachmentScope, processPasteFiles]);
 
   return { onPasteFiles, onPasteFailed };
 }
