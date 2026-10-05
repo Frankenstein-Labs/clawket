@@ -1,5 +1,12 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 R5S 长输入发送抓到独立 Android 原生 SIGSEGV；原生补丁整合，真机验收继续。
+  - 已实际加载 74f/d958 的 QA PID26323 在唯一长文本 Main Send 后退出；Android 明确记录 reason5/status11/前台 importance100。独立完整 crash buffer 的自有进程堆栈反复出现 AndroidTextInputState/AttributedString/Fragment/ShadowView 析构链，不与旧 SIGABRT 或滚动恢复空白混为一项。059 完整录像已转存，视觉审核待执行。
+  - Paste input 2.0.1 的 ShadowView fragment 保留旧 input state；对齐 RN BaseTextShadowNode 清除 props/state 的既有处理，保留 tag/event emitter/layout。整合 d6163370，Root 单文件8项、docs9指令对/5用例与实际 install patch 通过。独立 QA debug 原生构建成功，源码/生成JNI字节一致，新object/lib/APK已核SHA；唯一保数据 install-r 后完整安装APK与候选104,977,678B/SHA c2315ab9…一致。未升版本或替换商店App。标准 RN input 亦有相似原始形状，不能宣称 Paste 独占根因。
+  - R5S 原任务自然完成，最终仅2回执/start/complete、0 Current/abort/error；恢复后唯一 Stop 未得到原生中止证据，开发警告条遮挡另留现场，不记为通过或确定产品故障。原样冻结，不重发；修后另建独立样本测试连续 Current 和 Stop。
+  - 新QA PID19777完整JS缓存22,543,659B/SHA3400607b…，24源码/44标记通过，与APK原生证明分开记录。新R5T纯Init后长草稿全选清空保持进程；错误shell双引号注入及尾部一次ADB输入失败均留现场、未误发。纠正草稿1317字符全量核对后Main仅1Send；2条相同Current进入原turn，canonical间隔326,309ms，仍仅2普通回执。唯一Stop得到原turn明确1abort、0Maincomplete/error，同PID闲置UI层级与正文可见。Current1首次视觉tap未生效，警告条关闭后第二tap才进入Native；不得冒称单击链通过、真实IME或OS子进程已终止。061/062完整转存，Stop晚于062录制结束，录屏不替代截图/Native证明。空白/旧SIGABRT与跨后端原生回归仍待。
+  - 051–054/057–058 独立全部339张contact/4044编码帧视觉审核完成：057看见实际发送至回复，058仅打开并保持Reset确认，无最终Reset效果。83c18253及原生补丁standalone exact CI功能/类型/v1/Desktop通过，仅未批准braces审计阻挡；未合并或发布。分页空白诊断及Desktop owner-only检查仍未完成。
+
 - 2026-10-05 Reset 窄修整合到 74f696bd，fresh M2 真机验收通过，全面 Codex 测试继续。
   - 完整手机缓存22,543,551B/SHA d958f357…与24源码/44标记验证；新QA PID26323正常加载。开发加载过程中保留 Unable-load-script/ANR 与 USB reverse 恢复记录，只操作 QA 开发服务/保数据冷开，未触商店、Desktop owner 或 Production；未把零字节探测归因手机网络。
   - M2唯一初始化Send得到1回执/start/complete/user/reply、0工具/error/abort。唯一Reset后不离开当前会话即0消息，已验证未发送草稿保留；被动检查、离开重入后的 settled 截图仍空且草稿保留。只读Native核验旧线程归档、完整历史SHA不变、仍仅1回执；重入正常准备不同空Native绑定，不能要求永远无绑定。原M1显式Saved copy仍显示完整问答。058开始至Reset确认248.424秒超过180秒录制窗，不能声称该视频包含Reset；不重放M2造证据。
