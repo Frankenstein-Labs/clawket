@@ -1,5 +1,10 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 Codex QA 收敛：完整任务树重基至 `5ab56f64`，保留 main 的工具展示决定与已获负责人授权的依赖审计例外。
+  - 合并后的原生执行身份、同轮指导连续计时/步骤、partial 审批、断线保持及 scope 退休通过独立源码复核。完成后的 receipt 与无空回复占位、首步 dock 行为沿 main 决定；原七个一秒前无 dock 的断言已适配新决定，终止时仍必须退休。
+  - 串行九文件358项通过：ThreadView216、turn-work22、work-dock-model10、toolGrouping7、timestamps19、model30、Native QA bridge22、cache17、hook15；Mobile types、十对 agent 文档/五项损坏输入检查与 whitespace 通过。保留首次失败及重测日志。没有本地完整套件、设备动作或 Native 编译；新增只读 QA 模块尚待实际编译与手机回调验证。
+  - 073 全部1344编码帧/112contact独立亲看：34.585544秒出现09–11后下一帧回到24–27，37.3573秒经16–19、37.415022秒变为08–11，尾帧84.383211秒仍08–11。正文仍可读，没有全块 blank；最大VFR间隔13.729567秒，不能推连续绘制、精确持续时间或因果。已冻结原H6C/R5U文件、QA无草稿/图片，历史 clamp 修复候选独立验证中。
+
 - 2026-10-05 原生 QA viewport 有界观察器（负责人明确授权；窄 JS 验证通过，Native 待编译/实测）。
   - fresh-main 独立 worktree 证明 ancestry 后仅 fast-forward 到负责人已审完整 `2ad22664` 前置树；本任务新增补丁只含 Clawket 自有 Android Expo module、accepted-Start 消费者、V3 纯标量 encoder/回归源码及最近说明。原来的 anchor/scroll/render、V1/V2 与五后端行为保持。
   - 四 JS opt-in 门及 native `.qa`/debug/RN0.86.3/Fabric 门后，捕获实际 scroll host/直接 child 的 layout/scroll 与 manager mount 阶段；64事件 ring、序列/丢失/拒绝计数、px/density 和本次 Android uptime 明确。弱对象/代际逐回调校验；后台/销毁/离开 scope 退休，晚绑定仅清原代，没有计时器、事件推送、measure/scroll/React 状态或原生文件写入。

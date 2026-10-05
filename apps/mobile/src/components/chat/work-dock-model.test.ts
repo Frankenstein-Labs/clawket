@@ -89,7 +89,7 @@ describe('liveTurnHasWords', () => {
   });
 
   it('keeps known same-run words across guidance and excludes unreported older words on a partial page', () => {
-    const identity = { scope: {}, sessionKey: 'session', runId: 'run', turnId: 'turn', inputMessageId: 'main' };
+    const identity = { scope: {}, sessionKey: 'session', runId: 'run', turnId: 'turn', inputMessageId: 'main', startedAt: 1000 };
     const guide: UiMessage = { id: 'guide', role: 'user', text: 'Continue', turnId: 'turn' };
     const words: UiMessage = { id: 'words', role: 'assistant', text: 'Working', turnId: 'turn' };
     const earlier: UiMessage = { id: 'earlier', role: 'assistant', text: 'Old answer' };
