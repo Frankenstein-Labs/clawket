@@ -1,3 +1,4 @@
+import { finishLiveRunPresentation, liveReplyRenderKey } from './liveRunThread';
 import { UiMessage } from '../types/chat';
 import { preserveCompletedRunPresentation, preserveApprovalRows, preserveHydratedMessageKeys, preserveMessagePresentation, preserveOptimisticAssistantMessage, preserveToolTiming, prependOlderCachedMessages, reconcileAcceptedSteeringMessage, retireAliasedTools } from './historyMergePolicy';
 
@@ -759,5 +760,233 @@ describe('native same-run completed presentation', () => {
     expect(rows.filter(row => row.id === 'toolcall_exec')).toEqual([expect.objectContaining({ toolStatus: 'success' })]);
     expect(rows.find(row => row.text === 'A')?.renderKey).toBe('stable-a');
     expect(rows.at(-1)).toEqual(next);
+  });
+});
+
+
+
+describe('interrupted cumulative commentary across a canonical same-turn guide', () => {
+  const setup = () => {
+    const main: UiMessage = { id: 'native-main', role: 'user', text: 'Synthetic main', turnId: 'native-turn', idempotencyKey: 'main-send' };
+    const s: UiMessage = { id: 'native-s', role: 'assistant', text: 'Before tool.', turnId: 'native-turn', timestampMs: 1_000 };
+    const tool: UiMessage = { id: 'toolcall_synthetic', role: 'tool', text: '', toolName: 'exec', toolStatus: 'running', turnId: 'native-turn' };
+    const a: UiMessage = { id: 'native-a', role: 'assistant', text: 'Commentary A.', turnId: 'native-turn', timestampMs: 10_000 };
+    const guide: UiMessage = { id: 'native-guide', role: 'user', text: 'Synthetic guide', turnId: 'native-turn', timestampMs: 20_000 };
+    const b: UiMessage = { id: 'native-b', role: 'assistant', text: 'Commentary B.', turnId: 'native-turn', timestampMs: 30_000 };
+    const history = [main, s, tool, a, guide, b];
+    // This is the actual controller terminal composition; the cumulative tail
+    // has never met another tool boundary. No synthetic ACK cuts the text.
+    const rows = finishLiveRunPresentation({
+      segments: [{ id: 'local-s', renderKey: 'stable-s', text: s.text, timestampMs: 1_000, afterToolCount: 0 }],
+      tools: [tool], tail: a.text + '\n\n' + b.text, runId: 'synthetic-run',
+      startedAt: 1_000, turnId: 'native-turn', cancelled: true,
+    });
+    const merge = (incoming: UiMessage[]) => preserveOptimisticAssistantMessage([
+      ...incoming.filter(message => !rows.some(row => row.id === message.id)), ...rows,
+    ], incoming);
+    return { main, s, tool, a, guide, b, history, rows, merge };
+  };
+
+  it('keeps canonical A / guide / B once after abort instead of retaining a second A+B bubble', () => {
+    const { history, a, b, merge } = setup();
+    const result = merge(history);
+    expect(result.map(row => row.text)).toEqual(['Synthetic main', 'Before tool.', '', a.text, 'Synthetic guide', b.text]);
+    expect(result.filter(row => row.role === 'assistant').map(row => row.timestampMs)).toEqual([1_000, 10_000, 30_000]);
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.filter(row => row.id === b.id)).toHaveLength(1);
+    expect(result.find(row => row.text === 'Before tool.')?.renderKey).toBe('stable-s');
+    expect(result.find(row => row.id === a.id)?.renderKey).toBe(liveReplyRenderKey(1_000, 'synthetic-run', 1));
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+    // Repeated reconciliation cannot recreate the aborted aggregate.
+    expect(preserveOptimisticAssistantMessage(result, history).map(row => row.text)).toEqual(result.map(row => row.text));
+  });
+
+  it.each(['missing-b', 'no-guide', 'foreign-guide', 'local-ack', 'no-turn', 'missing-clock', 'changed-tail'] as const)
+  ('retains unproven text instead of guessing a split for %s', variant => {
+    const { history, a, b, rows, merge } = setup();
+    const incoming = history.flatMap(row => {
+      if (variant === 'missing-b' && row.id === b.id) return [];
+      if (variant === 'no-guide' && row.role === 'user' && row.id !== 'native-main') return [];
+      if (variant === 'foreign-guide' && row.id === 'native-guide') return [{ ...row, turnId: 'foreign-turn' }];
+      if (variant === 'local-ack' && row.id === 'native-guide') return [{ ...row, id: 'usr_20000_steer_synthetic-run', sentLocally: true as const }];
+      if (variant === 'no-turn') return [{ ...row, turnId: undefined }];
+      if (variant === 'missing-clock' && row.id === b.id) return [{ ...row, timestampMs: undefined }];
+      if (variant === 'changed-tail' && row.id === b.id) return [{ ...row, text: b.text + ' Changed.' }];
+      return [row];
+    });
+    const result = merge(incoming);
+    expect(result.some(row => row.id === 'abort_synthetic-run' && row.text === a.text + '\n\n' + b.text)).toBe(true);
+    expect(rows.find(row => row.id === 'abort_synthetic-run')?.text).toBe(a.text + '\n\n' + b.text);
+  });
+  it.each([undefined, 0, Number.NaN])('does not split across an unreported or invalid guide clock (%s)', timestampMs => {
+    const { history, a, b, merge } = setup();
+    const incoming = history.map(row => row.id === 'native-guide' ? { ...row, timestampMs } : row);
+    expect(merge(incoming).some(row => row.id === 'abort_synthetic-run' && row.text === a.text + '\n\n' + b.text)).toBe(true);
+  });
+
+  it('preserves canonical row order even when individually valid clocks are nonmonotonic', () => {
+    const { history, a, b, merge } = setup();
+    const incoming = history.map(row => row.id === b.id ? { ...row, timestampMs: 5_000 } : row);
+    const result = merge(incoming);
+    expect(result.map(row => row.text)).toEqual(['Synthetic main', 'Before tool.', '', a.text, 'Synthetic guide', b.text]);
+    expect(result.filter(row => row.role === 'assistant').map(row => row.timestampMs)).toEqual([1_000, 10_000, 5_000]);
+  });
+
+  it('keeps an already displayed canonical A render identity instead of claiming it for the aborted rollup', () => {
+    const { history, a, b, merge } = setup();
+    const incoming = history.map(row => row.id === a.id ? { ...row, renderKey: 'old-stable-canonical-a' } : row);
+    const result = merge(incoming);
+    expect(result.find(row => row.id === a.id)?.renderKey).toBe('old-stable-canonical-a');
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.filter(row => row.id === b.id)).toHaveLength(1);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('does not give canonical A a render key already owned by canonical B', () => {
+    const { history, a, b, merge } = setup();
+    const tailKey = liveReplyRenderKey(1_000, 'synthetic-run', 1);
+    const incoming = history.map(row => row.id === b.id ? { ...row, renderKey: tailKey } : row);
+    const result = merge(incoming);
+    // A adopts its own canonical identity rather than stealing B's existing cell.
+    expect(result.find(row => row.id === a.id)?.renderKey ?? a.id).toBe(a.id);
+    expect(result.find(row => row.id === b.id)?.renderKey).toBe(tailKey);
+    expect(result.some(row => row.id === 'abort_synthetic-run')).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('preserves a distinct earlier identical paragraph when the latest exact native identity is known', () => {
+    const { history, a, b, guide, merge } = setup();
+    const earlyA = { ...a, id: 'native-earlier-a', timestampMs: 5_000 };
+    const earlyGuide = { ...guide, id: 'native-earlier-guide', timestampMs: 6_000 };
+    const intervening = { ...a, id: 'native-intervening', text: 'An independent paragraph.', timestampMs: 7_000 };
+    const incoming = [...history.slice(0, 3), earlyA, earlyGuide, intervening, ...history.slice(3)];
+    const result = merge(incoming);
+    expect(result.map(row => row.text)).toEqual(incoming.map(row => row.text));
+    expect(result.filter(row => row.id === earlyA.id)).toHaveLength(1);
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.findIndex(row => row.id === a.id)).toBeLessThan(result.findIndex(row => row.id === guide.id));
+    expect(result.findIndex(row => row.id === guide.id)).toBeLessThan(result.findIndex(row => row.id === b.id));
+    expect(result.some(row => row.id === 'abort_synthetic-run')).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('retains an aggregate when an exact local prefix has changed content', () => {
+    const { history, a, b, rows } = setup();
+    const ownedA: UiMessage = { ...a, text: 'Unconfirmed changed paragraph.', presentationRunId: 'synthetic-run', renderKey: 'old-stable-canonical-a' };
+    const prior = [...history.filter(row => !rows.some(local => local.id === row.id) && row.id !== a.id), ...rows.filter(row => row.id !== 'abort_synthetic-run'), ownedA, rows.find(row => row.id === 'abort_synthetic-run')!];
+    const result = preserveOptimisticAssistantMessage(prior, history);
+    expect(result.some(row => row.id === 'abort_synthetic-run' && row.text === a.text + '\n\n' + b.text)).toBe(true);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+  it('does not clone A when an independent local presentation segment already owns its exact canonical identity', () => {
+    const { history, a, b, rows } = setup();
+    const ownedA: UiMessage = { ...a, presentationRunId: 'synthetic-run', renderKey: 'old-stable-canonical-a' };
+    const prior = [...history.filter(row => !rows.some(local => local.id === row.id) && row.id !== a.id), ...rows.filter(row => row.id !== 'abort_synthetic-run'), ownedA, rows.find(row => row.id === 'abort_synthetic-run')!];
+    const result = preserveOptimisticAssistantMessage(prior, history);
+    expect(result.filter(row => row.id === a.id)).toHaveLength(1);
+    expect(result.find(row => row.id === a.id)?.renderKey).toBe('old-stable-canonical-a');
+    expect(result.some(row => row.id === 'abort_synthetic-run')).toBe(false);
+    expect(result.map(row => row.text)).toEqual(['Synthetic main', 'Before tool.', '', a.text, 'Synthetic guide', b.text]);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+  });
+
+});
+
+describe('interrupted commentary with independently owned canonical prefix', () => {
+  const fixture = () => {
+    const turnId = 'synthetic-prefix-turn';
+    const runId = 'synthetic-prefix-run';
+    const repeated = 'Synthetic repeated commentary A.';
+    const after = 'Synthetic commentary B.';
+    const main: UiMessage = { id: 'synthetic-main', role: 'user', text: 'Synthetic task',
+      turnId, idempotencyKey: 'synthetic-main-send' };
+    const assistant = (ordinal: number, text: string): UiMessage => ({
+      id: `synthetic-native-assistant-${ordinal}`, role: 'assistant', text,
+      turnId, timestampMs: ordinal * 10_000,
+    });
+    const a1 = assistant(1, 'Synthetic introduction.');
+    const earlierA = assistant(3, repeated);
+    const latestA = assistant(10, repeated);
+    const b = assistant(11, after);
+    const tool: UiMessage = { id: 'toolcall_synthetic-prefix', role: 'tool', text: '',
+      toolName: 'exec', toolStatus: 'success', turnId, timestampMs: 15_000 };
+    // Native wire ID survives an ACK-first echo; sentLocally is its origin only.
+    const guide1: UiMessage = { id: 'synthetic-native-guide-1', role: 'user', text: 'Synthetic guide',
+      turnId, timestampMs: 95_000, sentLocally: true, renderKey: 'usr_95000_steer_synthetic-prefix-run' };
+    const guide2: UiMessage = { id: 'synthetic-native-guide-2', role: 'user', text: guide1.text,
+      turnId, timestampMs: 105_000, sentLocally: true, renderKey: 'usr_105000_steer_synthetic-prefix-run' };
+    // Exactly 16 canonical rows, 12 assistants, two same-turn guides. The early
+    // ordinal-3 A has the same text as ordinal-10 A but a distinct wire identity.
+    // This is synthetic ordering, not copied private Native text or wire data.
+    const canonical: UiMessage[] = [main, a1, tool,
+      assistant(2, 'Synthetic commentary two.'), earlierA,
+      assistant(4, 'Synthetic commentary four.'), assistant(5, 'Synthetic commentary five.'),
+      assistant(6, 'Synthetic commentary six.'), assistant(7, 'Synthetic commentary seven.'),
+      assistant(8, 'Synthetic commentary eight.'), assistant(9, 'Synthetic commentary nine.'),
+      guide1, latestA, guide2, b, assistant(12, 'Synthetic later paragraph.')];
+    const finished = finishLiveRunPresentation({
+      segments: [{ id: 'synthetic-local-intro', renderKey: 'synthetic-stable-intro',
+        text: a1.text, timestampMs: a1.timestampMs!, afterToolCount: 0 }],
+      tools: [tool], tail: repeated + '\n\n' + after, runId,
+      startedAt: 10_000, turnId, cancelled: true,
+    });
+    const aborted = finished.find(row => row.id === `abort_${runId}`)!;
+    const previous = (owners: UiMessage[] = []): UiMessage[] => [
+      main, ...finished.filter(row => row !== aborted), guide1, ...owners, guide2, aborted,
+    ];
+    const merge = (owners: UiMessage[] = []) => preserveOptimisticAssistantMessage(previous(owners), canonical);
+    return { canonical, latestA, earlierA, b, aborted, repeated, runId, merge };
+  };
+
+  it('keeps the earlier equal-text Native row when the unique latest A/guide/B tail is reconciled', () => {
+    const { canonical, latestA, earlierA, b, aborted, repeated, merge } = fixture();
+    expect(canonical).toHaveLength(16);
+    expect(canonical.filter(row => row.role === 'assistant')).toHaveLength(12);
+    const result = merge();
+    // A text fallback must not win before an available exact wire identity.
+    expect(result.map(row => row.id)).toEqual(canonical.map(row => row.id));
+    expect(result.filter(row => row.text === repeated).map(row => row.id)).toEqual([earlierA.id, latestA.id]);
+    expect(result.find(row => row.id === latestA.id)?.renderKey).toBe(aborted.renderKey);
+    expect(result.find(row => row.id === earlierA.id)?.renderKey ?? earlierA.id).toBe(earlierA.id);
+    expect(result.find(row => row.id === b.id)?.timestampMs).toBe(b.timestampMs);
+    expect(result.some(row => row.id === aborted.id)).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+    expect(preserveOptimisticAssistantMessage(result, canonical)).toEqual(result);
+  });
+
+  it('keeps an exact independently owned latest A cell and replaces only the interrupted suffix with B', () => {
+    const { canonical, latestA, earlierA, b, aborted, runId, merge } = fixture();
+    const owner: UiMessage = { ...latestA, presentationRunId: runId, renderKey: 'synthetic-owned-latest-a' };
+    const result = merge([owner]);
+    expect(result.map(row => row.id)).toEqual(canonical.map(row => row.id));
+    expect(result.filter(row => row.id === latestA.id)).toHaveLength(1);
+    expect(result.find(row => row.id === latestA.id)).toMatchObject({
+      text: latestA.text, turnId: latestA.turnId, timestampMs: latestA.timestampMs,
+      renderKey: owner.renderKey,
+    });
+    expect(result.find(row => row.id === earlierA.id)?.renderKey ?? earlierA.id).toBe(earlierA.id);
+    expect(result.find(row => row.id === b.id)).toMatchObject({
+      text: b.text, timestampMs: b.timestampMs, renderKey: aborted.renderKey,
+    });
+    expect(result.some(row => row.id === aborted.id)).toBe(false);
+    expect(new Set(result.map(row => row.renderKey ?? row.id)).size).toBe(result.length);
+    expect(preserveOptimisticAssistantMessage(result, canonical)).toEqual(result);
+  });
+
+  it('retains the aggregate when exact prefix ownership has changed text or is ambiguous', () => {
+    const { latestA, aborted, runId, merge } = fixture();
+    const owner: UiMessage = { ...latestA, presentationRunId: runId, renderKey: 'synthetic-owned-latest-a' };
+    const cases: UiMessage[][] = [
+      [{ ...owner, text: 'Synthetic changed ownership text.' }],
+      [owner, { ...owner, id: 'synthetic-local-alias-a', historyMessageId: latestA.id,
+        renderKey: 'synthetic-second-owner-a' }],
+    ];
+    for (const owners of cases) {
+      const result = merge(owners);
+      expect(result.filter(row => row.id === aborted.id)).toEqual([expect.objectContaining({
+        text: aborted.text, turnId: aborted.turnId, renderKey: aborted.renderKey,
+      })]);
+    }
   });
 });

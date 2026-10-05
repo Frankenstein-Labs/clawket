@@ -1,5 +1,16 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 停止后跨指南累计回复重复的原生/UI精确关联与源码窄修完成；手机加载验收待继续。
+  - 1454 独立第3泡的 Native ID 精确对应原 Main assistant ordinal10；第4本地 abort 尾精确为该 A＋双换行＋ordinal11 B，canonical 原序 A→guide2→B，三者有效 typed clocks。较早ordinal3同文 A有不同ID；不从正文或时钟推断指南消费。独立诊断纠正原role-prefix假设，旧证据保持；0RPC/Native写/进程操作。
+  - 仅完整唯一、同turn、有效clock的canonical序列可拆无usage/附件的本地 abort_ 累计尾；ACK到达不切文本。已确认guide的sentLocally起源标记保留；exact-owned不变前缀保原cell/key，仅展开后缀，changed/ambiguous/non-prefix仍保守。Known Native/history ID先于同文fallback，合法较早同文段不被抢身份，不全局按时钟排序。Root真实finish/preserve基线3红；actual controller ACK先、B pending期间到达、cancelled终态及late head基线1红；16行/12assistant重复身份与prefix再3红，最终history97/controller97通过。viewport union同样单文件4/15/208/24通过，Thread fixture同名AppState自动合并重项已删，类型通过；不声称1454手机已修或空白定因。
+  - 059/060/061的54/112/753 contact及11010编码帧已全部亲看：061直到最后9032仍工作正文和两commentary，未录Current/Stop/Home或整块空白。062超预算probe保持失败、0后续decode/contact。完整传输、容器/codec与实际视觉场景分别记录。QA PID19777仍旧d616/3400607b缓存，候选尚未加载；Desktop GUI与braces owner-only不绕过，未merge/release。
+
+- 2026-10-05 Codex A5A 原审批/工具与 Q5A 原问答提交真机闭环完成；滚动空白和终态重复继续修复。
+  - A5A 独立纯 Init 与 Main 均确认真实 Read-only，原第二 turn 的唯一 printf 审批经既有 IPC 只读观察、手机一次 Allow，得到原 item completed/exit0、准确 stdout 与最终回复；2 starts/completes/receipts、0错误/abort。冻结 reader 因要求未持久化的 exec begin/end 格式失败，另以原 canonical CommandExecution 严格关联验证，不改旧 reader/结果。键盘存在时首次工作回执 tap 未打开；隐藏键盘后打开工作记录、命令详情，Copy 后在同自有空草稿实际 Paste 得到准确28字符含换行，再清空且0Send。后台同PID返回保留详情，初帧重连/遮挡留证，不冒称全程在线。
+  - Q5A 先 Low ACK 再 Read-only，首次过早 Read-only 被 disabled 门拒绝且0写。纯 Init 确认原只读线程后，仅原QA owner切 Plan；唯一 Main 产生原双字段问题，第一项选推荐选项、第二项18字符 custom，关闭重开保留第二页与准确草稿。一次 Submit 后原 call 唯一准确 answers/output、2 starts/completes/receipts、0错误/abort；离开再进入同完成态，完整 Native 与 receipts 字节不变，问题表单不复活。同PID19777，未测刻意双击或本轮冷开，不重放夹具。
+  - 059/060全编码帧分别641/1336，通过natural EOF及全部54/112 contact亲看；059发送后确见Home转换但不能从像素证明退出原因，060只覆盖纯Init至Main草稿。061全解9033帧/753 contact、视觉审核继续；062唯一probe因帧数超预算拒绝，decode/contact未启动，完整视频仍保留。7个实际codec child均独立确认退役；不把容器时长当场景或连续paint覆盖。
+  - 整合731的默认关闭QA viewport观测，Root逐文件4/15/208/24项通过；不改变恢复行为、不宣称原空白已修。原停止后aggregate重复已在真实finish/preserve消费组合基线3红，候选92项通过，实际controller ACK/head时序继续审查。PR141仍未merge/release，Desktop GUI与未批准braces审计保留owner-only边界。
+
 - 2026-10-05 R5S 长输入发送抓到独立 Android 原生 SIGSEGV；原生补丁整合，真机验收继续。
   - 已实际加载 74f/d958 的 QA PID26323 在唯一长文本 Main Send 后退出；Android 明确记录 reason5/status11/前台 importance100。独立完整 crash buffer 的自有进程堆栈反复出现 AndroidTextInputState/AttributedString/Fragment/ShadowView 析构链，不与旧 SIGABRT 或滚动恢复空白混为一项。059 完整录像已转存，视觉审核待执行。
   - Paste input 2.0.1 的 ShadowView fragment 保留旧 input state；对齐 RN BaseTextShadowNode 清除 props/state 的既有处理，保留 tag/event emitter/layout。整合 d6163370，Root 单文件8项、docs9指令对/5用例与实际 install patch 通过。独立 QA debug 原生构建成功，源码/生成JNI字节一致，新object/lib/APK已核SHA；唯一保数据 install-r 后完整安装APK与候选104,977,678B/SHA c2315ab9…一致。未升版本或替换商店App。标准 RN input 亦有相似原始形状，不能宣称 Paste 独占根因。

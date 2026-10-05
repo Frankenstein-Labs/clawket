@@ -3076,6 +3076,107 @@ it('does not restore an old history snapshot after a live terminal event', async
     expect(historyMock.loadHistory).toHaveBeenCalledTimes(newRun ? 1 : 2);
   });
 
+it('reconciles actual aborted controller output after ACK-first guidance and a late canonical head', async () => {
+  const runAt = Date.UTC(2026, 9, 5, 0, 0, 0);
+  jest.setSystemTime(runAt);
+  const adapter = createAdapter('ready', 'codex');
+  const acknowledgement = deferred<void>();
+  const steer = jest.fn(() => acknowledgement.promise);
+  Object.assign(adapter, { steer, capabilities: { ...adapter.capabilities, steer: true } });
+  const { mapAdapterSessionUpdate } = jest.requireActual<typeof import('./useAdapterChatEvents')>('./useAdapterChatEvents');
+  const realPresentation = jest.requireActual<typeof import('./liveRunThread')>('./liveRunThread');
+  const finishSpy = jest.spyOn(realPresentation, 'finishLiveRunPresentation'); // calls actual implementation
+  const key = 'agent:main:main', runId = 'aborted-run', turnId = 'native-turn';
+  const main = { id: 'native-main', role: 'user' as const, text: 'Synthetic main', turnId,
+    idempotencyKey: 'main-send', timestampMs: runAt };
+  historyMock.messages = [main];
+  historyMock.applyReconciledHistory.mockReturnValue(false);
+  const { result, rerender, unmount } = renderHook(() => useChatController({ adapter: adapter as any,
+    debugMode: false, showAgentAvatar: true }));
+  const events = jest.mocked(useAdapterChatEvents).mock.calls.at(-1)![0];
+  const identity = { sessionKey: key, runId, turnId, inputMessageId: main.id, inputMessageKey: main.idempotencyKey };
+  const receive = (update: any, at: number) => {
+    jest.setSystemTime(at);
+    events.onUpdate?.(mapAdapterSessionUpdate(update, { now: () => at }));
+  };
+  const s = 'Before tool.', a = 'Commentary A.', b = 'Commentary B.', guide = 'Synthetic guide';
+  try {
+    await act(async () => {
+      events.onState?.('ready');
+      receive({ type: 'run_started', ...identity }, runAt);
+      receive({ type: 'agent_message_chunk', ...identity, textMode: 'snapshot', text: s, timestampMs: runAt + 1_000 }, runAt + 1_000);
+      receive({ type: 'tool_call', ...identity, toolCallId: 'synthetic-tool', title: 'exec', status: 'running' }, runAt + 2_000);
+      receive({ type: 'agent_message_chunk', ...identity, textMode: 'snapshot', text: s + '\n\n' + a,
+        timestampMs: runAt + 10_000 }, runAt + 10_000);
+    });
+    const firstSegmentKey = result.current.listData.find(row => row.text === s)?.renderKey;
+    expect(firstSegmentKey).toBeTruthy();
+    expect(result.current.runWorkIdentity).toMatchObject({ runId, turnId, inputMessageId: main.id });
+    await act(async () => { jest.setSystemTime(runAt + 20_000); result.current.setInput(guide); });
+    act(() => result.current.onSteer(runId));
+    expect(steer).toHaveBeenCalledTimes(1);
+    // A new paragraph arrives while ACK is pending. It must never be cut at
+    // ACK time merely because the local dispatch happened before this chunk.
+    await act(async () => {
+      receive({ type: 'agent_message_chunk', ...identity, textMode: 'snapshot', text: [s, a, b].join('\n\n'),
+        timestampMs: runAt + 30_000 }, runAt + 30_000);
+      acknowledgement.resolve();
+      await acknowledgement.promise;
+    });
+    const accepted = historyMock.messages.find(row => row.role === 'user' && row.text === guide);
+    expect(accepted).toMatchObject({ sentLocally: true, turnId, timestampMs: runAt + 20_000 });
+    expect(accepted?.id).toMatch(/^usr_\d+_steer_aborted-run_/);
+    const tailKey = result.current.listData.find(row => row.id === 'streaming')?.renderKey;
+    expect(tailKey).toBeTruthy();
+    // Actual mapping uses cancelled; Native turn abortion is not a new wire enum.
+    await act(async () => {
+      receive({ type: 'run_finished', sessionKey: key, runId, stopReason: 'cancelled' }, runAt + 40_000);
+      rerender({});
+    });
+    expect(finishSpy).toHaveBeenLastCalledWith(expect.objectContaining({ runId, turnId, cancelled: true, tail: a + '\n\n' + b }));
+    const produced = finishSpy.mock.results.at(-1)?.value as import('../types/chat').UiMessage[];
+    expect(produced.find(row => row.id === 'abort_aborted-run')).toMatchObject({ role: 'assistant', text: a + '\n\n' + b,
+      turnId, presentationRunId: runId, renderKey: tailKey });
+    // The head has not arrived yet; retaining this unknown rollup is correct.
+    expect(historyMock.messages.find(row => row.id === 'abort_aborted-run')?.turnId).toBe(turnId);
+    expect(result.current.isSending).toBe(false);
+    expect(result.current.runWorkIdentity).toBeUndefined();
+
+    const canonical = [main,
+      { id: 'native-s', role: 'assistant' as const, text: s, turnId, timestampMs: runAt + 1_000 },
+      { id: 'toolcall_synthetic-tool', role: 'tool' as const, text: '', turnId, timestampMs: runAt + 2_000,
+        tool: { name: 'exec', callId: 'synthetic-tool', status: 'success' as const } },
+      { id: 'native-a', role: 'assistant' as const, text: a, turnId, timestampMs: runAt + 10_000 },
+      { id: 'native-guide', role: 'user' as const, text: guide, turnId, timestampMs: runAt + 20_000 },
+      { id: 'native-b', role: 'assistant' as const, text: b, turnId, timestampMs: runAt + 30_000 }];
+    for (let pass = 0; pass < 2; pass++) {
+      await act(async () => {
+        receive({ type: 'history_reconciled', sessionKey: key, history: { key, hasActiveRun: false, messages: canonical } }, runAt + 41_000 + pass);
+        rerender({});
+      });
+      const rows = historyMock.messages.filter(row => row.role !== 'system');
+      expect(rows.map(row => row.text)).toEqual([main.text, s, '', a, guide, b]);
+      expect(rows.filter(row => row.id === 'native-a')).toHaveLength(1);
+      expect(rows.filter(row => row.id === 'native-b')).toHaveLength(1);
+      expect(rows.some(row => row.id === 'abort_aborted-run')).toBe(false);
+      // Local origin survives a confirmed native echo; it is not evidence
+      // that this row still lacks canonical native identity.
+      expect(rows.find(row => row.id === 'native-guide')).toMatchObject({ sentLocally: true, renderKey: accepted.renderKey });
+      expect(rows.find(row => row.text === s)?.renderKey).toBe(firstSegmentKey);
+      expect(rows.find(row => row.id === 'native-a')?.renderKey).toBe(tailKey);
+      expect(new Set(rows.map(row => row.renderKey ?? row.id)).size).toBe(rows.length);
+      expect(result.current.listData.filter(row => row.role === 'assistant').reverse().map(row => row.text)).toEqual([s, a, b]);
+      expect(result.current.listData.some(row => row.id === 'streaming')).toBe(false);
+    }
+    expect(adapter.prompt).not.toHaveBeenCalled();
+    expect(adapter.cancel).not.toHaveBeenCalled();
+    expect(steer).toHaveBeenCalledTimes(1);
+  } finally {
+    unmount();
+    finishSpy.mockRestore();
+  }
+});
+
 });
 
 it('puts external input in the chosen chat without switching to an empty main key', async () => {

@@ -131,7 +131,6 @@ jest.mock('react-native', () => {
   );
   return {
     ...require('../../../__mocks__/native-animated'),
-    AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
     DynamicColorIOS: (variants: unknown) => ({ dynamic: variants }),
     AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
     Keyboard: { dismiss: jest.fn() },

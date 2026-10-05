@@ -553,6 +553,75 @@ export function preserveOptimisticAssistantMessage(
 }
 
 
+/** Reconcile an interrupted rollup only from complete same-turn split history. */
+function splitConfirmedInterruptedGuideTail(message: UiMessage, remote: UiMessage[], turnId: string | undefined, retained: UiMessage[]): UiMessage[] {
+  if (!turnId || message.turnId !== turnId || message.role !== 'assistant'
+    || !message.id.startsWith('abort_') || message.streaming || message.usage
+    || message.artifactAttachments?.length || message.imageUris?.length || message.fileAttachments?.length
+    || remote.some(row => row.id === message.id || Boolean(message.historyMessageId && row.historyMessageId === message.historyMessageId))) return [message];
+  const clock = (row: UiMessage) => typeof row.timestampMs === 'number' && row.timestampMs > 0
+    && Number.isFinite(row.timestampMs) && Number.isFinite(new Date(row.timestampMs).getTime());
+  const canonicalAssistant = (row: UiMessage) => row.role === 'assistant' && row.turnId === turnId
+    && !row.presentationRunId && !row.streaming && row.text.trim().length > 0 && clock(row);
+  const canonicalGuide = (row: UiMessage) => row.role === 'user' && row.turnId === turnId
+    // Confirmed native echoes retain sentLocally as presentation metadata.
+    && !row.idempotencyKey && !row.delivery && !/^usr_\d/.test(row.id)
+    && !row.imageUris?.length && !row.fileAttachments?.length && clock(row);
+  const matches: UiMessage[][] = [];
+  for (let start = 0; start < remote.length; start++) {
+    if (!canonicalAssistant(remote[start]!) || !message.text.trimStart().startsWith(remote[start]!.text.trim())) continue;
+    const parts: UiMessage[] = [];
+    let remaining = message.text.trimStart(), crossedGuide = false;
+    for (let index = start; index < remote.length; index++) {
+      const row = remote[index]!;
+      if (canonicalGuide(row) && parts.length > 0 && remaining.trim()) { crossedGuide = true; continue; }
+      if (!canonicalAssistant(row)) break;
+      const prefix = row.text.trim();
+      if (!remaining.startsWith(prefix)) break;
+      parts.push(row);
+      remaining = remaining.slice(prefix.length);
+      if (!remaining.trim()) break;
+      // Exact separate paragraphs only; do not split a joined word or changed prose.
+      if (!/^\s/.test(remaining)) break;
+      remaining = remaining.trimStart();
+    }
+    if (!remaining.trim() && crossedGuide && parts.length > 1) matches.push(parts);
+  }
+  // Missing/partial/ambiguous canonical rows never authorize removal or a cut.
+  if (matches.length !== 1) return [message];
+  const confirmed = matches[0]!;
+  // An exact, unchanged prefix may already own independent cells. Leave those
+  // cells in place and expand only the remaining suffix of this rollup.
+  const identities = (row: UiMessage) => [row.id, row.historyMessageId].filter(Boolean);
+  let prefixCount = 0, lastOwner = -1;
+  for (let index = 0; index < confirmed.length; index++) {
+    const part = confirmed[index]!;
+    const owners = retained.map((row, position) => ({ row, position })).filter(({ row }) => row !== message
+      && identities(part).some(id => identities(row).includes(id)));
+    if (!owners.length) continue;
+    if (index !== prefixCount || owners.length !== 1) return [message];
+    const { row, position } = owners[0]!;
+    if (position <= lastOwner || position >= retained.indexOf(message) || row.role !== 'assistant'
+      || row.turnId !== turnId || row.presentationRunId !== message.presentationRunId
+      || row.streaming || !clock(row) || row.text.trim() !== part.text.trim()) return [message];
+    prefixCount++; lastOwner = position;
+  }
+  const parts = confirmed.slice(prefixCount);
+  if (!parts.length) return [];
+  const occupied = new Set([...remote.filter(row => !parts.includes(row)), ...retained.filter(row => row !== message)]
+    .map(row => row.renderKey ?? row.id));
+  const tailKey = message.renderKey ?? message.id;
+  // Preserve a known canonical A key. Reuse the rollup's old cell only when
+  // no other retained row owns it; otherwise use A's canonical identity.
+  const tailKeyTaken = occupied.has(tailKey) || parts.slice(1).some(row => (row.renderKey ?? row.id) === tailKey);
+  const firstKey = parts[0]!.renderKey ?? (tailKeyTaken ? parts[0]!.id : tailKey);
+  const keys = parts.map((row, index) => index === 0 ? firstKey : row.renderKey ?? row.id);
+  if (new Set(keys).size !== keys.length || keys.some(key => occupied.has(key))) return [message];
+  return parts.map((row, index) => ({ ...row, streaming: false,
+    presentationRunId: message.presentationRunId, renderKey: keys[index],
+  }));
+}
+
 /** Preserve a completed live turn's text/tool boundaries, updating matching server rows in place. */
 export function preserveCompletedRunPresentation(previous: UiMessage[], incoming: UiMessage[], options: { live?: boolean } = {}): UiMessage[] {
   if (!previous.some(message => message.presentationRunId)) return incoming;
@@ -585,7 +654,7 @@ export function preserveCompletedRunPresentation(previous: UiMessage[], incoming
     const confirmedTexts = new Set(remote.filter(message => message.role === 'assistant')
       .map(message => normalizeAssistantText(message.text)));
     const precedingTexts: Array<{ text: string }> = [];
-    const local = localRows.map(message => {
+    const local = localRows.flatMap(message => splitConfirmedInterruptedGuideTail(message, remote, user?.turnId, localRows)).map(message => {
       if (message.role !== 'assistant') return message;
       const tail = finalReplyTail(message.text, precedingTexts);
       const repaired = !confirmedTexts.has(normalizeAssistantText(message.text))
@@ -603,9 +672,11 @@ export function preserveCompletedRunPresentation(previous: UiMessage[], incoming
     if (aggregateIndex >= 0) consumed.add(aggregateIndex);
     const canonicalPositions: Array<number | undefined> = new Array(local.length).fill(undefined);
     const rows = local.map((message, localIndex) => {
-      const index = remote.findIndex((candidate, i) => !consumed.has(i) && candidate.role === message.role && (
-        candidate.id === message.id
-        || (message.role === 'assistant' && (normalizeAssistantText(candidate.text) === normalizeAssistantText(message.text)
+      // Repeated prose must not steal a later row's known native identity.
+      const exact = remote.findIndex((candidate, i) => !consumed.has(i) && candidate.role === message.role
+        && [candidate.id, candidate.historyMessageId].filter(Boolean).some(id => [message.id, message.historyMessageId].includes(id)));
+      const index = exact >= 0 ? exact : remote.findIndex((candidate, i) => !consumed.has(i) && candidate.role === message.role && (
+        (message.role === 'assistant' && (normalizeAssistantText(candidate.text) === normalizeAssistantText(message.text)
           || ((options.live || message.streaming) && candidate.text.trim().length > 0 && message.text.startsWith(candidate.text))))
         || (message.role === 'tool' && candidate.toolName === message.toolName
           && candidate.id.replace(/^tool(?:call|result)_/, '') === message.id.replace(/^tool(?:call|result)_/, ''))
