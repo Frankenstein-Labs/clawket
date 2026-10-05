@@ -88,6 +88,16 @@ describe('liveTurnHasWords', () => {
     expect(liveTurnHasWords([{ id: 's', role: 'assistant', text: 'On it', streaming: true }, prompt])).toBe(true);
   });
 
+  it('keeps known same-run words across guidance and excludes unreported older words on a partial page', () => {
+    const identity = { scope: {}, sessionKey: 'session', runId: 'run', turnId: 'turn', inputMessageId: 'main' };
+    const guide: UiMessage = { id: 'guide', role: 'user', text: 'Continue', turnId: 'turn' };
+    const words: UiMessage = { id: 'words', role: 'assistant', text: 'Working', turnId: 'turn' };
+    const earlier: UiMessage = { id: 'earlier', role: 'assistant', text: 'Old answer' };
+    expect(liveTurnHasWords([guide, words, { ...prompt, id: 'main', turnId: 'turn' }], identity)).toBe(true);
+    expect(liveTurnHasWords([guide, words, earlier], identity)).toBe(true);
+    expect(liveTurnHasWords([guide, earlier], identity)).toBe(false);
+  });
+
   it('keeps counting through a queued follow-up, which has not opened a turn', () => {
     const queued: UiMessage = { id: 'q', role: 'user', text: 'Also this', delivery: 'queued' };
     expect(liveTurnHasWords([queued, { id: 'a', role: 'assistant', text: 'Working on it' }, prompt])).toBe(true);

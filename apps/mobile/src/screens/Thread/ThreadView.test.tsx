@@ -3200,7 +3200,7 @@ describe('work dock', () => {
     view.rerender(<ThreadView {...props} messages={[guide, current, { ...prompt, id: 'unloaded-main', turnId: 'native-turn', timestampMs: start - 10_000 }]} />);
     expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 1:36')).toBeTruthy();
     view.rerender(<ThreadView {...props} sessionKey='another-session' runWorkIdentity={{ ...identity, scope: {}, sessionKey: 'another-session', runId: 'other-run', turnId: 'other-turn', inputMessageId: 'new-main', startedAt: Date.now() }} messages={[{ ...current, turnId: 'other-turn' }, { ...prompt, id: 'new-main', timestampMs: Date.now() }]} />);
-    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Running npm test')).toBeTruthy();
   });
 
   it('keeps current approval attention on a partial run without assigning the request to its native turn', () => {
@@ -3226,12 +3226,12 @@ describe('work dock', () => {
     expect(approval.turnId).toBeUndefined();
     view.rerender(<ThreadView {...props} messages={[{ ...approval, approval: { ...approval.approval!, status: 'allowed' } }, current]} />);
     expect(view.queryByText('Review')).toBeNull();
-    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Running npm test')).toBeTruthy();
     act(() => jest.advanceTimersByTime(1_000));
     expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 1:36')).toBeTruthy();
     view.rerender(<ThreadView {...props} sessionKey='another-session' runWorkIdentity={{ ...identity, scope: {}, sessionKey: 'another-session', runId: 'other-run', turnId: 'other-turn', inputMessageId: 'other-main', startedAt: Date.now() }} messages={[{ ...current, turnId: 'other-turn' }]} />);
     expect(view.queryByText('Review')).toBeNull();
-    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Running npm test')).toBeTruthy();
   });
 
   it.each(['expired', 'resolved', 'unsupported', 'pair'] as const)('does not revive %s approval attention on a partial run', (kind) => {
@@ -3242,7 +3242,7 @@ describe('work dock', () => {
       ? { kind: 'pair', id: 'pair-request', target: 'device', displayName: null, platform: null, receivedAtMs: start, status: 'pending' }
       : { kind: 'exec', id: 'inactive-request', command: 'rm -rf build', status: kind === 'resolved' ? 'denied' : 'pending', expiresAtMs: kind === 'expired' ? start : null } };
     const view = render(<ThreadView {...createProps({ isRunning: true, runWorkIdentity: identity, messages: [approval, { ...run, turnId: 'native-turn' }], capabilities: { ...CAPABILITY_MATRIX.openclaw, execApproval: kind !== 'unsupported' } })} />);
-    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Running npm test')).toBeTruthy();
     act(() => jest.advanceTimersByTime(1_000));
     expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Running npm test')).toBeTruthy();
     expect(view.queryByText('Review')).toBeNull();
@@ -3263,7 +3263,7 @@ describe('work dock', () => {
     const nextTool = { ...run, id: 'next-tool', turnId: 'turn-b' };
     const nextIdentity = { ...identity, runId: 'run-b', turnId: 'turn-b', inputMessageId: next.id, startedAt: Date.now() };
     view.rerender(<ThreadView {...props} messages={[nextTool, next, current, main]} runWorkIdentity={nextIdentity} />);
-    expect(view.queryByTestId('thread-screen-work-dock')).toBeNull();
+    expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Running npm test')).toBeTruthy();
     act(() => jest.advanceTimersByTime(1_000));
     expect(within(view.getByTestId('thread-screen-work-dock')).getByText('Step 1 · Elapsed 0:01')).toBeTruthy();
     view.rerender(<ThreadView {...props} isRunning={false} runWorkIdentity={undefined} messages={[{ id: 'final', role: 'assistant', text: 'Done', turnId: 'turn-b' }, { ...nextTool, toolStatus: 'success' }, next, current, main]} />);
