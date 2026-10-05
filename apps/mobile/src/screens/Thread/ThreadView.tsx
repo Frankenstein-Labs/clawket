@@ -1507,17 +1507,21 @@ export function ThreadView({
       />
     </View>
   ) : null), [canPageHistory, copy.loadingHistory, copy.retry, historyPaging.failed, historyPaging.loading, historyPaging.manual, previewUpgrade, styles.historyControl, styles.historyErrorCaption, t, testID]);
-  const historyRefreshControl = useMemo(() => canPageHistory ? (
+  // Android wraps the native scroll view when a RefreshControl is present.
+  // Removing it on the last page replaces that host under the loaded list,
+  // losing its offset and leaving UI-thread listeners bound to the old host.
+  const historyRefreshControl = useMemo(() => canPageHistory || Platform.OS === 'android' ? (
     <RefreshControl
       testID={`${testID}-history-refresh`}
-      refreshing={historyPaging.pulling}
-      onRefresh={historyPaging.pull}
+      enabled={canPageHistory}
+      refreshing={canPageHistory && historyPaging.pulling}
+      onRefresh={canPageHistory ? historyPaging.pull : undefined}
       progressViewOffset={timelineTopClearance}
       tintColor={theme.colors.inkSecondary}
       colors={[theme.colors.inkSecondary]}
       progressBackgroundColor={theme.colors.canvas}
       accessibilityLabel={copy.loadingHistory}
-      accessibilityState={{ busy: historyPaging.pulling }}
+      accessibilityState={{ busy: canPageHistory && historyPaging.pulling }}
     />
   ) : undefined, [canPageHistory, copy.loadingHistory, historyPaging.pull, historyPaging.pulling, theme.colors.canvas, theme.colors.inkSecondary, testID, timelineTopClearance]);
 

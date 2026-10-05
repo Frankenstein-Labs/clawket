@@ -2336,11 +2336,53 @@ describe('ThreadView', () => {
       act(() => { refresh().onRefresh(); });
       expect(props.onLoadMoreHistory).toHaveBeenCalledTimes(1);
       view.rerender(<ThreadView {...props} onLoadMoreHistory={undefined} />);
-      expect(view.getByTestId('thread-screen-timeline').props.refreshControl).toBeUndefined();
+      const exhaustedRefresh = view.getByTestId('thread-screen-timeline').props.refreshControl;
+      if (platform === 'android') {
+        expect(exhaustedRefresh.props.enabled).toBe(false);
+        expect(exhaustedRefresh.props.onRefresh).toBeUndefined();
+      } else expect(exhaustedRefresh).toBeUndefined();
       expect(view.queryByTestId('thread-screen-history-load')).toBeNull();
       view.unmount();
     } finally { Platform.OS = previous; }
   });
+
+  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const)(
+    'retains the Android scroll host when the final %s history page disables pulling', backend => {
+      const { Platform } = require('react-native');
+      const { FlashList } = require('@shopify/flash-list');
+      const previous = Platform.OS;
+      Platform.OS = 'android';
+      const props = createProps({ capabilities: CAPABILITY_MATRIX[backend] });
+      const view = render(<ThreadView {...props} />);
+      try {
+        const list = view.UNSAFE_getByType(FlashList);
+        const input = view.getByTestId('thread-screen-composer-input');
+        const refreshType = list.props.refreshControl.type;
+        // RN's Android ScrollView replaces its native host when this wrapper
+        // disappears, even though the FlashList instance remains mounted.
+        view.rerender(<ThreadView {...props} onLoadMoreHistory={undefined} />);
+        const exhausted = view.UNSAFE_getByType(FlashList).props.refreshControl;
+        expect(exhausted).toBeDefined();
+        expect(exhausted.type).toBe(refreshType);
+        expect(exhausted.props.enabled).toBe(false);
+        expect(exhausted.props.refreshing).toBe(false);
+        expect(exhausted.props.onRefresh).toBeUndefined();
+        expect(view.queryByTestId('thread-screen-history-load')).toBeNull();
+        expect(view.UNSAFE_getByType(FlashList)).toBe(list);
+        expect(view.getByTestId('thread-screen-composer-input')).toBe(input);
+        expect(props.onLoadMoreHistory).not.toHaveBeenCalled();
+        // A later head read can restore the cursor without replacing the host.
+        view.rerender(<ThreadView {...props} />);
+        const resumed = view.UNSAFE_getByType(FlashList).props.refreshControl;
+        expect(resumed.type).toBe(refreshType);
+        expect(resumed.props.enabled).toBe(true);
+        expect(resumed.props.onRefresh).toEqual(expect.any(Function));
+        expect(view.UNSAFE_getByType(FlashList)).toBe(list);
+      } finally {
+        view.unmount();
+        Platform.OS = previous;
+      }
+    });
 
   it('shows a slow page before controller loading propagates and joins a pull to the same read', async () => {
     let complete!: () => void;

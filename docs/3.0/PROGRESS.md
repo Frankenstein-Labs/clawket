@@ -1,5 +1,14 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 安卓 Codex 末页分页的滚动宿主生命周期窄修，修复版真机回归继续。
+  - 原40轮会话实际连续读历史，33→65→81行；首分页保留offset_command→JS ACK约2.09秒窗口。第二页后无新手势的截图出现37–40/01–03变化，原生scroll观测停在旧序列，SDK/JS继续；5次系统掉帧报告、完整缓存和90秒/30秒录屏已留现场。陈旧raw与非原子截图不证明全部paint因果。
+  - 确认Android移除RefreshControl会替换Native ScrollView，而FlashList首次onLoad绑定不会跟随重建；末页/同key恢复可触发该结构变化。Android保留刷新容器，以enabled、refreshing和回调门关闭无更早历史时的拉动；页头仍按真实分页显示，iOS保留原结构。五后端红基线5项，修复后ThreadView213项、Mobile类型和文档9指令对/5用例通过。尚未将新源码加载手机，不称空白/跳位已修复；PR141仍受未批准braces审计阻挡，无发布。
+
+- 2026-10-05 a7 手机加载与首次 V2 几何/冷历史有界观察完成，长历史独立采样继续。
+  - 完整手机JS缓存22,565,947B/SHA9a4b1fef…、26源码/53标记的全传输属于19777；后续Native加载错误现场保留。恢复丢失的开发reverse并从手机取得HTTP200/准确Metro状态后，唯一保数据QA冷开13948正常列表，缓存前后大小/SHA同全传输，仅作冷进程关联。Desktop、Native owner、商店与Production未动。
+  - Q5A完成态一次Start实际亲见started toast；首份43,493B V2完整稳定缓存以已审冻结生产encoder验证56sample/20layout事件，0reject/drop。raw序列仍0，不声称raw/SDK一致或paint。20,089ms后台命令间隔返回同PID、原完成回复/无复活表单，首图保留活动返回过渡；独立最终129,569B缓存严格stopped/background、188sample、32保留/20退休layout事件。无手势，本轮不算分页验收；新可复用固定缓存读者只校验独立观察，不重放旧one-shot extractor。
+  - 原R5T只读冷重入确切A→guide2→B各Native ID一次、0abort累计泡；原Native357,515B和initreceipt全字节/SHA未变，不冒称warm split已实机修复。原40轮QA搜索两同标题项目后选择exact original，初加载空画面无手势恢复37–40，与idle滚动恢复问题分开。新long-history capture正准备。a7 exact CI所有功能/types/static/mobile/v1/Desktop绿，唯一未批准braces审计仍阻merge；无发布。
+
 - 2026-10-05 停止后跨指南累计回复重复的原生/UI精确关联与源码窄修完成；手机加载验收待继续。
   - 1454 独立第3泡的 Native ID 精确对应原 Main assistant ordinal10；第4本地 abort 尾精确为该 A＋双换行＋ordinal11 B，canonical 原序 A→guide2→B，三者有效 typed clocks。较早ordinal3同文 A有不同ID；不从正文或时钟推断指南消费。独立诊断纠正原role-prefix假设，旧证据保持；0RPC/Native写/进程操作。
   - 仅完整唯一、同turn、有效clock的canonical序列可拆无usage/附件的本地 abort_ 累计尾；ACK到达不切文本。已确认guide的sentLocally起源标记保留；exact-owned不变前缀保原cell/key，仅展开后缀，changed/ambiguous/non-prefix仍保守。Known Native/history ID先于同文fallback，合法较早同文段不被抢身份，不全局按时钟排序。Root真实finish/preserve基线3红；actual controller ACK先、B pending期间到达、cancelled终态及late head基线1红；16行/12assistant重复身份与prefix再3红，最终history97/controller97通过。viewport union同样单文件4/15/208/24通过，Thread fixture同名AppState自动合并重项已删，类型通过；不声称1454手机已修或空白定因。
