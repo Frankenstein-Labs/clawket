@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import type { SharedValue } from 'react-native-reanimated';
@@ -1177,6 +1177,77 @@ describe('composer slot morph', () => {
 
 describe.each(['light', 'dark'] as const)('%s glass chrome over a wallpaper', (scheme) => {
   beforeEach(() => { mockScheme = scheme; });
+
+  it('gives pending attachments the shared composer width without a second add surface', () => {
+    const theme = activeTheme(scheme);
+    const glass = createChatGlassStyle(theme);
+    const onAddPress = jest.fn();
+    const result = render(<Composer testID="composer" value="Draft" placeholder="Message"
+      accessibilityLabels={{ add: 'Add', voice: 'Voice', send: 'Send', stop: 'Stop' }}
+      onChangeText={jest.fn()} onSend={jest.fn()} onAddPress={onAddPress} appearance="glass" hasAttachments
+      attachments={<View testID="tray"><Text>One attachment</Text></View>} />);
+    const body = result.getByTestId('composer-body');
+    expect(flattenStyle(body.props.style)).toMatchObject({
+      borderRadius: Radius.xl, padding: Space.xs, backgroundColor: glass.backgroundColor,
+      borderColor: glass.borderColor, borderWidth: BorderWidth.hairline,
+    });
+    expect(body.findAllByProps({ testID: 'tray' }).length).toBeGreaterThan(0);
+    expect(result.getByTestId('composer-capsule').findAllByProps({ testID: 'tray' })).toHaveLength(0);
+    expect(flattenStyle(result.getByTestId('composer-capsule').props.style).backgroundColor).toBe('transparent');
+    expect(flattenStyle(result.getByTestId('composer-add-surface').props.style)).toMatchObject({
+      width: ControlSize.floatingButton, height: ControlSize.floatingButton, backgroundColor: 'transparent',
+    });
+    fireEvent.press(result.getByTestId('composer-add'));
+    expect(onAddPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the editor and draft through attachment changes, keyboard focus and expansion', () => {
+    const onSend = jest.fn();
+    const props = { testID: 'composer', value: 'Keep this draft', placeholder: 'Message', appearance: 'glass' as const,
+      accessibilityLabels: { add: 'Add', voice: 'Voice', send: 'Send', stop: 'Stop' },
+      onChangeText: jest.fn(), onSend, onAddPress: jest.fn(), onExpandedChange: jest.fn(), onPasteFiles: jest.fn(),
+      accessory: <Text testID="model-chip">Model</Text> };
+    const result = render(<Composer {...props} />);
+    const input = result.getByTestId('composer-input');
+    const shell = result.getByTestId('composer-input-shell');
+    fireEvent(input, 'focus', { nativeEvent: {} });
+    const tray = <View testID="tray"><Text>Six attachments</Text></View>;
+    result.rerender(<Composer {...props} attachments={tray} hasAttachments />);
+    expect(result.getByTestId('composer-input')).toBe(input);
+    expect(result.getByTestId('composer-input-shell')).toBe(shell);
+    // Focused iOS composition releases controlled value; the native baseline
+    // and draft measurement still retain the same text on the same Paste host.
+    expect(input.type).toBe('PasteInput');
+    expect(input.props.defaultValue).toBe(props.value);
+    expect(result.getByTestId('composer-measurement', { includeHiddenElements: true }).props.children).toBe(props.value);
+    expect(result.getByTestId('model-chip')).toBeTruthy();
+    result.rerender(<Composer {...props} attachments={tray} hasAttachments expanded />);
+    expect(result.getByTestId('composer-input')).toBe(input);
+    expect(flattenStyle(result.getByTestId('composer-body').props.style)).toMatchObject({ flex: 1, minHeight: 0 });
+    expect(flattenStyle(result.getByTestId('composer-body').props.style).backgroundColor).toBeUndefined();
+    result.rerender(<Composer {...props} expanded />);
+    result.rerender(<Composer {...props} />);
+    expect(result.getByTestId('composer-input')).toBe(input);
+    expect(flattenStyle(result.getByTestId('composer-body').props.style).backgroundColor).toBeUndefined();
+    expect(flattenStyle(result.getByTestId('composer-capsule').props.style).backgroundColor)
+      .toBe(createChatGlassStyle(activeTheme(scheme)).backgroundColor);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps disabled add and distinct stop/queued send actions in the shared attachment surface', () => {
+    const onStop = jest.fn();
+    const onSend = jest.fn();
+    const result = render(<Composer testID="composer" value="Next message" placeholder="Message"
+      accessibilityLabels={{ add: 'Add', voice: 'Voice', send: 'Send', stop: 'Stop', queue: 'Queue' }}
+      onChangeText={jest.fn()} onSend={onSend} onStop={onStop} onAddPress={jest.fn()}
+      addDisabled isRunning hasAttachments attachments={<Text>Attachment</Text>} />);
+    expect(result.getByTestId('composer-add').props.accessibilityState.disabled).toBe(true);
+    expect(flattenStyle(result.getByTestId('composer-stop-surface').props.style).backgroundColor).toBe('transparent');
+    fireEvent.press(result.getByTestId('composer-stop'));
+    fireEvent.press(result.getByTestId('composer-primary'));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
 
   it('floats the compact capsule and circles on translucent chrome and keeps full-screen editing on the canvas', () => {
     const theme = activeTheme(scheme);

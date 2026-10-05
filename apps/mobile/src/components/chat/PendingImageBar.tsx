@@ -86,7 +86,7 @@ export function PendingImageBar({ images, canAddMore, attachDisabled = false, on
         </Animated.View>
       ))}
       {canAddMore && (
-        <Animated.View layout={layout}>
+        <Animated.View layout={layout} style={styles.addItem}>
           <AttachmentMenu
             disabled={attachDisabled}
             style={styles.addTile}
@@ -95,7 +95,9 @@ export function PendingImageBar({ images, canAddMore, attachDisabled = false, on
             onChooseFile={onChooseFile}
           >
             <View testID="pending-attachment-add" style={styles.addTrigger}>
-              <Plus size={IconSize.md} color={attachDisabled ? colors.inkTertiary : colors.inkSecondary} strokeWidth={1.75} />
+              <View testID="pending-attachment-add-visual" style={styles.addBadge}>
+                <Plus size={IconSize.md} color={attachDisabled ? colors.inkTertiary : colors.inkSecondary} strokeWidth={1.75} />
+              </View>
             </View>
           </AttachmentMenu>
         </Animated.View>
@@ -111,14 +113,14 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
       flexWrap: 'wrap',
       alignItems: 'center',
       paddingHorizontal: Space.sm,
-      paddingTop: Space.sm,
+      paddingTop: 0,
       paddingBottom: Space.xs,
       gap: Space.md,
     },
     item: {
       position: 'relative',
       paddingTop: Space.md,
-      // Keep the 44pt remove target and hitSlop clear of the thumbnail center.
+      // Keep the 44pt remove target + hit slop clear of the 56pt tile center.
       paddingRight: Space.xl,
     },
     fileItem: {
@@ -178,13 +180,20 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
       alignItems: 'center',
       justifyContent: 'center',
     },
-    addTile: {
-      borderRadius: Radius.card,
-      backgroundColor: colors.canvas,
-    },
+    addItem: { paddingTop: Space.md },
+    addTile: { borderRadius: Radius.card },
     addTrigger: {
       width: TILE_SIZE,
       height: TILE_SIZE,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    addBadge: {
+      width: HitSize.md,
+      height: HitSize.md,
+      borderRadius: Radius.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.line,
       alignItems: 'center',
       justifyContent: 'center',
     },

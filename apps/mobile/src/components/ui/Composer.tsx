@@ -120,7 +120,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
   const glassChrome = useMemo(() => (appearance === 'glass' ? createChatGlassStyle(theme) : null), [appearance, theme]);
   // Over the canvas the capsule and circles take the neutral surface; over a wallpaper, glass.
   const capsuleSurface = useMemo(() => ({ backgroundColor: theme.colors.surface }), [theme.colors.surface]);
-  const chromeSurface = capsuleSurface;
+  const compactTray = !expanded && Boolean(attachments);
   const [accessoryWidth, setAccessoryWidth] = useState(0);
   const [shellWidth, setShellWidth] = useState(0);
   const [placeholderWidth, setPlaceholderWidth] = useState(0);
@@ -236,14 +236,14 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
   }), [onChangeText]);
 
   const leadingAction = voiceActive && onVoiceCancel ? <ComposerAction icon={X} label={t('Cancel', { ns: 'common' })} onPress={onVoiceCancel}
-    tone={expanded ? 'plain' : 'chrome'} chrome={glassChrome} testID={testID ? `${testID}-voice-cancel` : undefined} />
+    tone={expanded || compactTray ? 'plain' : 'chrome'} chrome={glassChrome} testID={testID ? `${testID}-voice-cancel` : undefined} />
     : onAddPress ? <ComposerAction icon={Plus} label={accessibilityLabels.add} onPress={onAddPress}
-      tone={expanded ? 'secondary' : 'chrome'} chrome={glassChrome} disabled={addDisabled || !editable} testID={testID ? `${testID}-add` : undefined} /> : null;
+      tone={compactTray ? 'plain' : expanded ? 'secondary' : 'chrome'} chrome={glassChrome} disabled={addDisabled || !editable} testID={testID ? `${testID}-add` : undefined} /> : null;
   const trailingActions = (voiceActive || showVoice) ? <>
     {voiceActive && !voiceGesture.holding && !voiceGesture.pressing && voiceState === 'listening' ? <SlotMorph slot="voice-stop" ready={slotReady}>
       <ComposerAction icon={Square}
       label={accessibilityLabels.stopVoice ?? accessibilityLabels.stop} onPress={() => (onVoiceStop ?? onVoicePress)?.(false)}
-      tone={expanded ? 'plain' : 'chrome'} chrome={glassChrome} testID={testID ? `${testID}-voice-stop` : undefined} />
+      tone={expanded || compactTray ? 'plain' : 'chrome'} chrome={glassChrome} testID={testID ? `${testID}-voice-stop` : undefined} />
     </SlotMorph> : null}
     <Pressable {...voiceGesture.handlers} testID={testID ? `${testID}-voice` : undefined}
       accessibilityRole="button" accessibilityLabel={voiceActive ? accessibilityLabels.send : accessibilityLabels.voice}
@@ -254,7 +254,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
           only the surface morphs, the touch target stays mounted. */}
       <SlotMorph slot={voiceActive ? 'voice-send' : 'mic'} ready={slotReady} inert>
         <View style={[actionStyles.surface, voiceActive ? { backgroundColor: theme.colors.ink }
-          : expanded ? { backgroundColor: theme.colors.canvas } : [chromeSurface, glassChrome]]}>
+          : expanded ? { backgroundColor: theme.colors.canvas } : compactTray ? styles.clearSurface : [capsuleSurface, glassChrome]]}>
           {voiceState === 'transcribing' ? <ActivityIndicator color={theme.colors.canvas} />
             : voiceActive ? <ArrowUp size={IconSize.md} color={theme.colors.canvas} /> : <Mic size={IconSize.md} color={theme.colors.ink} strokeWidth={1.75} />}
         </View>
@@ -262,7 +262,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
     </Pressable>
   </> : showQueueSend ? <>
     {onStop ? <Animated.View layout={reducedMotion ? undefined : LinearTransition.duration(Motion.duration.fast)}>
-      <ComposerAction icon={Square} label={accessibilityLabels.stop} onPress={onStop} tone={expanded ? 'secondary' : 'chrome'} chrome={glassChrome}
+      <ComposerAction icon={Square} label={accessibilityLabels.stop} onPress={onStop} tone={compactTray ? 'plain' : expanded ? 'secondary' : 'chrome'} chrome={glassChrome}
         testID={testID ? `${testID}-stop` : undefined} />
     </Animated.View> : null}
     <SlotMorph slot="queue-send" ready={slotReady}>
@@ -277,11 +277,9 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
     </SlotMorph>;
   const dismissHandlers = expanded ? null : keyboardDismissResponder.panHandlers;
 
-  // One row (A+ chat design, owner decision 2026-09-30): the add circle, the
-  // capsule holding the draft and the model chip, and the send / voice / stop
-  // circle. Full-screen editing keeps its editor and bottom toolbar. Both
-  // layouts share one parent chain for the native input, so switching between
-  // them never remounts it (marked text and selection survive).
+  // Empty composition keeps the A+ row. Pending attachments share one surface
+  // with that row and use its full width. The body, row and editor remain in
+  // one parent chain across attachment changes and full-screen editing.
   return (
     <View testID={testID} style={[styles.composer, style, expanded ? styles.expanded : null]}>
       {expanded ? <View testID={testID ? `${testID}-editor-header` : undefined} style={styles.editorHeader}>
@@ -297,11 +295,13 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
         <Text style={styles.voiceHint}>{t('Saved recording · Tap to recover')}</Text>
       </Pressable> : null}
       {notice}
+      <View testID={testID ? `${testID}-body` : undefined}
+        style={expanded ? styles.editorBody : compactTray ? [styles.attachmentBody, capsuleSurface, glassChrome] : null}>
+      <View testID={testID ? `${testID}-attachments` : undefined}>{attachments}</View>
       <View testID={testID ? `${testID}-row` : undefined} style={expanded ? styles.editorBody : styles.row}>
         {expanded ? null : <View testID={testID ? `${testID}-leading` : undefined} style={styles.side} {...dismissHandlers}>{leadingAction}</View>}
         <View testID={testID ? `${testID}-capsule` : undefined}
-          style={expanded ? styles.editorCapsule : [styles.capsule, capsuleSurface, glassChrome, attachments ? styles.capsuleWithTray : null]}>
-          {attachments}
+          style={expanded ? styles.editorCapsule : [styles.capsule, compactTray ? styles.clearSurface : [capsuleSurface, glassChrome]]}>
           <Animated.View testID={testID ? `${testID}-input-shell` : undefined}
             collapsable={false}
             onLayout={({ nativeEvent }) => {
@@ -352,6 +352,7 @@ export const Composer = React.forwardRef<ComposerHandle, ComposerProps>(function
           </Animated.View>
         </View>
         {expanded ? null : <View testID={testID ? `${testID}-trailing` : undefined} style={styles.side} {...dismissHandlers}>{trailingActions}</View>}
+      </View>
       </View>
       {expanded ? <View testID={testID ? `${testID}-toolbar` : undefined} style={styles.toolbar}>
         {leadingAction}
@@ -442,8 +443,8 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['theme']['colors'])
     row: { flexDirection: 'row', alignItems: 'flex-end', gap: Space.sm },
     side: { flexDirection: 'row', alignItems: 'flex-end', gap: Space.xs },
     capsule: { flex: 1, minWidth: 0, minHeight: ControlSize.floatingButton, borderRadius: Radius.xl, paddingVertical: 2, paddingLeft: Space.sm, paddingRight: Space.xs, justifyContent: 'center', overflow: 'hidden' },
-    // Photos waiting to send ride inside the capsule, above the draft.
-    capsuleWithTray: { paddingTop: Space.sm - 2, gap: Space.xs },
+    attachmentBody: { borderRadius: Radius.xl, padding: Space.xs },
+    clearSurface: { backgroundColor: 'transparent' },
     editorBody: { flex: 1, minHeight: 0 },
     editorCapsule: { flex: 1, minHeight: 0, gap: Space.xs },
     inputShell: { minHeight: ControlSize.pill, flexDirection: 'row', paddingHorizontal: Space.sm, overflow: 'hidden' },

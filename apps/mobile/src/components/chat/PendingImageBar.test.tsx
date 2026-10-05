@@ -1,8 +1,12 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
-import { HitSize, IconSize } from '../../theme/tokens';
+import { HitSize, IconSize, Radius, Space } from '../../theme/tokens';
+import { buildTheme } from '../../theme/theme';
+import { builtInAccents } from '../../theme/accents';
 import { PendingImageBar } from './PendingImageBar';
+
+let mockScheme: 'light' | 'dark' = 'light';
 
 /** Resolve this component's fixed corner geometry; host tests do not run native hit testing. */
 function attachmentTargets(view: ReturnType<typeof render>, index: number) {
@@ -97,16 +101,9 @@ jest.mock('lucide-react-native', () => {
 
 jest.mock('../../theme', () => ({
   useAppTheme: () => ({
-    theme: {
-      colors: {
-        line: '#ddd',
-        bad: '#d00',
-        onAccent: '#fff',
-        surface: '#fff',
-        inkSecondary: '#666',
-        inkTertiary: '#999',
-      },
-    },
+    theme: jest.requireActual('../../theme/theme').buildTheme(
+      mockScheme, mockScheme, jest.requireActual('../../theme/accents').builtInAccents.iceBlue,
+    ),
   }),
 }));
 
@@ -114,13 +111,57 @@ jest.mock('./AttachmentMenu', () => {
   const ReactRuntime = require('react');
   const { View } = require('react-native');
   return {
-    AttachmentMenu: ({ children }: { children: React.ReactNode }) => (
-      ReactRuntime.createElement(View, null, children)
+    AttachmentMenu: ({ children, ...props }: { children: React.ReactNode }) => (
+      ReactRuntime.createElement(View, { ...props, testID: 'attachment-menu' }, children)
     ),
   };
 });
 
 describe('PendingImageBar', () => {
+  afterEach(() => { mockScheme = 'light'; });
+
+  it.each(['light', 'dark'] as const)('uses a low-emphasis add control on the %s composer surface', (scheme) => {
+    mockScheme = scheme;
+    const theme = buildTheme(scheme, scheme, builtInAccents.iceBlue);
+    const actions = { onPickImage: jest.fn(), onTakePhoto: jest.fn(), onChooseFile: jest.fn() };
+    const props = { images: [{ uri: 'file://draft.png', mimeType: 'image/png', base64: 'image-data' }],
+      canAddMore: true, onOpenPreview: jest.fn(), onRemove: jest.fn(), ...actions };
+    const view = render(<PendingImageBar {...props} />);
+    const menu = view.getByTestId('attachment-menu');
+    expect(StyleSheet.flatten(menu.props.style).backgroundColor).toBeUndefined();
+    expect(StyleSheet.flatten(view.getByTestId('pending-attachment-add-visual').props.style)).toMatchObject({
+      width: HitSize.md, height: HitSize.md, borderRadius: Radius.card, borderColor: theme.colors.line,
+    });
+    expect(StyleSheet.flatten(view.getByTestId('pending-attachment-add').props.style)).toMatchObject({ width: 56, height: 56 });
+    for (const action of Object.keys(actions) as Array<keyof typeof actions>) {
+      menu.props[action]();
+      expect(actions[action]).toHaveBeenCalledTimes(1);
+    }
+    view.rerender(<PendingImageBar {...props} attachDisabled />);
+    expect(view.getByTestId('attachment-menu').props.disabled).toBe(true);
+    expect(view.getByTestId('pending-attachment-add-visual').children[0]).toHaveProperty('props.color', theme.colors.inkTertiary);
+  });
+
+  it('wraps six previews with separate remove targets and no capacity add control', () => {
+    const onOpenPreview = jest.fn();
+    const onRemove = jest.fn();
+    const view = render(<PendingImageBar
+      images={Array.from({ length: 6 }, (_, index) => ({ uri: `file://draft-${index}.png`, mimeType: 'image/png', base64: 'image-data' }))}
+      canAddMore={false} onOpenPreview={onOpenPreview} onRemove={onRemove}
+      onPickImage={jest.fn()} onTakePhoto={jest.fn()} />);
+    expect(StyleSheet.flatten(view.getByTestId('pending-attachments').props.style)).toMatchObject({
+      flexWrap: 'wrap', gap: Space.md, paddingTop: 0,
+    });
+    for (let index = 0; index < 6; index += 1) {
+      const targets = attachmentTargets(view, index);
+      expect(targets.bounds.left).toBeGreaterThan(targets.center.x);
+      pressAttachmentPoint(targets, targets.center);
+      pressAttachmentPoint(targets, targets.removeCenter);
+    }
+    expect(onOpenPreview.mock.calls).toEqual(Array.from({ length: 6 }, (_, index) => [index]));
+    expect(onRemove.mock.calls).toEqual(Array.from({ length: 6 }, (_, index) => [index]));
+    expect(view.queryByTestId('pending-attachment-add')).toBeNull();
+  });
   it.each(['image/gif', 'image/png', 'image/jpeg'])(
     'opens the %s tile at its center instead of removing it',
     (mimeType) => {

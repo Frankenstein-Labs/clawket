@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-05 待发附件托盘与输入区整合（负责人根据实际手机截图要求优化）。
+  - 有附件时用一块共享 surface/glass 承载全宽托盘及底部输入/动作行，加号变为同底面的轻量图标；无附件保留 A+ 单行。托盘 Add 使用现有56点触区内的44点细边控件，去除重复白色填充和叠加上留白。
+  - 保留同一个原生输入的父链、展开/键盘/模型/语音和发送行为，保留56点预览、44点删除目标与24点右侧隔离；不改选择、预览、删除、六项容量、动画/减少动态效果、附件会话作用域或后端合同。
+  - 本树独立安装依赖，逐文件串行验证：PendingImageBar 旧 UI（已保24点 reserve）3红/8绿→候选11绿；ThreadPrimitives 旧 UI 6红/62绿→候选68绿。真实 Paste 输入实例在附件增减、聚焦和展开后保留；几何用例是组件样式/回调模型，不冒称 Native 命中、键盘或六图视觉验收。
+  - Mobile 类型通过，UI 检查246文件/959 TypeScript token来源，设计文档11组件/10 token families＋5腐败用例、check:docs 7指令对＋5用例通过；未跑完整套件。负责人真机视觉与命中验收待组合候选。未操作手机、Native、Metro或发布。
+
 - 2026-10-05 Codex 组合候选已安装并完成附件会话隔离真机复验；其余矩阵继续。
   - Root `1c698b2e` 合并独立附件 scope 与 Reanimated 安装守卫，保留既有 MIME、Reset、steering、分页和原生输入修复。暂停自有 Metro、heavy 租约下串行通过 controller 111、picker 20、paste 8、安装守卫 6、Mobile types、docs 9 指令对/5 检查器用例；未跑本地全套。
   - 单次本地 QA debug 构建成功：新 APK 105,185,664B/SHA26e56859…，实际安装的 QA base APK 全 SHA 相同。Mobile consumer、Kotlin class、runtime jar 和 APK DEX 的缺失 tag 守卫分支逐项核验；Paste 生成源码保持不变。原生静态包含不等于 missing→mounted 或空白根因验收。
