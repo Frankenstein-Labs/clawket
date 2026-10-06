@@ -81,6 +81,7 @@ export type ConnectionRuntimeSnapshot = Readonly<{
   freeConnectionId: string | null;
   activeAdapter: AgentAdapter | null;
   activeState: ConnectionState;
+  activePairingRequired?: boolean;
   runActivities?: ReadonlyArray<RunActivity>;
   recovering?: boolean;
   recoveryFailed?: boolean;
@@ -175,6 +176,7 @@ type ActiveAdapterEntry = {
   readyRevision: number;
   hasReportedReady: boolean;
   needsUserAction: boolean;
+  pairingRequired: boolean;
   probeInFlight: Promise<boolean> | null;
   probeGeneration: number;
   probeReconnectReason: Extract<ReconnectReason, 'probe_failed' | 'foreground'> | null;
@@ -458,8 +460,10 @@ export class ConnectionCoordinator {
     return this.snapshot;
   }
 
-  async addConnection(input: NewConnectionRecord): Promise<ConnectionDescriptor> {
+  async addConnection(input: NewConnectionRecord, onSaved?: (connection: ConnectionDescriptor) => void): Promise<ConnectionDescriptor> {
     const descriptor = await this.store.add(input);
+    // Setup owns the persisted target before waiting for a native handshake.
+    onSaved?.(descriptor);
     await this.whenIdle();
     return descriptor;
   }
@@ -477,8 +481,10 @@ export class ConnectionCoordinator {
   async replaceConnection(
     connectionId: string,
     replacement: ConnectionRecordReplacement,
+    onSaved?: (connection: ConnectionDescriptor) => void,
   ): Promise<ConnectionDescriptor> {
     const descriptor = await this.store.replace(connectionId, replacement);
+    onSaved?.(descriptor);
     if (this.active?.connectionId === connectionId) {
       this.disconnectActiveImmediately();
       this.scheduleReconcile();
@@ -868,6 +874,7 @@ export class ConnectionCoordinator {
       stateRevision: 0,
       hasReportedReady: false,
       needsUserAction: false,
+      pairingRequired: false,
       probeInFlight: null,
       probeGeneration: 0,
       probeReconnectReason: null,
@@ -918,6 +925,10 @@ export class ConnectionCoordinator {
       }),
       adapter.on('update', (update) => {
         if (this.active !== entry) return;
+        if (update.type === 'pairing_required' || update.type === 'pairing_resolved') {
+          entry.pairingRequired = update.type === 'pairing_required';
+          this.publish();
+        }
         if (update.type === 'session_info_update') {
           this.acceptSessionPatch(entry, update.session);
         }
@@ -1350,6 +1361,7 @@ export class ConnectionCoordinator {
     this.recovery.finish();
     if (entry.readyRefresh) return entry.readyRefresh;
 
+    entry.pairingRequired = false;
     entry.readyRevision += 1;
     this.captureConnectionReady(entry);
     if (!entry.hasReportedReady) {
@@ -1438,6 +1450,7 @@ export class ConnectionCoordinator {
         : patch.freeConnectionId,
       activeAdapter: this.active?.adapter ?? null,
       activeState: this.active?.adapter.state ?? 'idle',
+      activePairingRequired: Boolean(this.active?.connectionId === activeConnectionId && this.active?.pairingRequired),
       runActivities: this.runActivities,
       recovering: this.recovery.phase === 'recovering',
       recoveryFailed: this.recovery.phase === 'failed',
@@ -1654,3 +1667,6 @@ function disposeAdapter(adapter: AgentAdapter): void {
 }
 
 export { compareAgentSummaries } from './registry/roster-cache';
+
+export { buildOpenClawDirectRecord, connectOpenClawDirect, DirectConnectionInputError, classifyOpenClawDirectFailure, findOpenClawDirectConnection } from './pairing/openclaw-direct';
+export type { OpenClawDirectDraft } from './pairing/openclaw-direct';
