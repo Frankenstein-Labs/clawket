@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-06 Bridge 3.1.16 patch 已公开发布，公共安装验证通过（负责人授权基于最新 main）。
+  - 起点 `be4ca502`（PR208），纳入 Claude 首次输入前模型读取、Codex 流式段落/分页历史排序与官方 clawket.ai 域名映射；仅公开 CLI manifest/lock、publish guard 升版，内部 workspace/App 版本保持。
+  - 固定源码 `ee2e3508` 的 CI37441584545 十一项全绿，包含 Windows/macOS；六 guard、八指令对/五 checker、v1 五文件42项、最新生产快照矩阵4用例/24阶段、双锁文件审计零阻挡（沿用两例外）、92模块/144输入 provenance、固定包 dry-run、空认证候选安装通过。首次本地回放缺少新 worktree 的 Core 构建，补齐后两次完整回放全绿。
+  - 负责人完成 npm 安全密钥认证后，npm 接受固定286,625B包；初始公开404已保留。2026-10-06 18:22:43 JST，公开 version/latest=3.1.16，完整无认证下载逐字节/SHA-256/SHA-1/SHA-512匹配候选，18:23:03公共独立安装通过identity、exact bundle、updateProtocol与CLI help。六生产 Worker 源码/config哈希、部署锚点和观测设置前后未变；交付记录不替换包。源码与交付记录见[PR #210](https://github.com/p697/clawket/pull/210)，详细记录见[发布记录](../3.1/bridge-3.1.16-release.md)。本次未更新或重启现有 Bridge、未分发 App、未部署 Worker，手机/Desktop 验收保持独立。
+
+
 - 2026-10-06 官方连接域名统一（负责人授权分阶段方案与 Cloudflare 操作）。
   - 统一 OpenClaw/Hermes/Codex/Claude Code/Pi Production 与 Preview、本地模型独立服务的 22 个入口为 clawket.ai；18 个新增域名绑定至原 Worker，最终新/旧 TLS/JSON health 各 22/22 通过。WAF 精确域名集覆盖 v1/v2 API、WS/health/关联文件/邀请页，原有 120/min WS、20/min 配对限流动作/阈值与 Speech 例外保留。
   - Core 唯一纯域名映射供 CLI/Mobile/Registry 使用；旧官方地址运行时迁移、手机地址事务迁移、Registry 旧记录返回新 Relay，保留连接 ID/凭据/邀请与自建地址。去掉 OpenClaw Workers challenge fallback；Pi/本地模型同 Registry 重配复用身份。11 Registry 固定候选与 9 Relay 配置更新已上线，2 个 Production Relay 无需更新；22 项绑定/源码 hash/部署/迁移锚点读回通过。11 组旧注册配对完成新旧域名双向 WS 与保存 token 重连，9 组加密六位码/邀请通过；33 个专属测试 KV 键清理且读回不存在，测试凭据文件删除。v1 42 项、生产快照矩阵 4 用例/24 阶段与定向测试/类型检查通过，完整门禁由 PR208 CI 执行，详见[迁移记录](../3.1/connection-domains.md)。
