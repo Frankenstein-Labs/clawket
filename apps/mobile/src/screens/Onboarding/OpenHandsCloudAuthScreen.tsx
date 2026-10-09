@@ -11,6 +11,7 @@ import {
   pollOpenHandsCloudToken,
   startOpenHandsCloudDeviceFlow,
 } from '../../connection/openhands/device-flow';
+import { verifyOpenHandsCloudSession } from '../../connection/openhands/cloud-client';
 import { useAppTheme } from '../../theme';
 import { FontSize, FontWeight, LineHeight, Radius, Space } from '../../theme/tokens';
 
@@ -29,8 +30,15 @@ export function OpenHandsCloudAuthScreen({ onBack }: Props): React.JSX.Element {
 
   useEffect(() => {
     let mounted = true;
-    void openHandsCredentialStore.getAccessToken().then((token) => {
-      if (mounted && token) setPhase('connected');
+    void openHandsCredentialStore.getAccessToken().then(async (token) => {
+      if (!token) return;
+      try {
+        await verifyOpenHandsCloudSession();
+        if (mounted) setPhase('connected');
+      } catch {
+        await openHandsCredentialStore.clearAccessToken();
+        if (mounted) setMessage('Ta session OpenHands Cloud a expiré. Reconnecte-toi.');
+      }
     }).catch(() => undefined);
     return () => {
       mounted = false;
@@ -61,9 +69,11 @@ export function OpenHandsCloudAuthScreen({ onBack }: Props): React.JSX.Element {
       });
       if (controller.signal.aborted) return;
       await openHandsCredentialStore.saveAccessToken(token.access_token);
+      await verifyOpenHandsCloudSession();
       if (!controller.signal.aborted) setPhase('connected');
     } catch {
       if (controller.signal.aborted) return;
+      await openHandsCredentialStore.clearAccessToken().catch(() => undefined);
       setMessage('La connexion a échoué ou le code a expiré. Réessaie.');
       setPhase('error');
     }

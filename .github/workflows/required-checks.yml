@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - manus/openhands-cloud-integration
 
 # A new push to a pull request supersedes its running checks; every push to main completes.
 concurrency:
@@ -158,6 +159,41 @@ jobs:
       # Replay imports current runtime source and builds the pinned historical Bridges itself.
       - run: npm run --workspace @clawket/bridge-core build
       - run: npm run test:compat
+
+  android-apk:
+    name: Android APK (OpenHands branch)
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/manus/openhands-cloud-integration' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - run: npm ci
+      - name: Generate Android project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --no-install
+      - name: Build debug APK
+        working-directory: apps/mobile/android
+        run: ./gradlew app:assembleDebug -x lint -x test --configure-on-demand --build-cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openhands-android-debug-${{ github.sha }}
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
 
   required:
     name: Typecheck, tests, design system, and docs
