@@ -9,6 +9,8 @@ import { DEFAULT_NODE_CAPABILITY_TOGGLES, NodeCapabilityToggles } from '../servi
 import { AccentColorId, ChatAppearanceSettings, ThemeMode } from '../types';
 import { defaultAccentId } from '../theme';
 import { DEFAULT_CHAT_APPEARANCE, DEFAULT_CHAT_FONT_SIZE } from '../features/chat-appearance/defaults';
+
+const PREFERENCES_LOAD_TIMEOUT_MS = 8_000;
 import {
   buildPrimarySessionPreview,
   PRIMARY_CACHED_AGENT_ID,
@@ -78,6 +80,14 @@ export function useAppBootstrap({
   const initialSessionHydratedRef = useRef(false);
 
   useEffect(() => {
+    let active = true;
+    let preferencesSettled = false;
+    const preferencesTimeout = setTimeout(() => {
+      if (!active || preferencesSettled) return;
+      preferencesSettled = true;
+      // Optional preferences must not prevent the first screen from opening.
+      setPreferencesLoaded(true);
+    }, PREFERENCES_LOAD_TIMEOUT_MS);
     Promise.all([
       StorageService.getDebugMode(),
       StorageService.getShowAgentAvatar(),
@@ -116,9 +126,17 @@ export function useAppBootstrap({
         setNodeCapabilityToggles(savedNodeCapabilityToggles);
         setSavedCurrentAgentId(currentAgentId);
       })
-      .finally(() => setPreferencesLoaded(true));
+      .finally(() => {
+        if (active && !preferencesSettled) {
+          preferencesSettled = true;
+          setPreferencesLoaded(true);
+        }
+        clearTimeout(preferencesTimeout);
+      });
 
     return () => {
+      active = false;
+      clearTimeout(preferencesTimeout);
       nodeClient.disconnect();
     };
   }, [nodeClient]);
