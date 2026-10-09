@@ -1,0 +1,60 @@
+name: Publish Android artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'GitHub Actions run ID containing the artifact'
+        required: true
+        default: '37871791148'
+      artifact_name:
+        description: 'Artifact name to publish'
+        required: true
+        default: 'openhands-android-debug-b7fa85e8fb294f63285e17f18069dd5940a53790'
+      release_tag:
+        description: 'Release tag to create'
+        required: true
+        default: 'android-build-37871791148'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifact from GitHub
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: artifact
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Locate APK
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=$(find artifact -type f -iname '*.apk' | head -n 1 || true)
+          if [[ -z "$apk" ]]; then
+            echo 'No APK found in the selected artifact.' >&2
+            find artifact -type f -maxdepth 5 -print >&2
+            exit 1
+          fi
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $apk"
+
+      - name: Create GitHub Release and upload APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          gh release create "$TAG" "$APK" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "OpenDevin Android — $TAG" \
+            --notes "Version Android compilée automatiquement depuis l'exécution GitHub Actions #${{ inputs.source_run_id }}. Téléchargez l'APK ci-dessous."
