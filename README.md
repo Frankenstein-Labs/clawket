@@ -11,13 +11,14 @@ OpenHands Mobile a été créée principalement pour donner accès à **OpenDevi
 L’application peut également se connecter à des **agents locaux** et à des backends exécutés sur votre propre ordinateur ou votre réseau. La connexion à OpenDevine Cloud est son usage principal ; les connexions locales offrent une solution complémentaire pour les utilisateurs qui souhaitent conserver leurs agents chez eux.
 
 <p align="center">
-  <a href="https://github.com/Frankenstein-Labs/clawket/releases/download/android-build-37871791148/app-debug.apk"><strong>⬇ Télécharger OpenHands Mobile pour Android (APK)</strong></a>
+  <a href="https://github.com/Frankenstein-Labs/clawket/actions/runs/37878687647"><strong>⬇ Télécharger OpenHands Mobile pour Android (APK release)</strong></a>
 </p>
 
-- [Télécharger l’application Android](https://github.com/Frankenstein-Labs/clawket/releases/download/android-build-37871791148/app-debug.apk)
+- [Télécharger le nouvel APK Android release](https://github.com/Frankenstein-Labs/clawket/actions/runs/37878687647)
 - [Voir toutes les versions](https://github.com/Frankenstein-Labs/clawket/releases)
 - [Consulter le projet OpenHands](https://github.com/OpenHands/OpenHands)
 
+> **Téléchargement :** ouvrez l’exécution GitHub Actions, puis téléchargez l’artefact `openhands-android-release-9fbbbc1716b79ad4312942c18d4296ae32be96e5` dans la section **Artifacts**.
 > **Installation Android :** après le téléchargement, Android peut demander l’autorisation d’installer des applications provenant de cette source. Activez cette autorisation dans les réglages de votre appareil si nécessaire.
 
 ## À propos d’OpenHands Mobile
