@@ -1,7 +1,6 @@
 import {
   OFFICIAL_HERMES_PREVIEW_REGISTRY_URL,
   OFFICIAL_HERMES_PRODUCTION_REGISTRY_URL,
-  OFFICIAL_LOCAL_MODEL_PREVIEW_REGISTRY_URL,
   OFFICIAL_PREVIEW_REGISTRY_URL,
   OFFICIAL_PRODUCTION_REGISTRY_URL,
   assessRelayEnvironmentSelection,
@@ -37,23 +36,6 @@ describe('relay environment selection', () => {
     })).toBe('preview_requires_debug_mode');
   });
 
-  it('accepts the dedicated local-model Registry from any environment without Debug Mode', () => {
-    // Still an official pairing server (pairing-session trusts it), but never a Preview gate.
-    expect(resolveOfficialRelayEnvironment(`${OFFICIAL_LOCAL_MODEL_PREVIEW_REGISTRY_URL}/v1/pair/claim`)).toBe('preview');
-    expect(isEnvironmentIndependentRegistry(`${OFFICIAL_LOCAL_MODEL_PREVIEW_REGISTRY_URL}/v1/pair/claim`)).toBe(true);
-    expect(isEnvironmentIndependentRegistry(OFFICIAL_PREVIEW_REGISTRY_URL)).toBe(false);
-    expect(isEnvironmentIndependentRegistry(OFFICIAL_HERMES_PREVIEW_REGISTRY_URL)).toBe(false);
-    expect(isEnvironmentIndependentRegistry('https://self-hosted.example.com')).toBe(false);
-    for (const selectedEnvironment of ['production', 'preview'] as const) {
-      for (const debugMode of [false, true]) {
-        expect(assessRelayEnvironmentSelection({
-          serverUrl: OFFICIAL_LOCAL_MODEL_PREVIEW_REGISTRY_URL,
-          selectedEnvironment,
-          debugMode,
-        })).toBeNull();
-      }
-    }
-  });
 
   it('rejects official QR codes from a different selected environment', () => {
     expect(assessRelayEnvironmentSelection({

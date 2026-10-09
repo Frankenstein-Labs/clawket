@@ -21,7 +21,7 @@ function fixture(backend = 'hermes', attachment: Partial<SocketAttachment> = {})
 
 describe('legacy Hermes owner contention', () => {
   it('preserves first replacement and modern takeover, and leaves other backends unchanged', () => {
-    for (const backend of ['hermes', 'openclaw', 'codex', 'claude-code', 'pi', 'local-model']) {
+    for (const backend of ['hermes', 'openclaw', 'codex', 'claude-code', 'pi']) {
       const { runtime } = fixture(backend);
       expect(admitHermesOwner(runtime, 'same-owner', [], 100).allowed).toBe(true);
     }

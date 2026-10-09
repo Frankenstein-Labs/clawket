@@ -88,7 +88,7 @@ export type ModelsScreenProps = Readonly<{
 /**
  * Models: the Agent's default model, fallbacks and default thinking level on
  * top; below, the provider catalog with enable switches. OpenClaw edits its
- * Gateway config (one restart per Save); Hermes and local-model only expose a
+ * Gateway config (one restart per Save); Hermes only exposes a
  * global current model.
  */
 export function ModelsScreen({

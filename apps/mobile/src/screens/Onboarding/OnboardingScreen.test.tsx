@@ -217,7 +217,7 @@ describe('OnboardingScreen', () => {
     fireEvent.press(view.getByTestId('onboarding-custom-connection'));
     expect(onOpenCustomConnection).toHaveBeenCalledTimes(1);
   });
-  it.each(['hermes', 'pi', 'codex', 'claude-code', 'local-model', undefined] as const)('does not offer direct setup for %s', (initialBackend) => {
+  it.each(['hermes', 'pi', 'codex', 'claude-code', undefined] as const)('does not offer direct setup for %s', (initialBackend) => {
     const view = render(<OnboardingScreen {...createProps({ initialBackend, onOpenCustomConnection: jest.fn() })} />);
     expect(view.queryByTestId('onboarding-custom-connection')).toBeNull();
   });
@@ -346,54 +346,24 @@ describe('OnboardingScreen', () => {
     });
   });
 
-  it('offers local models in every environment and submits all six digits including zero and one', () => {
+  it('offers each terminal backend and submits all six digits including zero and one', () => {
     const onSubmitPairing = jest.fn();
     const onOpenWebsite = jest.fn();
-    // Production, no Debug Mode: the local model row is a first-class backend (owner decision 2026-09-19).
     const view = render(<OnboardingScreen {...createProps({ initialBackend: undefined, onSubmitPairing, onOpenWebsite })} />);
-    // Chooser order (owner decision 2026-09-26): products first, the user's own model server last.
+    // Chooser order (owner decision 2026-09-26): installable products first.
     expect(view.getByTestId('onboarding-backends').props.children.map((cell: { props: { children: { props: { testID: string } } } }) => cell.props.children.props.testID))
-      .toEqual(['onboarding-backend-openclaw', 'onboarding-backend-hermes', 'onboarding-backend-codex', 'onboarding-backend-claude-code', 'onboarding-backend-pi', 'onboarding-backend-local-model']);
-    // A local model is a server the user already runs; "No agent yet?" only lists products to install.
+      .toEqual(['onboarding-backend-openclaw', 'onboarding-backend-hermes', 'onboarding-backend-codex', 'onboarding-backend-claude-code', 'onboarding-backend-pi']);
     fireEvent.press(view.getByTestId('onboarding-docs-toggle'));
     expect(view.getByTestId('onboarding-doc-options').props.children.map((link: { props: { testID: string } }) => link.props.testID))
       .toEqual(['onboarding-doc-openclaw', 'onboarding-doc-hermes', 'onboarding-doc-codex', 'onboarding-doc-claude-code', 'onboarding-doc-pi']);
-    expect(view.queryByTestId('onboarding-doc-local-model')).toBeNull();
-    fireEvent.press(view.getByTestId('onboarding-backend-local-model'));
+    fireEvent.press(view.getByTestId('onboarding-backend-pi'));
     expect(view.queryByTestId('onboarding-agent-prompt')).toBeNull();
     expect(view.queryByTestId('onboarding-pairing-method-terminal')).toBeNull();
-    expect(view.getByText('npx @p697/clawket@latest pair --backend local-model')).toBeTruthy();
+    expect(view.getByText('npx @p697/clawket@latest pair --backend pi')).toBeTruthy();
     fireEvent.press(view.getByTestId('onboarding-show-code'));
     fireEvent.changeText(view.getByTestId('onboarding-pairing-code'), '001234');
     fireEvent.press(view.getByTestId('onboarding-connect'));
-    expect(onSubmitPairing).toHaveBeenCalledWith({ backendKind: 'local-model', transportKind: 'relay', code: '001234' });
-  });
-
-  it('lists the supported local model servers and adapts the command and hint to the chosen one', () => {
-    const onCopyCommand = jest.fn();
-    const view = render(<OnboardingScreen {...createProps({ initialBackend: 'local-model', onCopyCommand })} />);
-    const engineTabs = view.getByTestId('onboarding-local-model-engine');
-    expect(engineTabs).toBeTruthy();
-    expect(view.getByTestId('onboarding-local-model-engine-llamacpp').props.accessibilityState).toEqual({ selected: true });
-    expect(view.getByTestId('onboarding-command-hint').props.children).toBe('Start llama-server first (default port 8080), then run this in Terminal.');
-    expect(view.getByText('npx @p697/clawket@latest pair --backend local-model')).toBeTruthy();
-
-    fireEvent.press(view.getByTestId('onboarding-local-model-engine-ollama'));
-    expect(view.getByTestId('onboarding-command-hint').props.children).toBe('Make sure Ollama is running, then run this in Terminal.');
-    const ollamaCommand = 'npx @p697/clawket@latest pair --backend local-model --engine ollama --base-url http://127.0.0.1:11434';
-    expect(view.getByText(ollamaCommand)).toBeTruthy();
-    fireEvent.press(view.getByTestId('onboarding-copy-command'));
-    expect(onCopyCommand).toHaveBeenCalledWith(ollamaCommand);
-
-    fireEvent.press(view.getByTestId('onboarding-local-model-engine-openai-compatible'));
-    expect(view.getByTestId('onboarding-command-hint').props.children).toContain('OpenAI-compatible server');
-    expect(view.getByText('npx @p697/clawket@latest pair --backend local-model --engine openai-compatible --base-url http://127.0.0.1:1234')).toBeTruthy();
-
-    // OpenClaw's step title already says where to run it: no hint line and no engine switch.
-    view.rerender(<OnboardingScreen {...createProps({ initialBackend: 'openclaw', onCopyCommand, onCopyAgentPrompt: undefined })} />);
-    expect(view.queryByTestId('onboarding-local-model-engine')).toBeNull();
-    expect(view.queryByTestId('onboarding-command-hint')).toBeNull();
-    expect(view.getByText('Run in your computer’s terminal')).toBeTruthy();
+    expect(onSubmitPairing).toHaveBeenCalledWith({ backendKind: 'pi', transportKind: 'relay', code: '001234' });
   });
 
   it('shares one synchronous readiness guard across Enter, button, and input state', () => {
@@ -615,7 +585,7 @@ describe('OnboardingScreen', () => {
     expect(view.getByTestId('onboarding-scan-qr')).toBeTruthy();
   });
 
-  it.each(['codex', 'claude-code', 'pi', 'local-model'] as const)('leads %s with a terminal command and scanner, revealing codes on request', (backend) => {
+  it.each(['codex', 'claude-code', 'pi'] as const)('leads %s with a terminal command and scanner, revealing codes on request', (backend) => {
     const onScanQr = jest.fn();
     const onSubmitPairing = jest.fn();
     const view = render(<OnboardingScreen {...createProps({ initialBackend: backend, onScanQr, onSubmitPairing })} />);
@@ -664,7 +634,6 @@ describe('OnboardingScreen', () => {
     expect(onScanAnyQr).toHaveBeenCalledTimes(1);
     fireEvent.press(view.getByTestId('onboarding-show-code'));
     expect(view.queryByTestId('onboarding-pairing-code')).toBeNull();
-    expect(view.queryByTestId('onboarding-code-backend-local-model')).toBeNull();
     fireEvent.press(view.getByTestId('onboarding-change-code-backend'));
     fireEvent.press(view.getByTestId('onboarding-code-backend-hermes'));
     fireEvent.changeText(view.getByTestId('onboarding-pairing-code'), 'ABC234');
@@ -866,7 +835,7 @@ describe('OnboardingScreen', () => {
     const view = render(<OnboardingScreen {...createProps({ initialBackend: undefined })} />);
     // Two columns of 52-point rows keep the official platforms above the home pairing actions.
     expect(flattenStyle(view.getByTestId('onboarding-backends').props.style)).not.toHaveProperty('gap');
-    for (const kind of ['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model']) {
+    for (const kind of ['openclaw', 'hermes', 'codex', 'claude-code', 'pi']) {
       const row = view.getByTestId(`onboarding-backend-${kind}`);
       const choiceStyle = flattenStyle(row.props.style);
       expect(choiceStyle.paddingVertical).toBe(Space.sm);

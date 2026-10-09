@@ -15,7 +15,7 @@ function socket(id: string, hash?: string, pairing = false, open = true): WebSoc
 }
 
 describe('authenticated room admission', () => {
-  it.each<BackendKind>(['openclaw', 'hermes', 'pi', 'codex', 'claude-code', 'local-model'])('bounds %s devices before and after hibernation', (backend) => {
+  it.each<BackendKind>(['openclaw', 'hermes', 'pi', 'codex', 'claude-code'])('bounds %s devices before and after hibernation', (backend) => {
     const peers = Array.from({ length: MAX_DEVICE_SOCKETS }, (_, index) => socket(`phone-${index}`, 'one-way-hash'));
     const state = { getWebSockets: () => peers, id: { toString: () => 'test-room' } } as unknown as DurableObjectState;
     const makeRuntime = () => {

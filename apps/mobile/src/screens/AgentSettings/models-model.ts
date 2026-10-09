@@ -15,7 +15,7 @@ import { matchesAllowlistEntry } from '../../utils/model-cost-config';
 
 /**
  * `manage`: OpenClaw — Gateway config defaults, allowlist, add / delete /
- * cost live on this page. `select`: Hermes and local-model — the backend
+ * cost live on this page. `select`: Hermes — the backend
  * exposes one global current model and nothing else to edit.
  */
 export type ModelsMode = 'manage' | 'select';

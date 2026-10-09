@@ -137,18 +137,17 @@ export const HERMES_BACKEND_POLICY: BackendPolicy = {
   traceHints: true,
 };
 
-// Local model traffic uses origin-routed RPC and the existing secure pairing wire.
-// Bind ROOM/ROUTES_KV only to this deployment's isolated resources.
-export const LOCAL_MODEL_BACKEND_POLICY: BackendPolicy = {
-  ...OPENCLAW_BACKEND_POLICY, backend: 'local-model',
+// Origin-routed RPC over the existing secure pairing wire.
+const ORIGIN_ROUTED_PAIRING_POLICY: BackendPolicy = {
+  ...OPENCLAW_BACKEND_POLICY,
   routeRequestsByOrigin: true, rejectRequestWithoutOwner: true,
 };
 
-export const CLAUDE_CODE_BACKEND_POLICY: BackendPolicy = { ...LOCAL_MODEL_BACKEND_POLICY, backend: 'claude-code' };
+export const CLAUDE_CODE_BACKEND_POLICY: BackendPolicy = { ...ORIGIN_ROUTED_PAIRING_POLICY, backend: 'claude-code' };
 
-export const CODEX_BACKEND_POLICY: BackendPolicy = { ...LOCAL_MODEL_BACKEND_POLICY, backend: 'codex' };
+export const CODEX_BACKEND_POLICY: BackendPolicy = { ...ORIGIN_ROUTED_PAIRING_POLICY, backend: 'codex' };
 
-export const PI_BACKEND_POLICY: BackendPolicy = { ...LOCAL_MODEL_BACKEND_POLICY, backend: 'pi' };
+export const PI_BACKEND_POLICY: BackendPolicy = { ...ORIGIN_ROUTED_PAIRING_POLICY, backend: 'pi' };
 
 export function policyForBackend(backend: string | undefined): BackendPolicy {
   if (backend === undefined) return OPENCLAW_BACKEND_POLICY;
@@ -156,7 +155,6 @@ export function policyForBackend(backend: string | undefined): BackendPolicy {
   if (backend === 'claude-code') return CLAUDE_CODE_BACKEND_POLICY;
   if (backend === 'codex') return CODEX_BACKEND_POLICY;
   if (backend === 'pi') return PI_BACKEND_POLICY;
-  if (backend === 'local-model') return LOCAL_MODEL_BACKEND_POLICY;
   if (backend === 'hermes') return HERMES_BACKEND_POLICY;
   throw new Error(`Unsupported RELAY_BACKEND: ${backend}`);
 }

@@ -11,7 +11,7 @@ export type PairingMethod = 'agent' | 'terminal';
 
 const DEFAULT_PAIRING_METHOD: Readonly<Record<PairableBackendKind, PairingMethod>> = {
   openclaw: 'agent', hermes: 'agent', codex: 'terminal',
-  'claude-code': 'terminal', pi: 'terminal', 'local-model': 'terminal',
+  'claude-code': 'terminal', pi: 'terminal',
 };
 
 export function getDefaultPairingMethod(backend: PairableBackendKind): PairingMethod {
@@ -32,38 +32,13 @@ export const VERIFICATION_CODE_LENGTH = 6;
 
 const LEGACY_PAIRING_CODE = /^[ABCDEFGHJKMNPQRSTVWXYZ2-9]{12}$/;
 
-export type PairableBackendKind = Extract<BackendKind, 'openclaw' | 'hermes' | 'local-model' | 'pi' | 'codex' | 'claude-code'>;
-
-/** Model servers the local-model Bridge can discover; mirrors the CLI `--engine` values. */
-export type LocalModelEngine = 'llamacpp' | 'ollama' | 'openai-compatible';
-
-export const LOCAL_MODEL_ENGINES: ReadonlyArray<LocalModelEngine> = ['llamacpp', 'ollama', 'openai-compatible'];
-
-/**
- * The CLI defaults to llama.cpp on port 8080, so other servers need their
- * engine and address spelled out; Ollama listens on 11434, LM Studio on 1234.
- * No `--preview`: the CLI always pairs local models through their dedicated
- * Registry, whichever Relay environment the app has selected.
- */
-export function buildLocalModelPairingCommand(engine: LocalModelEngine): string {
-  const base = `${PAIRING_COMMAND} --backend local-model`;
-  switch (engine) {
-    case 'ollama':
-      return `${base} --engine ollama --base-url http://127.0.0.1:11434`;
-    case 'openai-compatible':
-      return `${base} --engine openai-compatible --base-url http://127.0.0.1:1234`;
-    default:
-      return base;
-  }
-}
+export type PairableBackendKind = Extract<BackendKind, 'openclaw' | 'hermes' | 'pi' | 'codex' | 'claude-code'>;
 
 /** A copied command must select exactly the backend the person chose in the app. */
 export function buildBackendPairingCommand(
   backendKind: PairableBackendKind,
   pairingCommand: string = PAIRING_COMMAND,
-  localModelEngine: LocalModelEngine = 'llamacpp',
 ): string {
-  if (backendKind === 'local-model') return buildLocalModelPairingCommand(localModelEngine);
   // Pi has no Preview service; its existing pairing always uses the Pi production Registry.
   if (backendKind === 'pi') return `${PAIRING_COMMAND} --backend pi`;
   return `${pairingCommand} --backend ${backendKind}`;
@@ -95,7 +70,6 @@ const BACKEND_OFFLINE_MESSAGE: Record<PairableBackendKind, string> = {
   codex: 'Codex is not responding',
   'claude-code': 'Claude Code is not responding',
   pi: 'Pi is not responding',
-  'local-model': 'Local model is not responding',
 };
 
 export function normalizeVerificationCode(
@@ -124,7 +98,7 @@ export function isVerificationCodeComplete(
   backendKind: PairableBackendKind = 'openclaw',
 ): boolean {
   const code = normalizeVerificationCode(value, backendKind);
-  if (backendKind === 'local-model' || backendKind === 'pi' || backendKind === 'codex' || backendKind === 'claude-code') return /^\d{6}$/.test(code);
+  if (backendKind === 'pi' || backendKind === 'codex' || backendKind === 'claude-code') return /^\d{6}$/.test(code);
   return backendKind === 'openclaw'
     ? /^\d{6}$/.test(code) || LEGACY_PAIRING_CODE.test(code)
     : /^[A-HJ-KM-NP-TV-Z2-9]{6}$/.test(code);

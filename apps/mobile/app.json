@@ -18,8 +18,7 @@
         "applinks:claude-code-registry.clawket.ai",
         "applinks:claude-code-registry-preview.clawket.ai",
         "applinks:pi-registry.clawket.ai",
-        "applinks:pi-registry-preview.clawket.ai",
-        "applinks:local-model-registry.clawket.ai"
+        "applinks:pi-registry-preview.clawket.ai"
       ],
       "infoPlist": {
         "NSCameraUsageDescription": "Allow Clawket to use your camera to scan QR codes and take photos to send to AI.",
@@ -114,11 +113,6 @@
             {
               "scheme": "https",
               "host": "pi-registry-preview.clawket.ai",
-              "pathPrefix": "/pair/"
-            },
-            {
-              "scheme": "https",
-              "host": "local-model-registry.clawket.ai",
               "pathPrefix": "/pair/"
             }
           ],

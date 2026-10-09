@@ -413,7 +413,7 @@ describe('aggregateRoster', () => {
   });
 });
 
-it.each(['openclaw', 'hermes', 'local-model'] as const)('counts only canonical main-chat unread for %s', (backendKind) => {
+it.each(['openclaw', 'hermes', 'pi'] as const)('counts only canonical main-chat unread for %s', (backendKind) => {
   const input = {
     connection: { ...connection('a', 1), backendKind },
     source: 'live' as const,

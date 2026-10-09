@@ -24,7 +24,7 @@ it('does not create a second owner after an unverified replacement stop, includi
   expect(first.start).toHaveBeenCalledTimes(1); expect(second.start).toHaveBeenCalledTimes(2); expect(result).toContainEqual({ backend: 'codex', state: 'failed', reason: 'replacement_stop_unverified' });
 });
 it('reports independently supervised installations as manual instead of claiming all updated', async () => {
-  const manual = { ...fixture('local-model', false), manual: true }; expect(await activateUpdate([manual], '/new', '3.1.11')).toEqual([{ backend: 'local-model', state: 'manual' }]); expect(manual.start).not.toHaveBeenCalled();
+  const manual = { ...fixture('codex', false), manual: true }; expect(await activateUpdate([manual], '/new', '3.1.11')).toEqual([{ backend: 'codex', state: 'manual' }]); expect(manual.start).not.toHaveBeenCalled();
 });
 it('refreshes stopped registrations without starting them and rolls back if one refresh fails', async () => {
   const stopped = fixture('openclaw', false), restore = vi.fn(); stopped.prepareStopped = vi.fn(async () => restore);

@@ -69,7 +69,7 @@ describe('negotiated owner transport echo', () => {
     f.helper.dispose();
   });
 
-  it('preserves explicit local-model legacy protocol pong recovery and clears the application deadline without sending again', async () => {
+  it('preserves explicit legacy protocol pong recovery and clears the application deadline without sending again', async () => {
     vi.useFakeTimers();
     const f = fixture(false, true); f.helper.handleControl(ready); f.helper.request();
     f.helper.confirmTransportPong();

@@ -87,9 +87,9 @@ describe('hasCachedNonMainAgentSession', () => {
     })).toBe(true);
   });
 
-  it('never treats Hermes, local models, unknown connections, or OpenClaw main as secondary', () => {
+  it('never treats Hermes, Pi, unknown connections, or OpenClaw main as secondary', () => {
     const hermes = connection('hermes', 'hermes');
-    const local = connection('local', 'local-model');
+    const local = connection('local', 'pi');
     const openclaw = connection('openclaw', 'openclaw');
     expect(hasCachedNonMainAgentSession({
       connections: [hermes, local, openclaw],

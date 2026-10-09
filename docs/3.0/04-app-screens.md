@@ -48,7 +48,7 @@
 3. 六位码输入（自动分组 3+3，粘贴自动填充，剪贴板检测提示一句话）。键盘弹起时（iOS）页面用 keyboard-controller 的 padding `KeyboardAvoidingView` 收缩视口，并用 `useKeyboardRevealScroll` 把「配对码输入框 + 连接按钮」这一组刚好推到键盘上方 16 点：只滚实测的差额、按键盘真实高度进度插值，第三方键盘二次改高度时只补增量。Android 保持 adjustResize。不用 RN `automaticallyAdjustKeyboardInsets`（第三方键盘过渡帧会按整个键盘高度过滚），也不用库的 `KeyboardAwareScrollView`（它缓存的输入框位置在滚动后不刷新，键盘改高度时会二次叠加滚动并弹回）。数字键盘不再设 `returnKeyType`，避免 RN 自动附加的 Go 工具条再改一次键盘 frame。
 4. 主按钮「连接」/ `Connect`；下方一行文字键：「自己运行命令」/「发给我的 Agent」（见 2）、「扫码连接」/ `Scan to connect`、「从相册选择」/ `Choose from photos`（折叠的兼容路径）。
 5. 底部一个文字链接：「还没有 Agent？」/ `No agent yet?` → 展开 OpenClaw / Hermes 两个文字键，各自直接打开官网首页（`openclaw.ai`、`hermes-agent.nousresearch.com`），不进安装/快速上手文档。埋点沿用 `onboarding_docs_opened{ backend }`。
-6. Preview 环境（Debug 模式）额外显示第三个选择行「Local model」（2026-09-11 授权的 `local-model` 后端，见 `15-local-model.md`）。其步骤 01 没有「发给我的 Agent」路径（底部也不出现切换键）：标题「拿到配对码」下用 `SegmentedTabs` 提供 llama.cpp / Ollama / Other（OpenAI 兼容）三选一，作为「支持哪些模型服务」的自解释列表；一行灰字说明该服务需先运行，命令块随选择带上 `--engine` / `--base-url`（Ollama 11434、其他 1234；llama.cpp 用 CLI 默认 8080）。「还没有 Agent？」不列出 Local model——它不是要安装的产品，而是用户已在运行的服务；`bridge_offline` 的文档动作指向 `15-local-model.md`。
+6. 本地模型选择行已于 2026-10-09 移除：应用改为 100% 云端，Onboarding 不再列出 Local model，也不再提供 llama.cpp / Ollama / Other 引擎选项卡、`--engine` / `--base-url` 命令或 `15-local-model.md` 链接。
 
 **状态**：连接中（2026-09-30 负责人要求：提交配对码、扫码或打开配对链接之后，上面的复制按钮、已用掉的配对码和看起来还能点的「连接」都没有意义了）——页头以下整页换成连接舞台：与猫猫等待场景一起在 `Motion.loadingGrace` 后淡入（更快的失败只会看到「连接」按钮里的转圈），猫下方用 title 半粗体大字写「正在连接」，不显示传输阶段；已配对的连接掉线时保持「离线 · 正在重连」和一个「重新连接」文字键，直到这次配对结束。表单留在舞台下面（锁定、对读屏隐藏），失败时舞台淡出，回到原样的表单和保留的错误条；返回键离开引导；成功时猫咪笑眼淡出、立即打开新 Agent，不为动画推迟跳转。失败（错误码文案 + 动作）；Preview 环境提示（Debug 模式下显示黄色「Preview」标签，沿用现有环境校验）。
 

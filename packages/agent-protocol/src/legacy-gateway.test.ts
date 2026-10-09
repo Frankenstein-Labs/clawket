@@ -17,7 +17,7 @@ import {
 
 describe('temporary legacy gateway facade', () => {
   it('keeps the exact legacy backend and transport guards', () => {
-    for (const value of ['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code']) expect(isGatewayBackendKind(value)).toBe(true);
+    for (const value of ['openclaw', 'hermes', 'pi', 'codex', 'claude-code']) expect(isGatewayBackendKind(value)).toBe(true);
     for (const value of ['local', 'tailscale', 'cloudflare', 'custom', 'relay']) {
       expect(isGatewayTransportKind(value)).toBe(true);
     }
@@ -55,7 +55,6 @@ describe('temporary legacy gateway facade', () => {
       consoleCronCreate: false,
       consoleAgentSessionsBoard: false,
     });
-    expect(getGatewayBackendCapabilities('local-model').gatewayConnection).toBe(false);
     expect(Object.values(getGatewayBackendCapabilities('openclaw')).every(Boolean)).toBe(true);
   });
 
@@ -70,8 +69,6 @@ describe('temporary legacy gateway facade', () => {
     expect(getGatewayThinkingLevels('hermes')).not.toContain('adaptive');
     expect(resolveGlobalMainSessionKey('openclaw')).toBeNull();
     expect(resolveGlobalMainSessionKey('hermes')).toBe('main');
-    expect(resolveGlobalMainSessionKey('local-model')).toBe('main');
-    expect(resolveGlobalMainSessionKey({ backendKind: 'local-model' })).toBe('main');
     expect(resolveGlobalMainSessionKey(null)).toBeNull();
   });
 

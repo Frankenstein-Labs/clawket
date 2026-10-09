@@ -299,7 +299,7 @@ export async function handleGatewayMessage(
     return;
   }
   const connectResId = parseResponseId(text);
-  if ((runtime.policy.backend === 'local-model' || runtime.policy.backend === 'pi' || runtime.policy.backend === 'codex' || runtime.policy.backend === 'claude-code') && !connectResId) {
+  if ((runtime.policy.backend === 'pi' || runtime.policy.backend === 'codex' || runtime.policy.backend === 'claude-code') && !connectResId) {
     // These backends own their session state. Stream updates reach every
     // fully paired device; temporary pairing-ticket sockets are kept separate.
     let event: { type?: string; event?: string };

@@ -36,7 +36,6 @@ import {
 import {
   HERMES_BACKEND_POLICY,
   OPENCLAW_BACKEND_POLICY,
-  LOCAL_MODEL_BACKEND_POLICY,
   PI_BACKEND_POLICY,
   CODEX_BACKEND_POLICY,
   CLAUDE_CODE_BACKEND_POLICY,
@@ -706,12 +705,6 @@ class BaseRelayRoom {
 export class RelayRoom extends BaseRelayRoom {
   constructor(state: DurableObjectState, env: Env) {
     super(state, env, OPENCLAW_BACKEND_POLICY);
-  }
-}
-
-export class LocalModelRelayRoom extends BaseRelayRoom {
-  constructor(state: DurableObjectState, env: Env) {
-    super(state, env, LOCAL_MODEL_BACKEND_POLICY);
   }
 }
 

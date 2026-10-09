@@ -36,13 +36,10 @@ describe('official service domain migration', () => {
     expect(canonicalizeOfficialRelayUrl(value)).toBe(value);
   });
 
-  it('never crosses backend or environment, and keeps local-model independent', () => {
+  it('never crosses backend or environment', () => {
     const value = 'https://clawket-codex-registry-preview.clawket.workers.dev';
     expect(canonicalizeOfficialRelayUrl(value, 'hermes')).toBe(value);
     expect(canonicalizeOfficialRelayUrl(value, 'codex', 'production')).toBe(value);
-    expect(officialRelayEndpoints('local-model', 'production')).toEqual(officialRelayEndpoints('local-model', 'preview'));
-    expect(canonicalizeOfficialRelayUrl('https://clawket-local-model-registry-preview.clawket.workers.dev', 'local-model', 'production'))
-      .toBe('https://local-model-registry.clawket.ai');
     expect(() => officialRelayEndpoints('invalid' as 'codex')).toThrow();
   });
 

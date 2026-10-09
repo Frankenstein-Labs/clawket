@@ -14,11 +14,10 @@ vi.mock('ws', async () => {
 import { ClaudeRelay } from './claude-code/relay.js';
 import { CodexRelay } from './codex/relay.js';
 import { PiRelay } from './pi/relay.js';
-import { LocalModelRelay } from './local-model/relay.js';
 import { RELAY_OWNER_PONG_CAPABILITY } from './relay-owner-pong.js';
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); state.sockets.length = 0; });
 
-describe.each([['Claude', ClaudeRelay], ['Codex', CodexRelay], ['Pi', PiRelay], ['local model', LocalModelRelay]] as const)('%s relay capacity', (_name, Relay) => {
+describe.each([['Claude', ClaudeRelay], ['Codex', CodexRelay], ['Pi', PiRelay]] as const)('%s relay capacity', (_name, Relay) => {
   const prefix = '__clawket_relay_control__:';
   // Local-model timing is unchanged by this five-agent optimization.
   const firstEchoAt = _name === 'local model' ? 30_000 : 16_000;
@@ -256,7 +255,7 @@ describe.each([['Claude', ClaudeRelay], ['Codex', CodexRelay], ['Pi', PiRelay]] 
   });
 });
 
-describe.each([['Claude', ClaudeRelay], ['Codex', CodexRelay], ['Pi', PiRelay], ['local model', LocalModelRelay]] as const)('%s presence-driven owner cadence', (name, Relay) => {
+describe.each([['Claude', ClaudeRelay], ['Codex', CodexRelay], ['Pi', PiRelay]] as const)('%s presence-driven owner cadence', (name, Relay) => {
   const prefix = '__clawket_relay_control__:';
   const presence = (socket: any, count: number, extra = {}) => socket.emit('message', prefix + JSON.stringify({ event: 'client_count', count, ...extra }));
   const ready = (socket: any) => socket.emit('message', prefix + JSON.stringify({ event: 'relay.ready', payload: { capabilities: [RELAY_OWNER_PONG_CAPABILITY] } }));
@@ -265,7 +264,7 @@ describe.each([['Claude', ClaudeRelay], ['Codex', CodexRelay], ['Pi', PiRelay], 
     return new Relay({ conversation: new EventEmitter(), request: vi.fn() } as never,
       { relayUrl: 'wss://example.test/ws', gatewayId: 'qa', relaySecret: 'qa' }, () => {});
   };
-  it('uses trusted active presence without changing local-model or granting health', async () => {
+  it('uses trusted active presence without changing health', async () => {
     vi.useFakeTimers(); const relay = create();
     try {
       relay.start(); const socket = state.sockets[0]; socket.emit('open'); ready(socket);

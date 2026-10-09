@@ -59,6 +59,8 @@ import {
   getConnectionRuntime,
   useConnections,
 } from './src/connection';
+import { OPENHANDS_CLOUD_CONNECTION_ID } from './src/connection/openhands/cloud-client';
+import { CLOUD_AGENT_ID } from './src/connection/openhands/cloud-events';
 import {
   CAPABILITY_KEYS,
   resolveCapabilities,
@@ -494,6 +496,45 @@ function AppContent({
       routes: [{ name: 'Roster' }],
     });
   };
+
+  // Cloud sign-in is a connection source, not an installed backend: give the
+  // account a registry row and activate it so the roster can open its chats.
+  //
+  // Order matters: `activate` registers the adapter and performs the handshake,
+  // and it resolves only once that settles (it records a connect failure in a
+  // snapshot instead of throwing). The redirect runs after it so the roster
+  // opens on a connection the runtime already owns; resetting first would paint
+  // an empty roster. The stored credential stays valid even when the handshake
+  // fails, so the destination is always Roster: the cloud adapter surfaces its
+  // offline state there and the Connection page offers reconnect.
+  const completeOpenHandsCloudConnection = useCallback(() => {
+    void (async () => {
+      const runtime = getConnectionRuntime();
+      const { connection } = await runtime.upsertConnection({
+        id: OPENHANDS_CLOUD_CONNECTION_ID,
+        backendKind: 'openhands-cloud',
+        transportKind: 'custom',
+        label: 'OpenHands Cloud',
+        url: 'https://app.all-hands.dev',
+      });
+      await runtime.activate(connection.id);
+      setCurrentAgentId(CLOUD_AGENT_ID);
+      setPendingAutoOpen({
+        connectionId: connection.id,
+        agentId: CLOUD_AGENT_ID,
+        sessionKey: '',
+        from: 'onboarding',
+      });
+      if (rootNavigationRef.isReady()) {
+        rootNavigationRef.reset({
+          index: 0,
+          routes: [{ name: 'Roster' }],
+        });
+      }
+    })().catch(() => {
+      // A failed handshake leaves the sign-in screen visible and retryable.
+    });
+  }, []);
   // `undefined` until the one-time cache has been read; `null` once nothing is due.
   const [launchAnnouncement, setLaunchAnnouncement] = useState<AppUpdateAnnouncement | null | undefined>(undefined);
   const [announcementPresentation, setAnnouncementPresentation] = useState<AnnouncementPresentation | null>(null);
@@ -1765,6 +1806,7 @@ function AppContent({
                           : 'first_run',
                       })}
                       onOpenPaywall={(reason, onContinue) => presentPaywall(reason, onContinue)}
+                      onCloudConnected={completeOpenHandsCloudConnection}
                       onConnected={completeOnboardingConnection}
                     />
                   )}

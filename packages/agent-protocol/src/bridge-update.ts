@@ -10,7 +10,7 @@ export const BRIDGE_UPDATE_STATUS_METHOD = 'bridge.update.status';
 export type BridgeUpdateState = 'checking' | 'installing' | 'restarting' | 'updated' | 'failed';
 /** Fixed failure categories; never native errors, paths or command output. */
 export type BridgeUpdateFailure = 'download' | 'unsupported' | 'running' | 'interrupted' | 'not_confirmed' | 'error';
-export type BridgeUpdateBackend = 'openclaw' | 'hermes' | 'hermes-relay' | 'codex' | 'claude-code' | 'pi' | 'local-model';
+export type BridgeUpdateBackend = 'openclaw' | 'hermes' | 'hermes-relay' | 'codex' | 'claude-code' | 'pi';
 export type BridgeUpdateOutcome = Readonly<{
   backend: BridgeUpdateBackend;
   state: 'updated' | 'stopped' | 'restored' | 'failed' | 'manual';
@@ -40,7 +40,7 @@ export interface BridgeUpdateOperations {
 
 const STATES: readonly BridgeUpdateState[] = ['checking', 'installing', 'restarting', 'updated', 'failed'];
 const FAILURES: readonly BridgeUpdateFailure[] = ['download', 'unsupported', 'running', 'interrupted', 'not_confirmed', 'error'];
-const BACKENDS: readonly BridgeUpdateBackend[] = ['openclaw', 'hermes', 'hermes-relay', 'codex', 'claude-code', 'pi', 'local-model'];
+const BACKENDS: readonly BridgeUpdateBackend[] = ['openclaw', 'hermes', 'hermes-relay', 'codex', 'claude-code', 'pi'];
 const OUTCOMES: readonly BridgeUpdateOutcome['state'][] = ['updated', 'stopped', 'restored', 'failed', 'manual'];
 const OUTCOME_REASONS = new Set(['stop_unverified', 'update_not_applied', 'restore_unverified', 'replacement_stop_unverified',
   'registration_update_unverified', 'registration_restore_unverified']);

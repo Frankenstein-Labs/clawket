@@ -26,7 +26,7 @@ const attachment = (clientId: string, extra: Partial<SocketAttachment> = {}): So
   role: 'client', clientId, connectedAt: 1, ...extra,
 });
 
-describe.each(['claude-code', 'codex', 'pi', 'hermes', 'local-model'])('%s pending response after hibernation', backend => {
+describe.each(['claude-code', 'codex', 'pi', 'hermes'])('%s pending response after hibernation', backend => {
   it('delivers to the original requester after a different client becomes active and memory is discarded', async () => {
     const phone = new Socket(attachment('phone'));
     const tablet = new Socket(attachment('tablet'));

@@ -31,7 +31,7 @@ function runtime(backend: string, sockets: Socket[]) {
   return new RelayRuntime({ getWebSockets: () => sockets.map(s => s.ws()), id: { toString: () => 'test' } } as unknown as DurableObjectState, {} as Env, policyForBackend(backend));
 }
 
-describe.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'])('%s owner generation replacement', backend => {
+describe.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'])('%s owner generation replacement', backend => {
   it('keeps a first-owner waiting client and does not retire the current socket itself', () => {
     const phone = socket('phone');
     const next = socket('owner', { role: 'gateway' });

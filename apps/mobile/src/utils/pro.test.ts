@@ -103,7 +103,7 @@ describe('3.0 quota policy', () => {
     expect(canUseAgent(mainAgent, workConnection, free)).toBe(false);
   });
 
-  it('uses descriptor isMain for Hermes and local models instead of backend branches', () => {
+  it('uses descriptor isMain for Hermes and Pi instead of backend branches', () => {
     expect(canUseAgent(
       { agentId: 'hermes', isMain: true },
       homeConnection,

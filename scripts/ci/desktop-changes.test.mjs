@@ -21,7 +21,6 @@ test('Bridge, Relay, shared package, install, test and workflow changes run them
     'apps/bridge-cli/src/index.ts',
     'apps/relay-worker/src/index.ts',
     'packages/agent-protocol/src/index.ts',
-    'scripts/bridge/local-model-supervisor.mjs',
     'tests/compat/PINNED.md',
     '.github/workflows/required-checks.yml',
     'package-lock.json',

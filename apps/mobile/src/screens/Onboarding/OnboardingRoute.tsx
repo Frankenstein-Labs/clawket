@@ -66,6 +66,7 @@ export type OnboardingRouteProps = NavigationProps & Readonly<{
   }) => void;
   onScanQrTapped?: (backendKind: PairableBackendKind) => void;
   onOpenPaywall?: (reason: 'gatewayConnections', onContinue?: () => void) => void;
+  onCloudConnected?: () => void;
   onClose?: () => void;
 }>;
 
@@ -95,6 +96,7 @@ export function OnboardingRoute({
   onPairingCodeSubmitted,
   onScanQrTapped,
   onOpenPaywall,
+  onCloudConnected,
   onClose,
 }: OnboardingRouteProps): React.JSX.Element {
   const { t } = useTranslation('config');
@@ -427,7 +429,7 @@ export function OnboardingRoute({
     ?? (route.params?.presentation === 'modal' ? navigation.goBack : undefined);
 
   if (openHandsAuthVisible) {
-    return <OpenHandsCloudAuthScreen onBack={() => setOpenHandsAuthVisible(false)} />;
+    return <OpenHandsCloudAuthScreen onBack={() => setOpenHandsAuthVisible(false)} onConnected={onCloudConnected} />;
   }
 
   if (!setupVisible && !operation.active && !operation.errorCode && !route.params?.pairingUrl) {

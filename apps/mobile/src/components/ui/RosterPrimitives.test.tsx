@@ -749,7 +749,7 @@ describe('AgentAvatar states and motion', () => {
       && flattenStyle(node.props.style).borderWidth === 1);
     expect(edges).toHaveLength(1);
 
-    for (const platform of ['codex', 'pi', 'hermes', 'local-model'] as const) {
+    for (const platform of ['codex', 'pi', 'hermes', 'openhands-cloud'] as const) {
       const other = render(<AgentAvatar testID="p" agentId={platform} name={platform} platform={platform} />);
       expect(other.getByTestId('p-face')).toBeTruthy();
       other.unmount();

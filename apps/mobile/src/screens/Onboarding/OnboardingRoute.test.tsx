@@ -23,7 +23,13 @@ const mockClipboardGetString = jest.fn(async () => '123456');
 const mockOpenUrl = jest.fn(async (_url: string) => true);
 const mockShowNoticeAlert = jest.fn();
 
-jest.mock('./WelcomeScreen', () => ({ WelcomeScreen: () => null }));
+let mockWelcomeProps: { onOpenCloud?: () => void } | null = null;
+jest.mock('./WelcomeScreen', () => ({
+  WelcomeScreen: (props: { onOpenCloud?: () => void }) => {
+    mockWelcomeProps = props;
+    return null;
+  },
+}));
 
 // OpenHandsCloudAuthScreen renders lucide icons, which pull in react-native-svg. Mock the icon
 // module directly rather than trying to satisfy svg's Touchable/processColor dependencies
@@ -35,8 +41,12 @@ jest.mock('lucide-react-native', () => ({
 
 // OpenHandsCloudAuthScreen pulls in the OpenHands device-flow SDK, which ships ESM-only
 // imports that Jest cannot transform. The route only forwards the screen, so stub it.
+let mockAuthProps: { onConnected?: () => void } | null = null;
 jest.mock('./OpenHandsCloudAuthScreen', () => ({
-  OpenHandsCloudAuthScreen: () => null,
+  OpenHandsCloudAuthScreen: (props: { onConnected?: () => void }) => {
+    mockAuthProps = props;
+    return null;
+  },
 }));
 
 // The repo's `__mocks__/react-native.ts` only provides app-state helpers, not host components,
@@ -143,10 +153,28 @@ describe('OnboardingRoute', () => {
     act(() => mockScreenProps?.onOpenCustomConnection?.());
     expect(props.navigation.navigate).toHaveBeenCalledWith('OpenClawDirect');
   });
+
+  it('opens the OpenHands Cloud login and forwards the connected callback', () => {
+    const onCloudConnected = jest.fn();
+    const props = createProps({
+      onCloudConnected,
+      route: { key: 'Onboarding-key', name: 'Onboarding', params: {} },
+    } as unknown as Partial<OnboardingRouteProps>);
+    render(<OnboardingRoute {...props} />);
+    expect(mockWelcomeProps).not.toBeNull();
+
+    act(() => mockWelcomeProps?.onOpenCloud?.());
+    expect(mockAuthProps).not.toBeNull();
+
+    act(() => mockAuthProps?.onConnected?.());
+    expect(onCloudConnected).toHaveBeenCalledTimes(1);
+  });
   let consoleErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
     mockScreenProps = null;
+    mockWelcomeProps = null;
+    mockAuthProps = null;
     mockRuntime = {
       initialized: true,
       connections: [],

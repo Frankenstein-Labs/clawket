@@ -67,7 +67,7 @@ App 配对首页在平台列表下方以「或者自动检测」标题直接展�
 clawket pair local
 ```
 
-使用 `--backend` 加上 `openclaw`、`hermes`、`codex`、`claude-code`、`pi` 或 `local-model` 可指定后端。使用 `clawket status`、`clawket doctor` 和 `clawket logs` 查看连接状态与诊断信息。
+使用 `--backend` 加上 `openclaw`、`hermes`、`codex`、`claude-code` 或 `pi` 可指定后端。使用 `clawket status`、`clawket doctor` 和 `clawket logs` 查看连接状态与诊断信息。
 
 `status` 汇总所有已保存的 Agent 连接，添加 `--verbose` 可查看路径与能力。使用 `clawket logs --backend codex --last 10m --follow`（或其他后端）实时排查问题。默认生命周期/reset 命令仍管理 OpenClaw/Hermes 服务；其他 Agent 使用 `clawket codex reset`、`clawket claude-code reset` 或 `clawket pi reset`，并保留原配对选项。Reset 保留会话历史。
 
@@ -94,7 +94,6 @@ npm run mobile:config:show
 npm run mobile:config:check
 ```
 
-也支持连接 llama.cpp、Ollama 和 OpenAI 兼容服务提供的本地模型。配置方法与当前限制见[本地模型指南](./docs/3.0/15-local-model.md)。
 
 ## 连接方式与自托管
 

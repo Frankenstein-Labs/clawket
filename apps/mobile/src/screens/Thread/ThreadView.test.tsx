@@ -1842,7 +1842,7 @@ describe('ThreadView', () => {
     expect(Linking.openURL).toHaveBeenCalledWith('https://example.com/docs');
   });
 
-  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'] as const)(
+  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const)(
     'folds only user text on %s, retaining attachments, delivery metadata and the native full message', backend => {
       const message: UiMessage = { id: 'long-prompt', renderKey: 'local-prompt', role: 'user', text: 'A wrapped long prompt. '.repeat(100), timestampMs: 1_700_000_000_000,
         imageUris: ['file://photo.jpg'], fileAttachments: [{ uri: 'file://notes.txt', fileName: 'notes.txt', mimeType: 'text/plain' }] };

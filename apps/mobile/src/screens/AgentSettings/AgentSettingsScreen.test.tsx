@@ -610,7 +610,7 @@ describe('AgentSettingsView deep rendering', () => {
 
   it('does not render sections whose capability is false', () => {
     const disabled: Capabilities = {
-      ...CAPABILITY_MATRIX['local-model'],
+      ...CAPABILITY_MATRIX['openhands-cloud'],
       attachments: false,
       models: false,
       devices: true,

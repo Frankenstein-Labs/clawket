@@ -67,8 +67,8 @@ it('interrupts a runtime that is still replying instead of waiting for it', asyn
 });
 
 it('signals a busy owner without a lifecycle stop only after its authenticated reply names that pid', async () => {
-  const scope = '/saved/local-model/runtime.json', running = await owner({ backend: 'local-model', configPath: scope, busy: true });
-  const target = await createUpdateTarget({ backend: 'local-model', configPath: scope, probe: async () => ({}), start: async () => {} });
+  const scope = '/saved/codex/runtime.json', running = await owner({ backend: 'codex', configPath: scope, busy: true });
+  const target = await createUpdateTarget({ backend: 'codex', configPath: scope, probe: async () => ({}), start: async () => {} });
   await target.stop();
   expect(running.methods).toEqual(['info', 'stop', 'info']);
   // Windows can report the pid gone before Node delivers the child's exit event.

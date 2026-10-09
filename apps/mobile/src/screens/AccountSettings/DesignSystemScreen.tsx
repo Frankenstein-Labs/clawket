@@ -271,7 +271,7 @@ export function DesignSystemScreen({
             {/* Product Agents wear the official mark; an Agent with its own avatar carries it as a
                 corner badge when the roster mixes backends (owner decision 2026-09-27). */}
             <View testID="design-system-platform-avatars" style={styles.actionRow}>
-              {(['claude-code', 'codex', 'pi', 'hermes', 'local-model'] as const).map((platform) => (
+              {(['claude-code', 'codex', 'pi', 'hermes'] as const).map((platform) => (
                 <AgentAvatar key={platform} agentId={platform} name={platform} platform={platform} variant="settings" />
               ))}
             </View>

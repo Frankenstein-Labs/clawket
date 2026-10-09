@@ -600,6 +600,7 @@ jest.mock('./assets/brands/hermes.png', () => 302);
 jest.mock('./assets/brands/pi.png', () => 307);
 jest.mock('./assets/brands/codex.png', () => 308);
 jest.mock('./assets/brands/claude-code.png', () => 309);
+jest.mock('./assets/openhands/openhands-mark.png', () => 310);
 
 jest.mock('./assets/icon.png', () => 304);
 jest.mock('./assets/app-icons/black/app-icon-black-1024.png', () => 305);

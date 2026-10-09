@@ -336,6 +336,6 @@ describe('backend marks', () => {
     expect(rosterBackendAccessibilityName({ backendKind: 'hermes', name: 'Studio Mac' })).toBe('Hermes');
     expect(rosterBackendAccessibilityName({ backendKind: 'claude-code', name: 'Claude Code' })).toBeNull();
     expect(rosterBackendAccessibilityName({ backendKind: 'pi', name: 'Pi · project' })).toBeNull();
-    expect(rosterBackendAccessibilityName({ backendKind: 'local-model', name: 'Qwen' })).toBeNull();
+    expect(rosterBackendAccessibilityName({ backendKind: 'openhands-cloud', name: 'OpenHands Cloud' })).toBeNull();
   });
 });

@@ -680,7 +680,7 @@ describe('ConnectionCoordinator', () => {
       store,
       cache,
       watermarks: new UnreadWatermarks({ storage: dashboardStorage, now: () => 50 }),
-      // Like Hermes without a Bridge name or the local model, the Agent is named after the label.
+      // Like Hermes without a Bridge name or Pi, the Agent is named after the label.
       adapterFactory: (_record, descriptor) => {
         const adapter = instrumentAdapter(descriptor, events);
         adapter.listAgents = async () => [{ ...agent(descriptor.id), name: descriptor.label }];

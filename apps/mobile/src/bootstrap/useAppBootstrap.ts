@@ -29,7 +29,7 @@ type Props = {
 
 function buildAgentPreview(
   agentId: string,
-  backendKind: 'openclaw' | 'hermes' | 'local-model' | 'pi' | 'codex' | 'claude-code',
+  backendKind: 'openclaw' | 'hermes' | 'pi' | 'codex' | 'claude-code' | 'openhands-cloud',
   identity?: {
     agentName?: string;
     agentEmoji?: string;

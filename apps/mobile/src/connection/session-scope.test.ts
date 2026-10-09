@@ -41,7 +41,7 @@ describe('connection session scope', () => {
       agentId: 'main',
       sessionKey: 'main',
     });
-    expect(resolveConnectedThreadTarget('local-model')).toEqual({
+    expect(resolveConnectedThreadTarget('openhands-cloud')).toEqual({
       agentId: 'main',
       sessionKey: 'main',
     });

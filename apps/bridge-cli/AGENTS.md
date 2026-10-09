@@ -67,14 +67,6 @@ When expanding `start`, `install`, `restart`, `stop`, or `uninstall`:
 
 Managed OpenClaw runtimes advertise additive independent-client channel support. The Relay must negotiate it before the runtime allocates per-client Gateway connections; older Relay deployments continue using the legacy transport.
 
-## Local model Preview
-
-`local-model pair` (also `pair --backend local-model`) runs a foreground, isolated Preview Bridge and prints a secure six-digit code only after Relay readiness. `local-model run` restores its saved configuration. Optional llama.cpp router startup must never replace an occupied port or terminate unrelated model processes. Local-model state is separate from existing OpenClaw and Hermes state. See `../../docs/3.0/15-local-model.md`. Model discovery goes through `discoverLocalModelEndpoints`: an unreachable address, a non-OpenAI-compatible reply, an empty model list or an unknown `--engine` must fail with the address and the `--base-url` / `--engine` remedy, never a bare `fetch failed`; keep its engine list equal to the Mobile onboarding tabs.
-
-Windows local-model persistence uses `scripts/bridge/windows-local-model.ps1` and its detached supervisor. Restore existing pairing only; keep independent bundle snapshots, per-config exclusive control, bounded child restart backoff, and graceful IPC shutdown/parent-loss cleanup. Logon recovery is per-user, not a pre-login service. See `../../docs/3.0/21-windows-local-model-recovery.md`.
-
-Supervisor Stop must wait for the owned child to exit before acknowledging; Start must wait out stopping instances. Install attempts use fresh release directories and validate the CLI before activation, never mutate a referenced snapshot. Cover these boundaries with process and Windows installation-failure regressions.
-
 The CLI keeps `https-proxy-agent` as an explicit external runtime dependency for Relay-only proxy support; preserve it in the packaged install. Managed service proxy configuration must not modify global host networking.
 
 Diagnostics resolve the invoked CLI symlink before matching managed process command lines; a global `clawket` symlink and its real bundle path must identify the same runtime. Missing paths remain safe to inspect.
@@ -125,7 +117,7 @@ Codex `permission_configuration_diagnostic` logs only the runtime's fixed failur
 
 ## Pairing progress
 
-`src/progress.ts` draws one live status line while `pair`, `pair choose` discovery, `refresh-code` and Agent/local-model pairing wait. It draws only on an interactive stderr outside CI and `TERM=dumb`; `--json`, pipes and scripts keep byte-identical output. Detached Agent children forward step text over IPC (`<backend>.progress`), and the launching terminal closes the line with ✔/✖ before printing a code, QR or error. Step text must never contain codes, tokens or payloads.
+`src/progress.ts` draws one live status line while `pair`, `pair choose` discovery, `refresh-code` and Agent pairing wait. It draws only on an interactive stderr outside CI and `TERM=dumb`; `--json`, pipes and scripts keep byte-identical output. Detached Agent children forward step text over IPC (`<backend>.progress`), and the launching terminal closes the line with ✔/✖ before printing a code, QR or error. Step text must never contain codes, tokens or payloads.
 
 ## Unified Bridge update
 

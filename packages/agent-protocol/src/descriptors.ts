@@ -1,4 +1,4 @@
-export type BackendKind = 'openclaw' | 'hermes' | 'local-model' | 'pi' | 'codex' | 'claude-code';
+export type BackendKind = 'openclaw' | 'hermes' | 'pi' | 'codex' | 'claude-code' | 'openhands-cloud';
 
 export type TransportKind =
   | 'relay'
@@ -34,7 +34,7 @@ export interface HermesGatewayConfig {
 }
 
 /** Credential-bearing record. Only the connection registry may persist it. */
-export interface ConnectionRecord {
+export type ConnectionRecord = {
   id: string;
   backendKind: BackendKind;
   transportKind: TransportKind;
@@ -47,7 +47,9 @@ export interface ConnectionRecord {
   relay?: RelayGatewayConfig;
   hermes?: HermesGatewayConfig;
   debugMode?: boolean;
-}
+  /** OpenHands Cloud organization selected for this connection; `null` uses the account default. */
+  cloudOrgId?: string | null;
+};
 
 /** Credential-free connection view that is safe for UI and protocol consumers. */
 export interface ConnectionDescriptor {

@@ -1,6 +1,6 @@
 /** Public service identities only. Keep this module free of Node/platform imports:
  * Mobile and Workers consume its source; the CLI consumes the compiled export. */
-export type OfficialRelayBackend = 'openclaw' | 'hermes' | 'codex' | 'claude-code' | 'pi' | 'local-model';
+export type OfficialRelayBackend = 'openclaw' | 'hermes' | 'codex' | 'claude-code' | 'pi';
 export type OfficialRelayEnvironment = 'production' | 'preview';
 
 export const OFFICIAL_RELAY_SERVICES = Object.freeze([
@@ -14,13 +14,11 @@ export const OFFICIAL_RELAY_SERVICES = Object.freeze([
   { backend: 'claude-code', environment: 'preview', registry: 'claude-code-registry-preview', relay: 'claude-code-relay-preview', worker: 'clawket-claude-code', suffix: '-preview' },
   { backend: 'pi', environment: 'production', registry: 'pi-registry', relay: 'pi-relay', worker: 'clawket-pi' },
   { backend: 'pi', environment: 'preview', registry: 'pi-registry-preview', relay: 'pi-relay-preview', worker: 'clawket-pi', suffix: '-preview' },
-  // One isolated service, offered in every App environment; no Production twin.
-  { backend: 'local-model', environment: 'preview', registry: 'local-model-registry', relay: 'local-model-relay', worker: 'clawket-local-model', suffix: '-preview' },
 ] as const);
 
 export function officialRelayEndpoints(backend: OfficialRelayBackend, environment: OfficialRelayEnvironment = 'production') {
   const service = OFFICIAL_RELAY_SERVICES.find(item => item.backend === backend
-    && (backend === 'local-model' || item.environment === environment));
+    && item.environment === environment);
   if (!service) throw new Error('Unknown official Relay service');
   return { registryUrl: `https://${service.registry}.clawket.ai`, relayUrl: `wss://${service.relay}.clawket.ai/ws` };
 }
@@ -45,7 +43,7 @@ export function resolveOfficialRelayService(value: string) {
 export function canonicalizeOfficialRelayUrl(value: string, backend?: string, environment?: string): string {
   const service = resolveOfficialRelayService(value);
   if (!service || (backend && service.backend !== backend)
-    || (environment && service.backend !== 'local-model' && service.environment !== environment)) return value;
+    || (environment && service.environment !== environment)) return value;
   const url = new URL(value);
   if (url.hostname !== service.legacyHostname) return value;
   url.hostname = service.hostname;

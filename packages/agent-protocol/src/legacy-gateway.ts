@@ -142,7 +142,7 @@ const LEGACY_BACKENDS: Record<GatewayBackendKind, GatewayBackendDescriptor> = {
   pi: { kind: 'pi', label: 'Pi', capabilities: { ...MINIMAL_LEGACY_CAPABILITIES, gatewayConnection: true, modelCatalog: true, modelSelection: true, chatAttachments: true, consoleAgentSessionsBoard: true } },
   openclaw: { kind: 'openclaw', label: 'OpenClaw', capabilities: OPENCLAW_LEGACY_CAPABILITIES },
   hermes: { kind: 'hermes', label: 'Hermes', capabilities: HERMES_LEGACY_CAPABILITIES },
-  'local-model': { kind: 'local-model', label: 'Local model', capabilities: { ...MINIMAL_LEGACY_CAPABILITIES, modelCatalog: true, modelSelection: true, chatAttachments: true } },
+  'openhands-cloud': { kind: 'openhands-cloud', label: 'OpenHands Cloud', capabilities: { ...MINIMAL_LEGACY_CAPABILITIES, modelCatalog: true, modelSelection: true, chatAttachments: true } },
 };
 
 const OPENCLAW_THINKING_LEVELS: ThinkingLevel[] = [
@@ -165,7 +165,7 @@ export function isGatewayTransportKind(value: unknown): value is GatewayTranspor
 }
 
 export function isGatewayBackendKind(value: unknown): value is GatewayBackendKind {
-  return value === 'openclaw' || value === 'hermes' || value === 'local-model' || value === 'pi' || value === 'codex' || value === 'claude-code';
+  return value === 'openclaw' || value === 'hermes' || value === 'pi' || value === 'codex' || value === 'claude-code' || value === 'openhands-cloud';
 }
 
 export function resolveGatewayBackendKind(value: LegacyGatewayLike | null | undefined): GatewayBackendKind {
@@ -225,7 +225,7 @@ export function selectByBackend<T>(
 export function resolveGlobalMainSessionKey(
   input: LegacyGatewayLike | GatewayBackendKind | null | undefined,
 ): string | null {
-  if (resolveGatewayBackendKind(typeof input === 'string' ? { backendKind: input } : input) === 'local-model') return 'main';
+  if (resolveGatewayBackendKind(typeof input === 'string' ? { backendKind: input } : input) === 'openhands-cloud') return 'main';
   return selectByBackend(input, { openclaw: null, hermes: 'main' });
 }
 
@@ -258,6 +258,8 @@ export function buildGatewayDefaultName(input: {
   const host = parseHost(input.url);
   const baseLabel = backendKind === 'hermes'
     ? 'Hermes'
+    : backendKind === 'openhands-cloud'
+      ? 'OpenHands Cloud'
     : transportKind === 'relay'
       ? 'Relay'
       : 'Custom';

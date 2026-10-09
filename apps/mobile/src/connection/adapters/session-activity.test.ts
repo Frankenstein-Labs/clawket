@@ -2,7 +2,6 @@ import type { AgentAdapter, ConnectionRecord } from '@clawket/agent-protocol';
 import type { WebSocketLike } from '../transports/types';
 import { ClaudeCodeAdapter } from './claude-code';
 import { CodexAdapter } from './codex';
-import { LocalModelAdapter } from './local-model';
 import { validateSessionActivity } from './session-activity';
 
 class Socket implements WebSocketLike {
@@ -15,7 +14,7 @@ class Socket implements WebSocketLike {
   latest() { return JSON.parse(this.sent.at(-1)!); }
   reply(payload: unknown) { this.onmessage?.({ data: JSON.stringify({ type: 'res', id: this.latest().id, ok: true, payload }) }); }
 }
-describe.each([['codex', CodexAdapter], ['claude-code', ClaudeCodeAdapter], ['local-model', LocalModelAdapter]] as const)
+describe.each([['codex', CodexAdapter], ['claude-code', ClaudeCodeAdapter]] as const)
 ('%s ephemeral activity negotiation', (backendKind, Adapter) => {
   let adapter: AgentAdapter, socket: Socket;
   beforeEach(() => {

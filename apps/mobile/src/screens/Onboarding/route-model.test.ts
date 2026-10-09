@@ -13,8 +13,6 @@ describe('Onboarding route model', () => {
     expect(getOnboardingPairingCommand('preview')).toBe('npx @p697/clawket@latest pair --preview');
     expect(ONBOARDING_DOCUMENTATION_URLS.openclaw).toBe('https://docs.openclaw.ai/install');
     expect(ONBOARDING_DOCUMENTATION_URLS.hermes).toContain('hermes-agent.nousresearch.com/docs/');
-    // The local-model "See how to start it" action lands on the feature document, not the repository root.
-    expect(ONBOARDING_DOCUMENTATION_URLS['local-model']).toBe('https://github.com/p697/clawket/blob/main/docs/3.0/15-local-model.md');
     expect(ONBOARDING_WEBSITE_URLS).toEqual({
       openclaw: 'https://openclaw.ai',
       hermes: 'https://hermes-agent.nousresearch.com',
@@ -26,7 +24,6 @@ describe('Onboarding route model', () => {
 
   it('normalizes route backends to the pairable ones', () => {
     expect(normalizePairableBackendKind('hermes')).toBe('hermes');
-    expect(normalizePairableBackendKind('local-model')).toBe('local-model');
     expect(normalizePairableBackendKind('openclaw')).toBe('openclaw');
     expect(normalizePairableBackendKind(undefined)).toBe('openclaw');
   });

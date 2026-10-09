@@ -17,7 +17,7 @@ const INITIALIZATION_DURATION_FIELDS = new Set([
   'initializationMs', 'roomMetaMs', 'clientTokensMs', 'ownerLoadMs', 'socketsRehydrateMs', 'heartbeatSetupMs',
 ]);
 const STRING_FIELDS: Record<string, readonly string[]> = {
-  backend: ['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code'],
+  backend: ['openclaw', 'hermes', 'pi', 'codex', 'claude-code'],
   role: ['gateway', 'client', 'unknown'],
   socketKind: ['owner', 'channel', 'client'],
   heartbeatOutcome: ['echo_sent', 'attachment_failed', 'send_failed', 'rate_limited'],

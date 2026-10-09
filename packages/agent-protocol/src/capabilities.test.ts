@@ -24,7 +24,6 @@ describe('canonical capability contract', () => {
     expect(resolveCapabilities('codex', { profileManagement: false }).profileManagement).toBe(false);
     expect(resolveCapabilities('hermes', { profileManagement: true }).profileManagement).toBeFalsy();
     expect(resolveCapabilities('pi')).toMatchObject({ chat: true, agentQuestions: true, sessionBranch: true, modelPerSession: true, execApproval: false, channels: false, cron: false });
-    expect(enabled('local-model')).toEqual(['chat', 'abort', 'history', 'attachments', 'models', 'bridgeRemoteUpdate']);
     expect(enabled('hermes')).toEqual([
       'chat',
       'abort',
@@ -64,7 +63,7 @@ describe('canonical capability contract', () => {
   });
 
   it('lets every Bridge backend negotiate phone-started updates but never assumes them', () => {
-    for (const backend of ['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'] as const) {
+    for (const backend of ['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const) {
       expect(resolveCapabilities(backend).bridgeRemoteUpdate).toBe(true);
       expect(resolveCapabilities(backend, { bridgeRemoteUpdate: false }).bridgeRemoteUpdate).toBe(false);
     }
@@ -76,7 +75,7 @@ describe('canonical capability contract', () => {
       chat: false,
       logs: false,
     });
-    expect(resolveCapabilities('local-model', { chat: true, files: true })).toMatchObject({
+    expect(resolveCapabilities('pi', { chat: true, files: true })).toMatchObject({
       chat: true,
       files: false,
     });
@@ -88,15 +87,15 @@ describe('canonical capability contract', () => {
     expect(resolveCapabilities('openclaw', { cronModel: false }).cronModel).toBe(false);
     expect(resolveCapabilities('hermes').cronModel).toBe(true);
     expect(resolveCapabilities('hermes', { cronModel: false }).cronModel).toBe(false);
-    expect(resolveCapabilities('local-model', { cronModel: true }).cronModel).toBeFalsy();
+    expect(resolveCapabilities('pi', { cronModel: true }).cronModel).toBeFalsy();
     expect(resolveCapabilities('openclaw').modelManage).toBe(true);
     expect(resolveCapabilities('openclaw', { modelManage: false }).modelManage).toBe(false);
     expect(resolveCapabilities('hermes', { modelManage: true }).modelManage).toBe(false);
-    expect(resolveCapabilities('local-model', { modelManage: true }).modelManage).toBeFalsy();
+    expect(resolveCapabilities('pi', { modelManage: true }).modelManage).toBeFalsy();
     expect(resolveCapabilities('openclaw').channelManage).toBe(true);
     expect(resolveCapabilities('openclaw', { channelManage: false }).channelManage).toBe(false);
     expect(resolveCapabilities('hermes', { channelManage: true }).channelManage).toBe(false);
-    expect(resolveCapabilities('local-model', { channelManage: true }).channelManage).toBe(false);
+    expect(resolveCapabilities('pi', { channelManage: true }).channelManage).toBe(false);
   });
 
   it('permits negotiated Hermes documents while rejecting arbitrary files', () => {
@@ -115,7 +114,7 @@ describe('canonical capability contract', () => {
     expect(supportsFileAttachments(undefined)).toBe(false);
     expect(supportsAttachmentMimeType(CAPABILITY_MATRIX.openclaw, 'application/pdf')).toBe(true);
     expect(supportsFileAttachments(CAPABILITY_MATRIX.openclaw)).toBe(true);
-    expect(supportsAttachmentMimeType(resolveCapabilities('local-model', { attachments: false }), 'image/png')).toBe(false);
+    expect(supportsAttachmentMimeType(resolveCapabilities('pi', { attachments: false }), 'image/png')).toBe(false);
     expect(supportsPromptAttachment(CAPABILITY_MATRIX.hermes, {
       type: 'image',
       mimeType: ' Image/PNG ',

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { authorizeRelayToken } from './auth';
 import { policyForBackend } from '../backend-policy';
 
-describe.each(['openclaw', 'hermes', 'local-model', 'codex', 'claude-code', 'pi'].map(policyForBackend))('$backend registry verification lifecycle', policy => {
+describe.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'].map(policyForBackend))('$backend registry verification lifecycle', policy => {
   const input = () => ({ routesKv: { get: async () => null } as unknown as KVNamespace,
     registryVerifyUrl: 'https://registry.example', principalId: 'test-principal',
     policy, role: 'gateway' as const, token: 'test-secret' });

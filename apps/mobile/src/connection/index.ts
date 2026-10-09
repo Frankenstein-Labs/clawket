@@ -509,7 +509,7 @@ export class ConnectionCoordinator {
   /**
    * Local display name only: credentials and transport are untouched, so an
    * OpenClaw socket keeps running. Adapters that name their sole Agent after the
-   * connection (Hermes without a Bridge name, local model) read the label at
+   * connection (Hermes without a Bridge name, Pi) read the label at
    * handshake time, so the roster mirrors the rename onto those Agents at once
    * and a live one re-handshakes to make it authoritative. Codex/Claude Code
    * use the current local label directly, without interrupting the socket.

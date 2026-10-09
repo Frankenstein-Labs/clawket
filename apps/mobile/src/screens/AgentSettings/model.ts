@@ -128,10 +128,10 @@ type StatDefinition = Gate & Readonly<{
 const BACKEND_LABELS: Readonly<Record<ConnectionDescriptor['backendKind'], string>> = {
   openclaw: 'OpenClaw',
   hermes: 'Hermes',
-  'local-model': 'Local model',
   pi: 'Pi',
   codex: 'Codex',
   'claude-code': 'Claude Code',
+  'openhands-cloud': 'OpenHands Cloud',
 };
 
 const CONNECTION_STATE_LABELS: Readonly<Record<ConnectionState, string>> = {
