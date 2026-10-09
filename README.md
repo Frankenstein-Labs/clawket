@@ -1,45 +1,28 @@
 <p align="center">
-  <img src="./assets/clawket-hero.png" alt="Clawket 3.0 — Agent roster, chat with tool calls, and Agent console" />
+  <img src="./assets/openhands-logo.png" alt="OpenHands" width="420" />
 </p>
 
-# Clawket
+# OpenHands Mobile
 
-[![npm version](https://img.shields.io/npm/v/@p697/clawket)](https://www.npmjs.com/package/@p697/clawket)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[Follow me on X](https://x.com/cavano697)
+**L’application mobile OpenHands pour utiliser vos agents où que vous soyez.**
 
-[中文说明](./README.zh-CN.md)
+OpenHands Mobile est le compagnon mobile open source d’[OpenHands](https://github.com/OpenHands/OpenHands), le projet anciennement connu sous le nom d’OpenDevin. Discutez avec vos agents, suivez leurs réponses et leurs appels d’outils, changez de session et gérez votre travail depuis votre téléphone.
 
-**Your agents. Always with you.**
-
-Clawket is an open-source iOS and Android companion for [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](https://github.com/NousResearch/hermes-agent). Chat with your agents, follow their tool calls, switch between sessions, and manage their work from your phone.
-
-<table>
-  <tr>
-    <th>iOS · App Store</th>
-    <th>Android · Google Play</th>
-  </tr>
-  <tr>
-    <td align="center"><a href="https://apps.apple.com/app/id6759597015"><img src="./assets/clawket-app-store.png" alt="App Store QR code" width="150" /></a></td>
-    <td align="center"><a href="https://play.google.com/store/apps/details?id=com.p697.clawket"><img src="./assets/clawket-google-play.png" alt="Google Play QR code" width="150" /></a></td>
-  </tr>
-  <tr>
-    <td align="center"><a href="https://apps.apple.com/app/id6759597015">App Store ↗</a></td>
-    <td align="center"><a href="https://play.google.com/store/apps/details?id=com.p697.clawket">Google Play ↗</a></td>
-  </tr>
-</table>
-
-The screenshots show the new 3.0 interface. Store availability may differ while the release is under review.
-
-## Download the Android app
-
-<p>
-  <a href="https://github.com/Frankenstein-Labs/clawket/releases/download/android-build-37871791148/app-debug.apk"><strong>⬇ Download Clawket for Android (APK)</strong></a>
+<p align="center">
+  <a href="https://github.com/Frankenstein-Labs/clawket/releases/download/android-build-37871791148/app-debug.apk"><strong>⬇ Télécharger OpenHands Mobile pour Android (APK)</strong></a>
 </p>
 
-You can install the official Android build directly from the [GitHub Release page](https://github.com/Frankenstein-Labs/clawket/releases/tag/android-build-37871791148). If Android asks for permission, allow installation from this source in your device settings. For the latest store version, use the Google Play link above.
+- [Télécharger l’application Android](https://github.com/Frankenstein-Labs/clawket/releases/download/android-build-37871791148/app-debug.apk)
+- [Voir toutes les versions](https://github.com/Frankenstein-Labs/clawket/releases)
+- [Consulter le projet OpenHands](https://github.com/OpenHands/OpenHands)
 
-## What you can do
+> **Installation Android :** après le téléchargement, Android peut demander l’autorisation d’installer des applications provenant de cette source. Activez cette autorisation dans les réglages de votre appareil si nécessaire.
+
+## À propos d’OpenHands Mobile
+
+L’application mobile est conçue pour se connecter à vos agents OpenHands et à vos backends configurés. Elle ne remplace pas le backend : vous devez disposer d’un agent ou d’un serveur de modèle compatible.
+
+## Fonctions de l’application
 
 - **Keep your agents together.** One roster for agents across your connections, with recent activity and quick access to conversations.
 - **Follow the work as it happens.** Streaming replies and detailed tool calls live alongside the conversation.
