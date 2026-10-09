@@ -30,6 +30,7 @@ import type { RootStackParamList } from '../../navigation/root-stack';
 import type { RelayServiceEnvironment } from '../../types';
 import { showNoticeAlert } from '../../utils/notice-alert';
 import { OnboardingScreen } from './OnboardingScreen';
+import { OpenHandsCloudAuthScreen } from './OpenHandsCloudAuthScreen';
 import { WelcomeScreen } from './WelcomeScreen';
 import type {
   OnboardingConnectionPhase,
@@ -108,6 +109,7 @@ export function OnboardingRoute({
   const environment: RelayServiceEnvironment = debugMode ? 'preview' : 'production';
   const initialBackend = normalizePairableBackendKind(route.params?.initialBackend);
   const [setupVisible, setSetupVisible] = useState(Boolean(route.params?.presentation === 'modal' || route.params?.initialBackend || route.params?.pairingUrl));
+  const [openHandsAuthVisible, setOpenHandsAuthVisible] = useState(false);
   const [operation, setOperation] = useState<PairingOperation>(() => ({
     ...INITIAL_OPERATION,
     backendKind: initialBackend,
@@ -424,8 +426,12 @@ export function OnboardingRoute({
   const close = onClose
     ?? (route.params?.presentation === 'modal' ? navigation.goBack : undefined);
 
+  if (openHandsAuthVisible) {
+    return <OpenHandsCloudAuthScreen onBack={() => setOpenHandsAuthVisible(false)} />;
+  }
+
   if (!setupVisible && !operation.active && !operation.errorCode && !route.params?.pairingUrl) {
-    return <WelcomeScreen onSettings={() => navigation.navigate('AccountSettings')} onConnect={() => setSetupVisible(true)} onClose={close} />;
+    return <WelcomeScreen onSettings={() => navigation.navigate('AccountSettings')} onConnect={() => setOpenHandsAuthVisible(true)} onClose={close} />;
   }
 
   return (

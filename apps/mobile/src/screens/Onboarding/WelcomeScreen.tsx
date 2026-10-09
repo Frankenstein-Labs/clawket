@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { ArrowUpRight, Settings, X } from 'lucide-react-native';
 import { useTranslation } from 'react-i18next';
@@ -56,8 +56,14 @@ export function WelcomeScreen({ onConnect, onClose, onSettings }: Props): React.
     <View testID="welcome-screen" style={[styles.screen, { backgroundColor: colors.canvas, paddingTop: insets.top }]}>
       <View style={styles.header}>
         <View style={styles.wordmark}>
-          <Companion size={IconSize.lg} />
-          <Text style={[styles.brand, { color: colors.ink }]}>{t('Clawket')}</Text>
+          <Image
+            testID="welcome-openhands-mark"
+            accessible={false}
+            source={require('../../../assets/openhands/openhands-mark.png')}
+            resizeMode="contain"
+            style={[styles.brandMark, { tintColor: colors.ink }]}
+          />
+          <Text style={[styles.brand, { color: colors.ink }]}>OpenHands</Text>
         </View>
         {onSettings && !onClose ? <FloatingButton icon={Settings} appearance="plain" onPress={onSettings} accessibilityLabel={t('Settings')} /> : null}
         {onClose ? <FloatingButton icon={X} appearance="plain" onPress={onClose} accessibilityLabel={t('Close', { ns: 'common' })} /> : null}
@@ -126,6 +132,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   header: { minHeight: 60, paddingHorizontal: Space.xl, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   wordmark: { flexDirection: 'row', alignItems: 'center', gap: Space.sm },
+  brandMark: { width: IconSize.lg, height: IconSize.lg },
   brand: { fontSize: FontSize.body, lineHeight: LineHeight.body, fontWeight: FontWeight.semibold },
   content: { flexGrow: 1, paddingHorizontal: Space.xl, gap: Space.xxl },
   introduction: { flex: 1, justifyContent: 'center', paddingVertical: Space.xl, gap: Space.lg },

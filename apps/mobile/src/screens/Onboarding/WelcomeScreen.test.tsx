@@ -110,6 +110,8 @@ describe('WelcomeScreen', () => {
     expect(discs.map((disc) => disc.props.platform)).toEqual(['openclaw', 'hermes', 'codex', 'claude-code', 'pi']);
     expect(view.getByTestId('welcome-agent-names').props.children).toBe('OpenClaw · Hermes · Codex · Claude Code · Pi');
     expect(view.getByText('The agents on your computer,\nall in one app')).toBeTruthy();
+    expect(view.getByText('OpenHands')).toBeTruthy();
+    expect(view.getByTestId('welcome-openhands-mark')).toBeTruthy();
     // Marks overlap their left neighbour and keep the names' left-to-right order in every locale.
     const styleOf = (testID: string) => Object.assign({}, ...[view.getByTestId(testID, { includeHiddenElements: true }).props.style].flat().filter(Boolean));
     expect(styleOf('welcome-agent-marks')).toMatchObject({ flexDirection: 'row', direction: 'ltr' });
@@ -134,7 +136,7 @@ describe('WelcomeScreen', () => {
 
     expect(view.getByTestId('welcome-open-source').props.accessibilityLabel).toBe('Clawket is open source');
     fireEvent.press(view.getByTestId('welcome-open-source'));
-    expect(mockOpenExternalUrl).toHaveBeenCalledWith('https://github.com/p697/clawket', expect.any(Function));
+    expect(mockOpenExternalUrl).toHaveBeenCalledWith('https://github.com/Frankenstein-Labs/clawket', expect.any(Function));
   });
 
   it('offers settings on the root welcome and close when presented over another route', () => {

@@ -26,7 +26,7 @@ describe('withAndroidQaVariant', () => {
     expect(output).toContain("namespace 'com.p697.clawket'");
     expect(output).toContain("applicationId 'com.p697.clawket'\n        if (clawketQaBuild) {");
     expect(output).toContain('applicationIdSuffix ".qa"');
-    expect(output).toContain('manifestPlaceholders.put("clawketAppLabel", clawketQaBuild ? "Clawket QA" : "@string/app_name")');
+    expect(output).toContain('manifestPlaceholders.put("clawketAppLabel", clawketQaBuild ? "OpenHands QA" : "@string/app_name")');
     expect(applyQaBuildGradle(output)).toBe(output);
   });
 
