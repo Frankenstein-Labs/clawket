@@ -1,4 +1,5 @@
 name: Android APK
+# Manual and branch-push build for the OpenHands mobile candidate.
 
 on:
   push:
