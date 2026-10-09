@@ -224,6 +224,7 @@
       "./plugins/with-alternate-app-icons",
       "./plugins/with-android-release-signing",
       "./plugins/with-android-qa-variant",
+      "./plugins/with-android-gradle-heap",
       "./plugins/with-paste-input-setup",
       "./plugins/with-xcode-env",
       "./plugins/with-ios-pod-deployment-target",
