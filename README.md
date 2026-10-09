@@ -31,18 +31,18 @@ L’application mobile est conçue pour se connecter à vos agents OpenHands et 
 - **Connect your way.** Use Relay for remote access, or connect over LAN, Tailscale, or your own endpoint. Self-host the infrastructure if you prefer.
 - **Use your language.** The app supports 19 interface languages, light and dark themes, and voice input with an optional transcription service.
 
-Clawket connects to agents you run; you need an existing supported agent or model server. Available tools and management features depend on that backend.
+OpenHands Mobile connects to agents you run; you need an existing supported agent or model server. Available tools and management features depend on that backend.
 
 ## Get connected
 
-Install the mobile app using either store link above. On the computer running your agent, install the Bridge CLI (Node.js 20.3+):
+Install OpenHands Mobile using the Android APK link above. On the computer running your agent, install the Bridge CLI (Node.js 20.3+):
 
 ```bash
 npm install -g @p697/clawket
 clawket pair
 ```
 
-Scan the generated QR code in Clawket. The default command detects installed OpenClaw and Hermes backends and produces a labeled pairing result for each. Relay is the default; Hermes pairing also attempts to start its Clawket-managed bridge and Relay runtime.
+Scan the generated QR code in OpenHands Mobile. The default command detects installed OpenClaw and Hermes backends and produces a labeled pairing result for each. Relay is the default; Hermes pairing also attempts to start its Clawket-managed bridge and Relay runtime.
 
 To detect installed platforms and choose one interactively (including Codex, Claude Code, and Pi), run this in your computer's terminal:
 
