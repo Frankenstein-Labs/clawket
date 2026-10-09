@@ -4,11 +4,11 @@
 
 # OpenHands Mobile
 
-**L’application mobile pour se connecter à Open Analytics Cloud.**
+**L’application mobile pour se connecter à OpenDevine Cloud.**
 
-OpenHands Mobile a été créée principalement pour donner accès à **Open Analytics Cloud** depuis un téléphone. Elle permet de se connecter à vos agents OpenHands dans le cloud, de suivre les conversations et les réponses en direct, de consulter les appels d’outils et de changer de session.
+OpenHands Mobile a été créée principalement pour donner accès à **OpenDevine Cloud** depuis un téléphone. Elle permet de se connecter à vos agents OpenHands dans le cloud, de suivre les conversations et les réponses en direct, de consulter les appels d’outils et de changer de session.
 
-L’application peut également se connecter à des **agents locaux** et à des backends exécutés sur votre propre ordinateur ou votre réseau. La connexion à Open Analytics Cloud est son usage principal ; les connexions locales offrent une solution complémentaire pour les utilisateurs qui souhaitent conserver leurs agents chez eux.
+L’application peut également se connecter à des **agents locaux** et à des backends exécutés sur votre propre ordinateur ou votre réseau. La connexion à OpenDevine Cloud est son usage principal ; les connexions locales offrent une solution complémentaire pour les utilisateurs qui souhaitent conserver leurs agents chez eux.
 
 <p align="center">
   <a href="https://github.com/Frankenstein-Labs/clawket/releases/download/android-build-37871791148/app-debug.apk"><strong>⬇ Télécharger OpenHands Mobile pour Android (APK)</strong></a>
@@ -22,7 +22,7 @@ L’application peut également se connecter à des **agents locaux** et à des 
 
 ## À propos d’OpenHands Mobile
 
-L’application est un client mobile : elle se connecte à Open Analytics Cloud en priorité, tout en prenant en charge les agents locaux et les backends compatibles configurés par l’utilisateur. Elle ne remplace pas le service cloud ou l’agent local auquel elle se connecte.
+L’application est un client mobile : elle se connecte à OpenDevine Cloud en priorité, tout en prenant en charge les agents locaux et les backends compatibles configurés par l’utilisateur. Elle ne remplace pas le service cloud ou l’agent local auquel elle se connecte.
 
 ## Fonctions de l’application
 
@@ -33,7 +33,7 @@ L’application est un client mobile : elle se connecte à Open Analytics Cloud 
 - **Connect your way.** Use Relay for remote access, or connect over LAN, Tailscale, or your own endpoint. Self-host the infrastructure if you prefer.
 - **Use your language.** The app supports 19 interface languages, light and dark themes, and voice input with an optional transcription service.
 
-OpenHands Mobile se connecte en priorité à Open Analytics Cloud, et peut aussi utiliser les agents locaux que vous exécutez. Les fonctions disponibles dépendent du backend connecté.
+OpenHands Mobile se connecte en priorité à OpenDevine Cloud, et peut aussi utiliser les agents locaux que vous exécutez. Les fonctions disponibles dépendent du backend connecté.
 
 ## Get connected
 
