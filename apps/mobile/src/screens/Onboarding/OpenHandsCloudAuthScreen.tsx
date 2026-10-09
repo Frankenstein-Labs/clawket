@@ -11,7 +11,7 @@ import {
   pollOpenHandsCloudToken,
   startOpenHandsCloudDeviceFlow,
 } from '../../connection/openhands/device-flow';
-import { verifyOpenHandsCloudSession } from '../../connection/openhands/cloud-client';
+import { isUnauthorizedCloudError, verifyOpenHandsCloudSession } from '../../connection/openhands/cloud-client';
 import { useAppTheme } from '../../theme';
 import { FontSize, FontWeight, LineHeight, Radius, Space } from '../../theme/tokens';
 
@@ -35,7 +35,12 @@ export function OpenHandsCloudAuthScreen({ onBack }: Props): React.JSX.Element {
       try {
         await verifyOpenHandsCloudSession();
         if (mounted) setPhase('connected');
-      } catch {
+      } catch (error) {
+        // Only a rejected credential is discarded; an offline start keeps the token.
+        if (!isUnauthorizedCloudError(error)) {
+          if (mounted) setPhase('connected');
+          return;
+        }
         await openHandsCredentialStore.clearAccessToken();
         if (mounted) setMessage('Ta session OpenHands Cloud a expiré. Reconnecte-toi.');
       }

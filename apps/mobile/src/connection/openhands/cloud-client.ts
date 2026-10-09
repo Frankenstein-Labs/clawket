@@ -12,6 +12,27 @@ export type OpenHandsCloudApi = Readonly<{
   getOrganizations(): Promise<CloudOrganizationsResult>;
 }>;
 
+/** Carries the HTTP status so callers can tell an invalid token from a transient failure. */
+export class OpenHandsCloudRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`OpenHands Cloud request failed (${status}).`);
+    this.name = 'OpenHandsCloudRequestError';
+    this.status = status;
+  }
+
+  /** A 401/403 means the stored credential is no longer accepted and must be discarded. */
+  get isUnauthorized(): boolean {
+    return this.status === 401 || this.status === 403;
+  }
+}
+
+/** True only for an invalid stored credential, never for a transient network/server error. */
+export function isUnauthorizedCloudError(error: unknown): boolean {
+  return error instanceof OpenHandsCloudRequestError && error.isUnauthorized;
+}
+
 type CloudClientConstructor = new (options: {
   host: string;
   apiKey: string;
@@ -39,7 +60,7 @@ class FetchCloudClient implements OpenHandsCloudApi {
         'X-Session-API-Key': this.apiKey,
       },
     });
-    if (!response.ok) throw new Error(`OpenHands Cloud request failed (${response.status}).`);
+    if (!response.ok) throw new OpenHandsCloudRequestError(response.status);
     const data = await response.json() as { items?: unknown; current_org_id?: unknown };
     return {
       items: Array.isArray(data?.items)

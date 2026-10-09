@@ -1,27 +1,41 @@
-name: Android APK
-# Manual and branch-push build for the OpenHands mobile candidate.
+name: Android sideload APK
+
+# Sideload test build only. This is intentionally NOT the official store artifact.
+# It installs beside the Google Play app under a distinct application id
+# (com.p697.clawket.qa, see plugins/with-android-qa-variant.js) and is signed with
+# the throwaway Android debug key. The store app is produced separately through the
+# EAS `production` profile with the real upload keystore.
+#
+# Installing it over the store package is impossible by design (different signature
+# and application id), so it never threatens the installed app's signature or data.
+# Never advertise this APK as the store release.
 
 on:
-  push:
-    branches:
-      - manus/openhands-cloud-integration
   workflow_dispatch:
     inputs:
       ref:
         description: Git ref to build
         required: false
-        default: manus/openhands-cloud-integration
+        default: main
+        type: string
+      version_code:
+        description: Optional Android versionCode override (defaults to the value derived from package.json)
+        required: false
+        type: string
+      release_tag:
+        description: Optional tag; when set, the APK is published as a GitHub Release
+        required: false
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   EXPO_NO_DOCTOR: '1'
 
 jobs:
   build-apk:
-    name: Build Android APK
+    name: Build sideload APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -53,19 +67,49 @@ jobs:
 
       - name: Generate Android project
         working-directory: apps/mobile
+        env:
+          EXPO_ANDROID_VERSION_CODE: ${{ inputs.version_code }}
         run: npx expo prebuild --platform android --no-install
 
-      - name: Build release APK
+      - name: Build sideload APK under the QA application id
         working-directory: apps/mobile/android
-        # This is a sideloadable test build, not the production store release.
-        # Keep release optimization while using the project's explicit temporary
-        # debug signing escape hatch; no signing secret is stored in the repo.
-        run: ./gradlew app:assembleRelease -Pclawket.allowDebugReleaseSigning=true -x lint -x test --configure-on-demand --build-cache
+        # -Pclawket.qa=true gives the package the ".qa" suffix so it coexists with the
+        # store app; the debug signing escape hatch is safe because this build is not
+        # the store release and no signing secret is stored in the repository.
+        run: |
+          ./gradlew app:assembleRelease \
+            -Pclawket.qa=true \
+            -Pclawket.allowDebugReleaseSigning=true \
+            -x lint -x test --configure-on-demand --build-cache
 
-      - name: Upload APK
+      - name: Name the APK for the QA channel
+        id: apk
+        working-directory: apps/mobile/android/app/build/outputs/apk/release
+        run: |
+          set -euo pipefail
+          out="openhands-mobile-qa-${GITHUB_SHA::12}.apk"
+          cp app-release.apk "$out"
+          echo "path=$PWD/$out" >> "$GITHUB_OUTPUT"
+          echo "name=$out" >> "$GITHUB_OUTPUT"
+          echo "Built $out"
+
+      - name: Upload sideload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openhands-android-release-${{ github.sha }}
-          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          name: openhands-mobile-qa-${{ github.sha }}
+          path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish QA APK as a GitHub Release
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          gh release create "$TAG" "$APK" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "${{ github.sha }}" \
+            --title "OpenHands Mobile QA — $TAG" \
+            --notes "Sideload test build: application id com.p697.clawket.qa, signed with the Android debug key. It installs beside the Google Play app and is not the store release."
