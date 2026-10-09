@@ -15,6 +15,7 @@ import { openExternalUrl } from '../../utils/openExternalUrl';
 
 type Props = {
   onConnect: () => void;
+  onOpenCloud?: () => void;
   onClose?: () => void;
   onSettings?: () => void;
 };
@@ -47,7 +48,7 @@ const MARK_GLYPH = 0.54;
  * message, so the supported agents take the centre and the open-source repository sits under the
  * one action. Setup instructions belong to the next step.
  */
-export function WelcomeScreen({ onConnect, onClose, onSettings }: Props): React.JSX.Element {
+export function WelcomeScreen({ onConnect, onOpenCloud, onClose, onSettings }: Props): React.JSX.Element {
   const { t } = useTranslation('config');
   const { theme: { colors } } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -113,6 +114,14 @@ export function WelcomeScreen({ onConnect, onClose, onSettings }: Props): React.
         </View>
         <View style={styles.actions}>
           <Button testID="welcome-connect" size="lg" label={t('Connect an agent')} onPress={onConnect} />
+          {onOpenCloud ? (
+            <Button
+              testID="welcome-openhands-cloud"
+              label="Se connecter à OpenHands Cloud"
+              variant="text"
+              onPress={onOpenCloud}
+            />
+          ) : null}
           <Button
             testID="welcome-open-source"
             label={t('Clawket is open source')}

@@ -431,7 +431,14 @@ export function OnboardingRoute({
   }
 
   if (!setupVisible && !operation.active && !operation.errorCode && !route.params?.pairingUrl) {
-    return <WelcomeScreen onSettings={() => navigation.navigate('AccountSettings')} onConnect={() => setOpenHandsAuthVisible(true)} onClose={close} />;
+    return (
+      <WelcomeScreen
+        onSettings={() => navigation.navigate('AccountSettings')}
+        onConnect={() => setSetupVisible(true)}
+        onOpenCloud={() => setOpenHandsAuthVisible(true)}
+        onClose={close}
+      />
+    );
   }
 
   return (

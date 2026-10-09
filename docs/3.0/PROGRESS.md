@@ -1,5 +1,7 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-09 OpenHands Cloud integration audit and fix. The existing device-flow PR stored a bearer token but never used it through the OpenHands SDK; the mobile app now wraps `CloudClient`, verifies the stored token with `getOrganizations()` before showing a connected state, clears expired credentials, and keeps the token inside SecureStore/SDK boundaries. The welcome screen no longer hides local OpenClaw/Hermes/Codex/Claude Code/Pi pairing behind Cloud auth: pairing remains the primary action and OpenHands Cloud is an explicit secondary action. Added focused client, credential and welcome regressions; 23 focused tests and mobile typecheck pass. No cloud deployment, release build, or production configuration change.
+
 - 2026-10-07 Hermes Relay 授权生产部署完成。
   - 鉴权修复PR216合入`4a4a5b30`，CI37596077737十一项全绿含Windows/macOS；固定源码与main消费路径一致。Hermes Relay最终版本`b7d2c87e-1afa-4954-9cc1-6a8c0e458836` / 源码hash`d66d765f…`读回一致；绑定、迁移tag、日志与三项原服务锚点保持，无新migration/配置或其他服务部署。
   - 窄验证256项、v1 44项、实时线上导出四用例28阶段通过，两次部署各跑44项v1门禁。生产隔离配对验证手机status与双向错角色WS 401、旧客户端130秒空闲/保存令牌重连、首次接管4001/4011与三次409保护、health/目录读取；后端回复受控，不声明模型或手机UI验收。

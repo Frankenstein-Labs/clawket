@@ -12,6 +12,7 @@ jest.mock('react-native', () => {
   );
   return {
     Platform: { OS: 'ios', select: (options: Record<string, unknown>) => options.ios ?? options.default },
+    Image: host('Image'),
     ScrollView: host('ScrollView'),
     Pressable: host('Pressable'),
     Text: host('Text'),
@@ -39,6 +40,8 @@ jest.mock('react-native-reanimated', () => {
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }),
 }));
+
+jest.mock('../../../assets/openhands/openhands-mark.png', () => 'openhands-mark');
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -129,6 +132,14 @@ describe('WelcomeScreen', () => {
 
     fireEvent.press(view.getByTestId('welcome-connect'));
     expect(onConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps OpenHands Cloud as an explicit secondary connection path', () => {
+    const onOpenCloud = jest.fn();
+    const view = render(<WelcomeScreen onConnect={jest.fn()} onOpenCloud={onOpenCloud} />);
+
+    fireEvent.press(view.getByTestId('welcome-openhands-cloud'));
+    expect(onOpenCloud).toHaveBeenCalledTimes(1);
   });
 
   it('opens the open-source repository under the action', () => {
