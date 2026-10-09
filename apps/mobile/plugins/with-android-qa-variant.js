@@ -1,13 +1,13 @@
 const { withAndroidManifest, withAppBuildGradle } = require('expo/config-plugins');
 
 // Local QA builds (-Pclawket.qa=true or CLAWKET_ANDROID_QA=1) install beside the store app:
-// the application ID gains a .qa suffix and the launcher label reads "Clawket QA". The
+// the application ID gains a .qa suffix and the launcher label reads "OpenHands QA". The
 // Kotlin namespace is unchanged, so generated sources and widget providers keep their package.
 const QA_PROPERTY_LINE = 'def clawketQaBuild = (findProperty("clawket.qa") ?: System.getenv("CLAWKET_ANDROID_QA") ?: "false").toString().toBoolean()';
 const QA_DEFAULT_CONFIG_BLOCK = `        if (clawketQaBuild) {
             applicationIdSuffix ".qa"
         }
-        manifestPlaceholders.put("clawketAppLabel", clawketQaBuild ? "Clawket QA" : "@string/app_name")`;
+        manifestPlaceholders.put("clawketAppLabel", clawketQaBuild ? "OpenHands QA" : "@string/app_name")`;
 const APPLICATION_ID_LINE = /^ {8}applicationId ['"][^'"]+['"]\n/m;
 const STORE_LABEL = '@string/app_name';
 const QA_LABEL_PLACEHOLDER = '${clawketAppLabel}';
