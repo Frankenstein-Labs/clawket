@@ -17,7 +17,7 @@ import {
 
 describe('temporary legacy gateway facade', () => {
   it('keeps the exact legacy backend and transport guards', () => {
-    for (const value of ['openclaw', 'hermes', 'pi', 'codex', 'claude-code']) expect(isGatewayBackendKind(value)).toBe(true);
+    for (const value of ['openclaw', 'hermes', 'openhands-cloud', 'pi', 'codex', 'claude-code']) expect(isGatewayBackendKind(value)).toBe(true);
     for (const value of ['local', 'tailscale', 'cloudflare', 'custom', 'relay']) {
       expect(isGatewayTransportKind(value)).toBe(true);
     }
@@ -49,11 +49,18 @@ describe('temporary legacy gateway facade', () => {
     expect(getGatewayBackendDescriptor('openclaw')).toMatchObject({ kind: 'openclaw', label: 'OpenClaw' });
     expect(getGatewayBackendDescriptor({ backendKind: 'hermes' })).toMatchObject({ kind: 'hermes', label: 'Hermes' });
     expect(getGatewayBackendDescriptor('pi')).toMatchObject({ kind: 'pi', label: 'Pi' });
+    expect(getGatewayBackendDescriptor('openhands-cloud')).toMatchObject({ kind: 'openhands-cloud', label: 'OpenHands Cloud' });
     expect(getGatewayBackendCapabilities('hermes')).toMatchObject({
       chatAbort: false,
       chatAttachments: false,
       consoleCronCreate: false,
       consoleAgentSessionsBoard: false,
+    });
+    expect(getGatewayBackendCapabilities('openhands-cloud')).toMatchObject({
+      gatewayConnection: false,
+      modelCatalog: true,
+      modelSelection: true,
+      chatAttachments: true,
     });
     expect(Object.values(getGatewayBackendCapabilities('openclaw')).every(Boolean)).toBe(true);
   });
@@ -69,6 +76,8 @@ describe('temporary legacy gateway facade', () => {
     expect(getGatewayThinkingLevels('hermes')).not.toContain('adaptive');
     expect(resolveGlobalMainSessionKey('openclaw')).toBeNull();
     expect(resolveGlobalMainSessionKey('hermes')).toBe('main');
+    expect(resolveGlobalMainSessionKey('openhands-cloud')).toBe('main');
+    expect(resolveGlobalMainSessionKey({ backendKind: 'openhands-cloud' })).toBe('main');
     expect(resolveGlobalMainSessionKey(null)).toBeNull();
   });
 
@@ -84,6 +93,9 @@ describe('temporary legacy gateway facade', () => {
   it('builds backend-aware default names with and without a parseable host', () => {
     expect(buildGatewayDefaultName({ backendKind: 'hermes', url: 'ws://bridge.test/ws', index: 1 })).toBe(
       'Hermes (bridge.test)',
+    );
+    expect(buildGatewayDefaultName({ backendKind: 'openhands-cloud', url: 'https://app.all-hands.dev', index: 5 })).toBe(
+      'OpenHands Cloud (app.all-hands.dev)',
     );
     expect(buildGatewayDefaultName({ transportKind: 'relay', url: 'wss://relay.test/v1', index: 2 })).toBe(
       'Relay (relay.test)',

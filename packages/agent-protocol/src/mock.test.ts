@@ -275,6 +275,22 @@ describe('createMockAdapter', () => {
     expect(sessionSnapshots.length).toBeGreaterThan(0);
   });
 
+  it('omits session mutation helpers when their capabilities are disabled', () => {
+    const adapter = createMockAdapter({
+      connection,
+      capabilities: {
+        sessionCreate: false,
+        sessionRename: false,
+        sessionReset: false,
+        sessionDelete: false,
+      },
+    });
+    expect(adapter.createSession).toBeUndefined();
+    expect(adapter.patchSession).toBeUndefined();
+    expect(adapter.resetSession).toBeUndefined();
+    expect(adapter.deleteSession).toBeUndefined();
+  });
+
   it('materializes every supported management group and omits unsupported groups', () => {
     const openclaw = createMockAdapter(fixture());
     expect(Object.keys(openclaw.management ?? {}).sort()).toEqual([
