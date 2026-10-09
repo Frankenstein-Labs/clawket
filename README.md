@@ -11,15 +11,31 @@ OpenHands Mobile a été créée principalement pour donner accès à **OpenDevi
 L’application peut également se connecter à des **agents locaux** et à des backends exécutés sur votre propre ordinateur ou votre réseau. La connexion à OpenDevine Cloud est son usage principal ; les connexions locales offrent une solution complémentaire pour les utilisateurs qui souhaitent conserver leurs agents chez eux.
 
 <p align="center">
-  <a href="https://github.com/Frankenstein-Labs/clawket/actions/runs/37878687647"><strong>⬇ Télécharger OpenHands Mobile pour Android (APK release)</strong></a>
+  <a href="https://github.com/Frankenstein-Labs/clawket/releases"><strong>⬇ Télécharger l’APK de test Android (canal QA)</strong></a>
 </p>
 
-- [Télécharger le nouvel APK Android release](https://github.com/Frankenstein-Labs/clawket/actions/runs/37878687647)
+- [Télécharger l’APK de test QA](https://github.com/Frankenstein-Labs/clawket/releases) (canal QA, voir ci-dessous)
 - [Voir toutes les versions](https://github.com/Frankenstein-Labs/clawket/releases)
 - [Consulter le projet OpenHands](https://github.com/OpenHands/OpenHands)
 
-> **Téléchargement :** ouvrez l’exécution GitHub Actions, puis téléchargez l’artefact `openhands-android-release-9fbbbc1716b79ad4312942c18d4296ae32be96e5` dans la section **Artifacts**.
-> **Installation Android :** après le téléchargement, Android peut demander l’autorisation d’installer des applications provenant de cette source. Activez cette autorisation dans les réglages de votre appareil si nécessaire.
+### Quelle version installer ? Deux canaux distincts
+
+Il existe **deux canaux**, et ils ne remplacent jamais l’un l’autre :
+
+| Canal | Identifiant d’application | Signature | Distribution |
+| --- | --- | --- | --- |
+| **Officiel** | `com.p697.clawket` | clé de signature « upload » officielle | Google Play (profil EAS `production`) |
+| **Test (QA / sideload)** | `com.p697.clawket.qa` | clé **debug** Android (jetable) | APK GitHub Releases / Actions |
+
+L’APK de test porte l’identifiant `com.p697.clawket.qa` et est signé avec la clé **debug** Android, qui est publique et jetable. Il **coexiste** avec l’application du Play Store : les deux s’installent côte à côte, comme deux applications différentes. Aucun des deux ne peut écraser ou désinstaller l’autre, et aucune donnée n’est perdue.
+
+> **À ne pas faire :** installer l’APK de test *à la place* de l’application officielle. C’est impossible par conception (identifiant et signature différents) ; Android affichera *« Application non installée »*. Pour passer d’un canal à l’autre, installez l’application de l’autre canal — vous aurez alors les deux.
+>
+> **Si vous voyez *« Application non installée »* ou `INSTALL_FAILED_UPDATE_INCOMPATIBLE` :** vous essayez probablement d’installer un paquet portant le même identifiant qu’une version déjà installée signée différemment (par exemple un ancien APK signé debug par-dessus la version Play). C’est le conflit de signature attendu. Utilisez l’APK du canal QA (`.qa`), ou désinstallez d’abord l’application du même identifiant.
+>
+> **Installation Android :** Android peut demander l’autorisation d’installer des applications provenant de cette source ; activez-la dans les réglages de votre appareil si nécessaire.
+
+La version **officielle** est construite et signée par le pipeline EAS (`production`) avec le vrai keystore ; l’APK de test n’est **pas** l’artefact du Play Store. Cette séparation est vérifiée automatiquement par `apps/mobile/scripts/check-android-apk-workflow.test.mjs`.
 
 ## À propos d’OpenHands Mobile
 
@@ -38,7 +54,7 @@ OpenHands Mobile se connecte en priorité à OpenDevine Cloud, et peut aussi uti
 
 ## Get connected
 
-Install OpenHands Mobile using the Android APK link above. On the computer running your agent, install the Bridge CLI (Node.js 20.3+):
+Install OpenHands Mobile from Google Play for the official app, or use the sideload QA APK link above to test a local build beside it. On the computer running your agent, install the Bridge CLI (Node.js 20.3+):
 
 ```bash
 npm install -g @p697/clawket
