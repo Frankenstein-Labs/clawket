@@ -29,7 +29,9 @@ export function OpenHandsCloudAuthScreen({ onBack, onConnected }: Props): React.
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Redirect the user exactly once, as soon as the credential is usable.
+  // Redirect once per connection attempt: resetting at the start of every
+  // attempt (and whenever one is abandoned) keeps a retry after a disconnect,
+  // cancel, or failed handoff able to reach `onConnected` again.
   const onConnectedRef = useRef(onConnected);
   onConnectedRef.current = onConnected;
   const notifyConnected = useCallback(() => {
@@ -74,6 +76,7 @@ export function OpenHandsCloudAuthScreen({ onBack, onConnected }: Props): React.
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
+    connectedNotifiedRef.current = false;
     setAuthorization(null);
     setMessage(null);
     setCopied(false);
@@ -123,6 +126,7 @@ export function OpenHandsCloudAuthScreen({ onBack, onConnected }: Props): React.
   const cancel = useCallback(() => {
     controllerRef.current?.abort();
     controllerRef.current = null;
+    connectedNotifiedRef.current = false;
     setAuthorization(null);
     setMessage(null);
     setPhase('idle');
@@ -141,6 +145,7 @@ export function OpenHandsCloudAuthScreen({ onBack, onConnected }: Props): React.
 
   const disconnect = useCallback(async () => {
     controllerRef.current?.abort();
+    connectedNotifiedRef.current = false;
     await openHandsCredentialStore.clearAccessToken();
     setAuthorization(null);
     setMessage(null);
