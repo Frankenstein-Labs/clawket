@@ -25,9 +25,28 @@ const mockShowNoticeAlert = jest.fn();
 
 jest.mock('./WelcomeScreen', () => ({ WelcomeScreen: () => null }));
 
+// OpenHandsCloudAuthScreen renders lucide icons, which pull in react-native-svg. Mock the icon
+// module directly rather than trying to satisfy svg's Touchable/processColor dependencies
+// (see WelcomeScreen.test.tsx for the same pattern).
+jest.mock('lucide-react-native', () => ({
+  ArrowLeft: () => null,
+  ExternalLink: () => null,
+}));
+
+// OpenHandsCloudAuthScreen pulls in the OpenHands device-flow SDK, which ships ESM-only
+// imports that Jest cannot transform. The route only forwards the screen, so stub it.
+jest.mock('./OpenHandsCloudAuthScreen', () => ({
+  OpenHandsCloudAuthScreen: () => null,
+}));
+
+// The repo's `__mocks__/react-native.ts` only provides app-state helpers, not host components,
+// so this suite supplies the minimal View host it renders (Platform/StyleSheet are read at
+// module load by theme tokens and the OnboardingScreen stub).
 jest.mock('react-native', () => {
   const ReactRuntime = require('react');
   return {
+    Platform: { OS: 'ios', select: (values: Record<string, unknown>) => values.ios ?? values.default },
+    StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style, hairlineWidth: 1 },
     View: ({ children, ...props }: { children?: React.ReactNode }) => ReactRuntime.createElement(
       'View',
       props,
@@ -78,11 +97,10 @@ jest.mock('../../contexts/ProPaywallContext', () => ({
 
 jest.mock('./OnboardingScreen', () => {
   const ReactRuntime = require('react');
-  const { View } = require('react-native');
   return {
     OnboardingScreen: (props: OnboardingScreenProps) => {
       mockScreenProps = props;
-      return ReactRuntime.createElement(View, { testID: 'onboarding-route-view' });
+      return ReactRuntime.createElement('View', { testID: 'onboarding-route-view' });
     },
   };
 });
