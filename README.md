@@ -31,6 +31,14 @@ Clawket is an open-source iOS and Android companion for [OpenClaw](https://githu
 
 The screenshots show the new 3.0 interface. Store availability may differ while the release is under review.
 
+## Download the Android app
+
+<p>
+  <a href="https://github.com/Frankenstein-Labs/clawket/releases/download/android-build-37871791148/app-debug.apk"><strong>⬇ Download Clawket for Android (APK)</strong></a>
+</p>
+
+You can install the official Android build directly from the [GitHub Release page](https://github.com/Frankenstein-Labs/clawket/releases/tag/android-build-37871791148). If Android asks for permission, allow installation from this source in your device settings. For the latest store version, use the Google Play link above.
+
 ## What you can do
 
 - **Keep your agents together.** One roster for agents across your connections, with recent activity and quick access to conversations.
