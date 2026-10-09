@@ -328,7 +328,6 @@
   "OpenClaw, Hermes, Codex and more": "OpenClaw وHermes وCodex وغيرها",
   "Create another agent on {{connection}}": "إنشاء وكيل آخر على {{connection}}",
   "Create another agent on this connection": "إنشاء وكيل آخر على هذا الاتصال",
-  "Other": "أخرى",
   "Diagnosing — this may take a few seconds…": "جارٍ التشخيص، قد يستغرق ذلك بضع ثوانٍ…",
   "Run diagnostics again": "إعادة التشخيص",
   "Edit OpenClaw config from your phone": "عدّل إعدادات OpenClaw من هاتفك",

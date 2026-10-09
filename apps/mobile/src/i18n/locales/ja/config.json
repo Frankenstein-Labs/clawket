@@ -328,7 +328,6 @@
   "OpenClaw, Hermes, Codex and more": "OpenClaw、Hermes、Codex など",
   "Create another agent on {{connection}}": "{{connection}} にエージェントを追加",
   "Create another agent on this connection": "この接続にエージェントを追加",
-  "Other": "その他",
   "Diagnosing — this may take a few seconds…": "診断中です。数秒かかる場合があります…",
   "Run diagnostics again": "再診断",
   "Edit OpenClaw config from your phone": "スマートフォンから OpenClaw 設定を編集",

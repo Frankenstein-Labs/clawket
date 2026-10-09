@@ -328,7 +328,6 @@
   "OpenClaw, Hermes, Codex and more": "OpenClaw, Hermes, Codex และอื่น ๆ",
   "Create another agent on {{connection}}": "สร้าง Agent อีกตัวบน {{connection}}",
   "Create another agent on this connection": "สร้าง Agent อีกตัวในการเชื่อมต่อนี้",
-  "Other": "อื่นๆ",
   "Diagnosing — this may take a few seconds…": "กำลังวินิจฉัย อาจใช้เวลาสักครู่…",
   "Run diagnostics again": "วินิจฉัยอีกครั้ง",
   "Edit OpenClaw config from your phone": "แก้ไขการตั้งค่า OpenClaw จากมือถือของคุณ",
