@@ -1,6 +1,9 @@
 name: Android APK
 
 on:
+  push:
+    branches:
+      - manus/openhands-cloud-integration
   workflow_dispatch:
     inputs:
       ref:
