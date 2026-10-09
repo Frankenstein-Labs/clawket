@@ -57,7 +57,10 @@ jobs:
 
       - name: Build release APK
         working-directory: apps/mobile/android
-        run: ./gradlew app:assembleRelease -x lint -x test --configure-on-demand --build-cache
+        # This is a sideloadable test build, not the production store release.
+        # Keep release optimization while using the project's explicit temporary
+        # debug signing escape hatch; no signing secret is stored in the repo.
+        run: ./gradlew app:assembleRelease -Pclawket.allowDebugReleaseSigning=true -x lint -x test --configure-on-demand --build-cache
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
