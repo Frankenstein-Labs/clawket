@@ -88,11 +88,7 @@ jobs:
         if: ${{ matrix.runDesktop }}
       - run: npm run bridge:test:required
         if: ${{ matrix.runDesktop }}
-      - run: node --test scripts/bridge/local-model-supervisor.test.mjs
-        if: ${{ matrix.runDesktop }}
       - run: npm run test:compat
-        if: ${{ matrix.runDesktop }}
-      - run: npx vitest run tests/integration/local-model.e2e.test.ts
         if: ${{ matrix.runDesktop }}
 
   # `npm run check:required` split into parallel jobs; the gate job below keeps the required name.

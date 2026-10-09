@@ -193,7 +193,7 @@ export function parseQRPayload(raw: string): QRScanResult | null {
     return {
       url: relayUrl,
       token: token || undefined,
-      ...(payload.b === 'local-model' || payload.b === 'pi' || payload.b === 'codex' || payload.b === 'claude-code' ? { backendKind: payload.b as 'pi' | 'codex' | 'claude-code' | 'local-model', transportKind: 'relay' as const } : {}),
+      ...(payload.b === 'pi' || payload.b === 'codex' || payload.b === 'claude-code' ? { backendKind: payload.b as 'pi' | 'codex' | 'claude-code', transportKind: 'relay' as const } : {}),
       password: password || undefined,
       mode: 'relay',
       relay: {

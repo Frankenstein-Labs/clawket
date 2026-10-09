@@ -303,10 +303,11 @@ export const CAPABILITY_MATRIX: Record<BackendKind, Capabilities> = {
     models: true, modelPerSession: true, thinkingLevels: true, skills: true, agentQuestions: true, sessionBranch: true },
   openclaw: OPENCLAW_CAPABILITIES,
   hermes: HERMES_CAPABILITIES,
-  'local-model': {
+  'openhands-cloud': {
     ...MINIMAL_CHAT_CAPABILITIES,
     chat: true, abort: true, history: true, attachments: true,
-    models: true, bridgeRemoteUpdate: true,
+    sessions: true, sessionCreate: true, sessionDelete: true,
+    models: true, modelPerSession: true,
   },
 };
 

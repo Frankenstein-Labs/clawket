@@ -12,10 +12,13 @@ import { OpenClawAdapter } from './openclaw';
 import { CodexAdapter } from './codex';
 import { ClaudeCodeAdapter } from './claude-code';
 import { PiAdapter } from './pi';
-import { LocalModelAdapter } from './local-model';
+import { OpenHandsCloudAdapter } from './openhands-cloud';
+import type { OpenHandsCloudApi } from '../openhands/cloud-client';
 
 type CreateConnectionAdapterOptions = ConnectionAdapterFactoryContext & Readonly<{
   gateway?: GatewayClient;
+  /** Test seam: supplies an authenticated Cloud client without the device credential. */
+  cloudClientFactory?: () => Promise<OpenHandsCloudApi>;
 }>;
 
 /**
@@ -32,8 +35,11 @@ export function createConnectionAdapter(
     case 'claude-code': return new ClaudeCodeAdapter(record, { isFreeSlot });
     case 'codex': return new CodexAdapter(record, { isFreeSlot });
     case 'pi': return new PiAdapter(record, { isFreeSlot });
-    case 'local-model':
-      return new LocalModelAdapter(record, { isFreeSlot });
+    case 'openhands-cloud':
+      return new OpenHandsCloudAdapter(record, {
+        isFreeSlot,
+        ...(options.cloudClientFactory ? { clientFactory: options.cloudClientFactory } : {}),
+      });
     case 'openclaw':
       return new OpenClawAdapter(record, {
         isFreeSlot,

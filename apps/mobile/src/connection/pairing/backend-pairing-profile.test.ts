@@ -38,7 +38,7 @@ jest.mock('../../services/analytics/events', () => ({
 
 function createRuntime(
   activeConnectionId: string | null = 'active-connection',
-  backendKind: 'openclaw' | 'hermes' | 'local-model' = 'openclaw',
+  backendKind: 'openclaw' | 'hermes' = 'openclaw',
 ) {
   return {
     getSnapshot: jest.fn(() => ({
@@ -103,61 +103,6 @@ describe('backend pairing profiles', () => {
     expect(mockPairingFinished).not.toHaveBeenCalled();
   });
 
-  it('pairs a local model code in Production without Debug Mode through its dedicated Registry', async () => {
-    const runtime = createRuntime('local-model-connection', 'local-model');
-    const secureInvitation = createSecureInvitation();
-
-    await expect(connectBackendPairingCode({
-      backendKind: 'local-model',
-      environment: 'production',
-      debugMode: false,
-      runtime,
-      pairingCode: '001234',
-      secureInvitation,
-    })).resolves.toEqual({
-      backendKind: 'local-model',
-      connectionId: 'local-model-connection',
-    });
-
-    // Neither the selected environment nor Debug Mode reaches the invitation: the Registry is fixed.
-    expect(secureInvitation.connectCode).toHaveBeenCalledWith({
-      serverUrl: 'https://local-model-registry.clawket.ai',
-      pairingCode: '001234',
-      expectedBackendKind: 'local-model',
-    });
-    expect(mockPairingFinished).not.toHaveBeenCalled();
-  });
-
-  it('accepts a local model link only from the dedicated Registry, in any environment', async () => {
-    const runtime = createRuntime('local-model-link-connection', 'local-model');
-    const secureInvitation = createSecureInvitation();
-    const url = `https://clawket-local-model-registry-preview.clawket.workers.dev/pair/ps_test#k=${'A'.repeat(43)}`;
-
-    await expect(connectBackendPairingLink({
-      backendKind: 'local-model',
-      environment: 'production',
-      debugMode: false,
-      runtime,
-      url,
-      secureInvitation,
-    })).resolves.toEqual({
-      backendKind: 'local-model',
-      connectionId: 'local-model-link-connection',
-    });
-    expect(secureInvitation.connectLink).toHaveBeenCalledWith(url, { expectedBackendKind: 'local-model' });
-
-    // An OpenClaw Registry link cannot be smuggled in as a local model pairing.
-    secureInvitation.connectLink.mockClear();
-    await expect(connectBackendPairingLink({
-      backendKind: 'local-model',
-      environment: 'preview',
-      debugMode: true,
-      runtime,
-      url: `https://clawket-registry-preview.clawket.workers.dev/pair/ps_test#k=${'A'.repeat(43)}`,
-      secureInvitation,
-    })).rejects.toMatchObject({ code: 'unsupported' });
-    expect(secureInvitation.connectLink).not.toHaveBeenCalled();
-  });
 
   it.each(['code', 'link'] as const)('does not invent an expiry after handled %s feedback or cancellation', async (method) => {
     const secureInvitation = createSecureInvitation();
@@ -433,7 +378,7 @@ describe('backend pairing profiles', () => {
     }));
   });
 
-  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'] as const)(
+  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const)(
     'accepts the first matching parsed %s QR without needing a warm saved connection', async (backendKind) => {
       const raw = backendKind === 'hermes'
         ? { version: 1, kind: 'clawket_hermes_pair', server: 'https://custom.example', bridgeId: 'bridge', accessCode: 'synthetic' }

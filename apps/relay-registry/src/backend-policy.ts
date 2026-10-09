@@ -1,4 +1,4 @@
-export type RegistryBackend = 'openclaw' | 'hermes' | 'local-model' | 'pi' | 'codex' | 'claude-code';
+export type RegistryBackend = 'openclaw' | 'hermes' | 'pi' | 'codex' | 'claude-code';
 
 export type RegistryKvBinding = 'ROUTES_KV' | 'HERMES_ROUTES_KV';
 export type RegistryPrincipalParam = 'gatewayId' | 'bridgeId';
@@ -73,11 +73,6 @@ export const HERMES_REGISTRY_POLICY: RegistryBackendPolicy = {
   },
 };
 
-// Same secure pairing wire protocol; deployed with isolated KV and service bindings.
-export const LOCAL_MODEL_REGISTRY_POLICY: RegistryBackendPolicy = {
-  ...OPENCLAW_REGISTRY_POLICY, backend: 'local-model',
-};
-
 export const CLAUDE_CODE_REGISTRY_POLICY: RegistryBackendPolicy = { ...OPENCLAW_REGISTRY_POLICY, backend: 'claude-code' };
 
 export const CODEX_REGISTRY_POLICY: RegistryBackendPolicy = { ...OPENCLAW_REGISTRY_POLICY, backend: 'codex' };
@@ -90,7 +85,6 @@ export function resolveRegistryBackendPolicy(value: string | undefined): Registr
   if (value === 'claude-code') return CLAUDE_CODE_REGISTRY_POLICY;
   if (value === 'codex') return CODEX_REGISTRY_POLICY;
   if (value === 'pi') return PI_REGISTRY_POLICY;
-  if (value === 'local-model') return LOCAL_MODEL_REGISTRY_POLICY;
   if (value === 'hermes') return HERMES_REGISTRY_POLICY;
   throw new Error(`Unsupported RELAY_BACKEND: ${value}`);
 }

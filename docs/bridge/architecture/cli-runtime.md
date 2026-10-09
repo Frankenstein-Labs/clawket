@@ -34,7 +34,7 @@ Pairing codes and QR images remain in terminal output. OpenClaw pairing invitati
 |---|---|
 | `pair` / `pair local` | Preserve automatic OpenClaw/Hermes pairing; `--backend` selects an additional supported backend. |
 | `pair choose` | Interactive installed-backend discovery, read-only until selection; not a runtime health check. |
-| `status` | Compact local-state rows for the shared services and all saved Codex/Claude Code/Pi project/device/environment configurations. Include saved local-model state as unverified. |
+| `status` | Compact local-state rows for the shared services and all saved Codex/Claude Code/Pi project/device/environment configurations. |
 | `doctor` | Same inventory with findings and remedies; missing/invalid/stopped/unverified selected state returns nonzero. No offline native process or SDK startup. |
 | `logs` | All saved backend logs, including legacy stderr; label each source. `--lines 1..2000`, `--last`, `--follow`, `--verbose`, `--json`. |
 | `start` / `install` | Existing OpenClaw/Hermes shared service behavior. Codex/Claude Code/Pi `start` restores only their explicitly selected saved configuration. |

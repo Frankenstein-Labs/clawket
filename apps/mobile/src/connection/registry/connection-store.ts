@@ -26,7 +26,7 @@ const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 
-const BACKEND_KINDS = new Set<BackendKind>(['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code']);
+const BACKEND_KINDS = new Set<BackendKind>(['openclaw', 'hermes', 'pi', 'codex', 'claude-code', 'openhands-cloud']);
 const TRANSPORT_KINDS = new Set<TransportKind>([
   'relay',
   'local',
@@ -38,10 +38,10 @@ const TRANSPORT_KINDS = new Set<TransportKind>([
 const LEGACY_TRANSPORT_NORMALIZERS: Record<BackendKind, (value: TransportKind) => TransportKind> = {
   openclaw: (value) => value,
   hermes: (value) => value,
-  'local-model': value => value,
   pi: value => value,
   codex: value => value,
   'claude-code': value => value,
+  'openhands-cloud': value => value,
 };
 
 type RegistryState = {
@@ -257,7 +257,13 @@ function normalizeConnectionRecord(value: unknown): ConnectionRecord | null {
     ...(relay ? { relay: { ...relay, serverUrl: canonicalizeOfficialRelayUrl(relay.serverUrl, String(value.backendKind), environment) } } : {}),
     ...(hermes ? { hermes } : {}),
     ...(typeof value.debugMode === 'boolean' ? { debugMode: value.debugMode } : {}),
+    ...normalizeCloudOrgId(value.cloudOrgId),
   };
+}
+
+function normalizeCloudOrgId(value: unknown): Pick<ConnectionRecord, 'cloudOrgId'> {
+  if (value === null) return { cloudOrgId: null };
+  return typeof value === 'string' && value.trim() ? { cloudOrgId: value.trim() } : {};
 }
 
 function normalizeRegistryState(value: unknown): RegistryState | null {
@@ -481,6 +487,10 @@ function findConnectionIdentityIndex(
       && record.relay?.gatewayId.trim() === gatewayId
     ));
   }
+  if (input.backendKind === 'openhands-cloud') {
+    const orgId = input.cloudOrgId?.trim() ?? '';
+    return records.findIndex((record) => record.backendKind === 'openhands-cloud' && (record.cloudOrgId?.trim() ?? '') === orgId);
+  }
   if (input.backendKind === 'openclaw' || input.backendKind === 'hermes' || input.backendKind === 'pi' || input.backendKind === 'codex' || input.backendKind === 'claude-code') {
     const endpointUrl = normalizeConnectionIdentityUrl(
       input.backendKind === 'hermes' ? input.hermes?.bridgeUrl ?? input.url : input.url,
@@ -514,6 +524,7 @@ function mergeConnectionRecord(
     relay: mergeConnectionRelay(existing.relay, input.relay),
     hermes: mergeConnectionHermes(existing.hermes, input.hermes),
     debugMode: input.debugMode ?? existing.debugMode,
+    cloudOrgId: input.cloudOrgId ?? existing.cloudOrgId,
     id: existing.id,
     createdAt: existing.createdAt,
   });

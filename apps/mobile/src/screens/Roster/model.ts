@@ -189,14 +189,14 @@ export function resolveRosterBackendMarks(rows: ReadonlyArray<Pick<RosterDisplay
   return new Set(rows.map((row) => row.backendKind)).size >= 2;
 }
 
-/** Product names are brand names in every language; the local model has no brand. */
+/** Product names are brand names in every language. */
 const BACKEND_NAMES: Readonly<Record<BackendKind, string | null>> = {
   openclaw: 'OpenClaw',
   hermes: 'Hermes',
   pi: 'Pi',
   codex: 'Codex',
   'claude-code': 'Claude Code',
-  'local-model': null,
+  'openhands-cloud': 'OpenHands Cloud',
 };
 
 /**

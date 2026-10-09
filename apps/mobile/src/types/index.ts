@@ -39,7 +39,7 @@ export interface OpenClawBootstrapConfig {
   access?: 'full' | 'limited' | 'node';
 }
 
-export type GatewayBackendKind = 'openclaw' | 'hermes' | 'local-model' | 'pi' | 'codex' | 'claude-code';
+export type GatewayBackendKind = 'openclaw' | 'hermes' | 'pi' | 'codex' | 'claude-code' | 'openhands-cloud';
 export type GatewayTransportKind = 'local' | 'tailscale' | 'cloudflare' | 'custom' | 'relay';
 export type RelayServiceEnvironment = 'production' | 'preview';
 export type GatewayMode = GatewayTransportKind | 'hermes';

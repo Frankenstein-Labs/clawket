@@ -16,19 +16,17 @@ describe('gateway scan Relay claim', () => {
     jest.clearAllMocks();
   });
 
-  it('keeps local-model identity through compact QR parsing, Preview validation and claim', async () => {
-    const serverUrl = 'https://clawket-local-model-registry-preview.clawket.workers.dev';
-    const payload = parseQRPayload(JSON.stringify({ v: 2, k: 'cp', b: 'local-model', s: serverUrl, g: 'gw_123', a: 'ABC234' }))!;
+  it('keeps Pi identity through compact QR parsing, Preview validation and claim', async () => {
+    const serverUrl = 'https://clawket-pi-registry-preview.clawket.workers.dev';
+    const payload = parseQRPayload(JSON.stringify({ v: 2, k: 'cp', b: 'pi', s: serverUrl, g: 'gw_123', a: 'ABC234' }))!;
     expect(payload).toBeTruthy();
-    expect(resolvePairingPayloadBackend(payload)).toBe('local-model');
-    expect(assessPairingPayload({ payload, expectedBackendKind: 'local-model', selectedEnvironment: 'preview', debugMode: true })).toEqual({kind:'accepted',backendKind:'local-model'});
+    expect(resolvePairingPayloadBackend(payload)).toBe('pi');
+    expect(assessPairingPayload({ payload, expectedBackendKind: 'pi', selectedEnvironment: 'preview', debugMode: true })).toEqual({kind:'accepted',backendKind:'pi'});
     expect(assessPairingPayload({ payload, expectedBackendKind: 'openclaw', selectedEnvironment: 'preview', debugMode: true }).kind).toBe('rejected');
-    // The local-model Registry is environment-independent: Production without Debug Mode pairs too.
-    expect(assessPairingPayload({ payload, expectedBackendKind: 'local-model', selectedEnvironment: 'production', debugMode: false })).toEqual({kind:'accepted',backendKind:'local-model'});
-    (RelayPairingService.claim as jest.Mock).mockResolvedValue({gatewayId:'gw_123',relayUrl:'wss://clawket-local-model-relay-preview.clawket.workers.dev/ws',clientToken:'gct_test'});
+    (RelayPairingService.claim as jest.Mock).mockResolvedValue({gatewayId:'gw_123',relayUrl:'wss://clawket-pi-relay-preview.clawket.workers.dev/ws',clientToken:'gct_test'});
     const claimed = await claimRelayPairing(payload, {current:new Map()});
-    expect(claimed.backendKind).toBe('local-model');
-    expect(resolvePairingPayloadBackend(claimed)).toBe('local-model');
+    expect(claimed.backendKind).toBe('pi');
+    expect(resolvePairingPayloadBackend(claimed)).toBe('pi');
   });
 
   it('returns an already claimed or direct QR payload unchanged', async () => {

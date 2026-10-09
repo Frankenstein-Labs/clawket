@@ -1,13 +1,11 @@
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { getHermesProcessLogPaths, getServicePaths } from '@clawket/bridge-core';
 import { agentLabels, discoverAgentTargets, inspectAgents, option, selectAgentTarget, type AgentBackend } from './agent-inventory.js';
 import type { CliDoctorReport } from './diagnostics.js';
 import { showLogs, type LogSource } from './cli-logs.js';
 import { readCliVersion } from './metadata.js';
 
-export const BACKENDS = ['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'] as const;
+export const BACKENDS = ['openclaw', 'hermes', 'codex', 'claude-code', 'pi'] as const;
 export type Backend = typeof BACKENDS[number];
 export function requestedBackend(args: string[]): Backend | undefined {
   const value = option(args, '--backend');
@@ -56,10 +54,6 @@ export async function productConnections(report: CliDoctorReport | undefined, pr
     if (kind && !targets.length) targets.push(selectAgentTarget(kind, args));
     rows.push(...await inspectAgents(targets));
   }
-  if (!backend || backend === 'local-model') {
-    const path = resolve(backend === 'local-model' ? option(args, '--config') ?? localModelPath() : localModelPath());
-    if (existsSync(path) || backend === 'local-model') rows.push(localModelStatus(path));
-  }
   if (report) {
     for (const row of rows) {
       if (row.state === 'unpaired') continue;
@@ -75,24 +69,6 @@ export async function productConnections(report: CliDoctorReport | undefined, pr
   }
   if (!rows.length) throw new Error('No matching configuration. Use the backend command with its original --config or --project options.');
   return rows;
-}
-
-function localModelPath(): string { return join(homedir(), '.clawket', 'local-model-preview', 'runtime.json'); }
-function localModelStatus(configPath: string): Connection {
-  let state = 'unpaired';
-  if (existsSync(configPath)) {
-    state = 'invalid';
-    try {
-      const info = lstatSync(configPath);
-      if (info.isFile() && info.size <= 256 * 1024) {
-        const config = JSON.parse(readFileSync(configPath, 'utf8'));
-        if (config && typeof config.token === 'string' && Array.isArray(config.endpoints) && config.endpoints.length) state = 'unverified';
-      }
-    } catch { /* Report invalid without leaking config contents. */ }
-  }
-  return { backend: 'local-model', environment: 'preview', scope: 'model server', transport: 'relay', state, configPath,
-    finding: state === 'unverified' ? 'Saved pairing found. Foreground/Windows supervisor readiness is not measured by this command.'
-      : state === 'invalid' ? 'Local-model configuration is invalid; inspect it locally.' : 'Pair a local model first.' };
 }
 
 export function printOperations(command: string, connections: Connection[], args: string[], extra: object = {}): void {
@@ -121,7 +97,7 @@ export function printOperations(command: string, connections: Connection[], args
 }
 
 function label(row: Connection): string {
-  const name = row.backend in agentLabels ? agentLabels[row.backend as AgentBackend] : row.backend === 'openclaw' ? 'OpenClaw' : row.backend === 'hermes' ? 'Hermes' : 'Local model';
+  const name = row.backend in agentLabels ? agentLabels[row.backend as AgentBackend] : row.backend === 'openclaw' ? 'OpenClaw' : 'Hermes';
   return `${name} · ${row.scope} · ${row.environment}`;
 }
 
@@ -143,11 +119,6 @@ export function productLogSources(args: string[]): LogSource[] {
     const targets = scoped ? [selectAgentTarget(kind!, args)] : discoverAgentTargets(kind, args.includes('--preview'));
     if (kind && !targets.length) targets.push(selectAgentTarget(kind, args));
     targets.forEach((target, index) => sources.push({ name: `${target.backend}:${target.environment}:${index + 1}`, path: join(dirname(target.configPath), `${target.backend}.log`) }));
-  }
-  // Local-model foreground output belongs to its terminal. Windows' supervisor has a sanitized persistent log.
-  if (!backend || backend === 'local-model') {
-    const config = backend === 'local-model' ? option(args, '--config') ?? localModelPath() : localModelPath();
-    sources.push({ name: 'local-model:supervisor', path: join(dirname(resolve(config)), 'windows-service', 'supervisor.jsonl') });
   }
   return sources;
 }

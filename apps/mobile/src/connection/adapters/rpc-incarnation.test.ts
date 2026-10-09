@@ -3,7 +3,6 @@ import type { WebSocketLike } from '../transports/types';
 import { ClaudeCodeAdapter } from './claude-code';
 import { CodexAdapter } from './codex';
 import { PiAdapter } from './pi';
-import { LocalModelAdapter } from './local-model';
 
 class Socket implements WebSocketLike {
   readyState = 0;
@@ -22,7 +21,7 @@ class Socket implements WebSocketLike {
 }
 
 describe.each([
-  ['claude-code', ClaudeCodeAdapter], ['codex', CodexAdapter], ['pi', PiAdapter], ['local-model', LocalModelAdapter],
+  ['claude-code', ClaudeCodeAdapter], ['codex', CodexAdapter], ['pi', PiAdapter]
 ] as const)('%s request identity', (backend, Adapter) => {
   it.each([undefined, 1_200])('bounds a foreground health probe to %s without changing other RPC deadlines', async (timeoutMs) => {
     jest.useFakeTimers();

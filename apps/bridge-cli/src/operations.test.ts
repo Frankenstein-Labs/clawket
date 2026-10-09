@@ -57,7 +57,6 @@ it('includes legacy stderr and all saved Agent logs by default, with precise fil
   const sources = productLogSources([]);
   expect(sources.map(source => source.name)).toEqual(expect.arrayContaining(['openclaw:stderr', 'hermes:relay:stderr', 'codex:production:1', 'claude-code:production:2', 'pi:custom:3']));
   expect(productLogSources(['--backend', 'claude-code'])).toHaveLength(1);
-  expect(productLogSources(['--backend', 'local-model'])[0].path).toBe(join(homedir(), '.clawket', 'local-model-preview', 'windows-service', 'supervisor.jsonl'));
 });
 it('does not enroll Hermes or Pi default state into Preview diagnostics', async () => {
   save('pi');

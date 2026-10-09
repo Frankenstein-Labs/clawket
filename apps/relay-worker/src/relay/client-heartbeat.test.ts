@@ -35,7 +35,7 @@ const consume = (runtime: RelayRuntime, socket: Socket, text = ping, now = 1_000
   consumeClientHeartbeatControl(runtime, asWs(socket), binary ? new TextEncoder().encode(text).buffer : text, text, now);
 
 describe('negotiated same-socket full-client heartbeat', () => {
-  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'])('echoes %s without touching owner health or legacy ACK time', backend => {
+  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'])('echoes %s without touching owner health or legacy ACK time', backend => {
     const { runtime, owner, phone } = setup(backend);
     const before = { ...phone.deserializeAttachment() };
     expect(consume(runtime, phone)).toBe(true);

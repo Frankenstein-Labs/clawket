@@ -261,7 +261,6 @@ export async function createUpdateTarget(input: { backend: string; configPath?: 
 
 export async function collectUpdateTargets(args: string[]): Promise<UpdateTarget[]> {
   const backend = requestedBackend(args), home = join(homedir(), '.clawket'), targets: UpdateTarget[] = [];
-  if (backend === 'local-model' && (option(args, '--project') || args.includes('--device'))) throw new Error('Local model update uses its original --config.');
   if (backend && ['openclaw', 'hermes'].includes(backend) && (option(args, '--config') || option(args, '--project') || args.includes('--device'))) throw new Error('This backend does not accept a project/config scope.');
   if (!backend && (option(args, '--config') || option(args, '--project') || args.includes('--device'))) throw new Error('Select --backend with an explicit update scope.');
   if ((!backend || backend === 'openclaw') && (readPairingConfig() || readPairingConfig('preview'))) {
@@ -292,15 +291,6 @@ export async function collectUpdateTargets(args: string[]): Promise<UpdateTarget
     targets.push(await createUpdateTarget({ backend: agent.backend, configPath: agent.configPath, probe: method => controls[agent.backend](config, method),
       start: (entry, node) => starts[agent.backend](['run', '--config', agent.configPath], join(dirname(agent.configPath), `${agent.backend}.log`), undefined, node, entry, true),
       legacyStop: async () => { await controls[agent.backend](config, 'bridge.stop'); } }));
-  }
-  if (!backend || backend === 'local-model') {
-    const configPath = resolve(option(args, '--config') ?? join(home, 'local-model-preview', 'runtime.json'));
-    if (existsSync(configPath)) {
-      // Terminal-owned and independently supervised installations retain their original lifecycle.
-      const owner = readRuntimeOwner(runtimeOwnerPath('local-model', configPath));
-      if (!owner) targets.push({ backend: 'local-model', running: false, previousEntry: null, manual: true, preflight: async () => {}, stop: async () => {}, start: async () => {}, verify: async () => {} });
-      else targets.push(await createUpdateTarget({ backend: 'local-model', configPath, probe: async () => { const current = readRuntimeOwner(runtimeOwnerPath('local-model', configPath)); if (!current) throw Object.assign(new Error(), { code: 'ECONNREFUSED' }); return queryRuntimeOwner(current, 'info'); }, start: async (entry, node) => detached(entry, ['local-model', 'run', '--config', configPath, ...(owner.port ? ['--port', String(owner.port)] : [])], join(dirname(configPath), 'bridge.log'), undefined, node) }));
-    }
   }
   if (!targets.length) throw new Error('No saved Bridge configurations match this scope. Use the original --backend / --config.');
   return targets;

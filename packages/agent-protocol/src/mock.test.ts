@@ -192,7 +192,7 @@ describe('createMockAdapter', () => {
 
   it('supports fixed probe outcomes, initial state, empty fixtures, and empty timelines', async () => {
     const adapter = createMockAdapter({
-      connection: { ...connection, backendKind: 'local-model', transportKind: 'local' },
+      connection: { ...connection, backendKind: 'openhands-cloud', transportKind: 'local' },
       capabilities: { attachments: false, models: false },
       initialState: 'offline',
       probeResult: false,
@@ -201,11 +201,6 @@ describe('createMockAdapter', () => {
     expect(await adapter.probe()).toBe(false);
     expect(await adapter.listAgents()).toEqual([]);
     expect(await adapter.listSessions()).toEqual([]);
-    expect(adapter.management).toBeUndefined();
-    expect(adapter.createSession).toBeUndefined();
-    expect(adapter.patchSession).toBeUndefined();
-    expect(adapter.resetSession).toBeUndefined();
-    expect(adapter.deleteSession).toBeUndefined();
     adapter.replayTimeline();
   });
 
@@ -278,6 +273,22 @@ describe('createMockAdapter', () => {
     expect((await adapter.listSessions()).some((session) => session.key === created!.key)).toBe(false);
     await expect(adapter.deleteSession?.('missing')).rejects.toBeInstanceOf(AdapterError);
     expect(sessionSnapshots.length).toBeGreaterThan(0);
+  });
+
+  it('omits session mutation helpers when their capabilities are disabled', () => {
+    const adapter = createMockAdapter({
+      connection,
+      capabilities: {
+        sessionCreate: false,
+        sessionRename: false,
+        sessionReset: false,
+        sessionDelete: false,
+      },
+    });
+    expect(adapter.createSession).toBeUndefined();
+    expect(adapter.patchSession).toBeUndefined();
+    expect(adapter.resetSession).toBeUndefined();
+    expect(adapter.deleteSession).toBeUndefined();
   });
 
   it('materializes every supported management group and omits unsupported groups', () => {

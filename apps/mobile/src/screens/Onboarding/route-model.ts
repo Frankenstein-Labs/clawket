@@ -18,14 +18,10 @@ export const ONBOARDING_DOCUMENTATION_URLS: Readonly<Record<PairableBackendKind,
   pi: 'https://github.com/p697/clawket/blob/main/docs/3.1/pi.md',
   codex: 'https://github.com/p697/clawket/blob/main/docs/3.1/codex.md',
   'claude-code': 'https://github.com/p697/clawket/blob/main/docs/3.1/claude-code.md',
-  'local-model': 'https://github.com/p697/clawket/blob/main/docs/3.0/15-local-model.md',
 });
 
-/**
- * Backends with a product to install; a local model is a server the user already
- * runs, so it has no "No agent yet?" destination.
- */
-export type OnboardingWebsiteBackendKind = Exclude<BackendKind, 'local-model'>;
+/** Backends with a product to install. Cloud has no install product, so it needs no "No agent yet?" destination. */
+export type OnboardingWebsiteBackendKind = Exclude<BackendKind, 'openhands-cloud'>;
 
 /** Official product homepages for the "No agent yet?" entry; pairing help keeps the documentation URLs above. */
 export const ONBOARDING_WEBSITE_URLS: Readonly<Record<OnboardingWebsiteBackendKind, string>> = Object.freeze({
@@ -65,10 +61,10 @@ export function normalizePairableBackendKind(
   const normalized: Readonly<Record<BackendKind, PairableBackendKind>> = {
     openclaw: 'openclaw',
     hermes: 'hermes',
-    'local-model': 'local-model',
     pi: 'pi',
     codex: 'codex',
     'claude-code': 'claude-code',
+    'openhands-cloud': 'openclaw',
   };
   return normalized[backendKind ?? 'openclaw'];
 }

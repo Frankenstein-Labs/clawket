@@ -432,7 +432,6 @@ describe('cli pairing output', () => {
 
   it.each([
     ['reset', '--backend', 'typo'],
-    ['reset', '--backend', 'local-model'],
     ['reset', '--config', '/an-agent.json'],
     ['reset', '--backend', 'openclaw', '--config', '/an-agent.json'],
     ['codex', 'reset', '--backend', 'hermes'],

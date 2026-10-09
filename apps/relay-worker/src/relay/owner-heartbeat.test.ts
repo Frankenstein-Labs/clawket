@@ -40,7 +40,7 @@ const consume = (runtime: RelayRuntime, socket: Socket, text = ping, now = 1_000
   consumeOwnerHeartbeatControl(runtime, asWs(socket), binary ? new TextEncoder().encode(text).buffer : text, text, now);
 
 describe('negotiated same-socket owner heartbeat', () => {
-  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'])('echoes only the authenticated %s owner without routing or leasing effects', backend => {
+  it.each(['openclaw', 'hermes', 'codex', 'claude-code', 'pi'])('echoes only the authenticated %s owner without routing or leasing effects', backend => {
     const { runtime, owner, phone } = setup(backend);
     expect(consume(runtime, owner)).toBe(true);
     expect(owner.sent).toEqual([pong]);

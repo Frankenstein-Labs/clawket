@@ -1417,7 +1417,7 @@ describe('ThreadScreen connection container', () => {
     expect(mockThreadOverlayProps?.onCreateScheduledTask).toBeDefined();
     expect(mockThreadOverlayProps?.onOpenTools).toBeUndefined();
 
-    adapter.capabilities = { ...CAPABILITY_MATRIX['local-model'], attachments: false, models: false };
+    adapter.capabilities = { ...CAPABILITY_MATRIX['openhands-cloud'], attachments: false, models: false };
     view.rerender(<ThreadScreen {...props} />);
     expect(mockThreadViewProps?.onOpenAddMenu).toBeUndefined();
     expect(mockThreadOverlayProps?.onAttachRecentPhotos).toBeUndefined();

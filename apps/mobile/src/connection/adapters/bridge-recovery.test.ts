@@ -3,7 +3,6 @@ import type { WebSocketLike } from '../transports/types';
 import { ClaudeCodeAdapter } from './claude-code';
 import { CodexAdapter } from './codex';
 import { PiAdapter } from './pi';
-import { LocalModelAdapter } from './local-model';
 
 class Socket implements WebSocketLike {
   readyState = 0;
@@ -24,7 +23,7 @@ class Socket implements WebSocketLike {
 }
 
 describe.each([
-  ['claude-code', ClaudeCodeAdapter], ['codex', CodexAdapter], ['pi', PiAdapter], ['local-model', LocalModelAdapter],
+  ['claude-code', ClaudeCodeAdapter], ['codex', CodexAdapter], ['pi', PiAdapter]
 ] as const)('%s unavailable Bridge recovery', (backend, Adapter) => {
   beforeEach(() => { jest.useFakeTimers(); jest.spyOn(Math, 'random').mockReturnValue(0); });
   afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
@@ -42,7 +41,7 @@ describe.each([
         adapter.disconnect();
       }
       void adapter.connect().catch(() => {});
-      const delays = previouslyReady && backend !== 'local-model'
+      const delays = previouslyReady
         ? [2_000, 4_000, 8_000, 8_000, 30_000, 60_000, 120_000, 120_000]
         : [30_000, 60_000, 120_000, 120_000];
       for (const [index, delay] of delays.entries()) {
@@ -56,7 +55,7 @@ describe.each([
         expect(sockets).toHaveLength(count);
         await jest.advanceTimersByTimeAsync(1);
         expect(sockets).toHaveLength(count + 1);
-        if (previouslyReady && backend !== 'local-model' && index === 3) {
+        if (previouslyReady && index === 3) {
           // Coordinator retries cannot refill an exhausted warm allowance.
           adapter.disconnect();
           void adapter.connect().catch(() => {});
@@ -70,7 +69,7 @@ describe.each([
       sockets.at(-1)!.open(); sockets.at(-1)!.answer();
       await jest.advanceTimersByTimeAsync(0);
       const count = sockets.length;
-      await jest.advanceTimersByTimeAsync(backend === 'local-model' ? 30_000 : 2_000);
+      await jest.advanceTimersByTimeAsync(2_000);
       expect(sockets).toHaveLength(count + 1);
       adapter.disconnect();
       await jest.advanceTimersByTimeAsync(120_000);

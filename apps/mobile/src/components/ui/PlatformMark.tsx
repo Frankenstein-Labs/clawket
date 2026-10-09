@@ -1,7 +1,6 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { getGatewayBackendDescriptor } from '@clawket/agent-protocol';
-import Svg, { Path, Rect } from 'react-native-svg';
 import { ControlSize, Radius } from '../../theme/tokens';
 import { useAppTheme } from '../../theme';
 
@@ -11,17 +10,21 @@ const marks = {
   pi: require('../../../assets/brands/pi.png'),
   openclaw: require('../../../assets/brands/openclaw.png'),
   hermes: require('../../../assets/brands/hermes.png'),
+  'openhands-cloud': require('../../../assets/openhands/openhands-mark.png'),
 } as const;
 
-type Platform = keyof typeof marks | 'local-model';
+type Platform = keyof typeof marks;
 export type PlatformKind = Platform;
+
+/** OpenHands' bundled mark is a monochrome glyph, so it is tinted to the theme ink like the Welcome wordmark. */
+const TINTED_MARK_PLATFORMS: ReadonlySet<Platform> = new Set(['openhands-cloud']);
 
 /**
  * Backends whose Agent is the product itself — one Agent per connection with no identity of its own —
  * so the official mark is that Agent's face wherever it appears (owner decision 2026-09-27). OpenClaw
  * Agents keep their own avatars and carry the mark as a corner badge instead.
  */
-const PRODUCT_FACE_PLATFORMS: ReadonlySet<Platform> = new Set(['hermes', 'codex', 'claude-code', 'pi', 'local-model']);
+const PRODUCT_FACE_PLATFORMS: ReadonlySet<Platform> = new Set(['hermes', 'codex', 'claude-code', 'pi', 'openhands-cloud']);
 
 export function isProductFacePlatform(platform: Platform | null | undefined): platform is Platform {
   return platform != null && PRODUCT_FACE_PLATFORMS.has(platform);
@@ -29,10 +32,10 @@ export function isProductFacePlatform(platform: Platform | null | undefined): pl
 
 /**
  * The brand a product face shows, so a name beside it need not repeat it; null when the face is
- * the Agent's own. The local model's chip names no brand.
+ * the Agent's own.
  */
 export function productFaceBrand(platform: Platform | null | undefined): string | null {
-  return isProductFacePlatform(platform) && platform !== 'local-model' ? getGatewayBackendDescriptor(platform).label : null;
+  return isProductFacePlatform(platform) ? getGatewayBackendDescriptor(platform).label : null;
 }
 
 /**
@@ -45,6 +48,7 @@ const ARTWORK: Readonly<Record<keyof typeof marks, Readonly<{ fill: number; tile
   pi: { fill: 0.59, tile: false },
   codex: { fill: 0.81, tile: true },
   hermes: { fill: 0.79, tile: true },
+  'openhands-cloud': { fill: 0.82, tile: false },
 };
 
 /** A dense mark reads larger than a sparse one of the same width; tuned by eye on the device roster. */
@@ -65,7 +69,7 @@ const BALANCED_SIZE: Readonly<Record<Platform, number>> = {
   hermes: 46,
   codex: 45,
   pi: 50,
-  'local-model': 41,
+  'openhands-cloud': 44,
 };
 
 /**
@@ -73,41 +77,10 @@ const BALANCED_SIZE: Readonly<Record<Platform, number>> = {
  * the mark beside other brands in a slot set by `size` (44 points by default); otherwise `size` sets the image box.
  */
 export function PlatformMark({ platform, size, balanced = false }: { platform: Platform; size?: number; balanced?: boolean }) {
+  const { theme: { colors } } = useAppTheme();
   const drawn = balanced ? BALANCED_SIZE[platform] * ((size ?? ControlSize.floatingButton) / ControlSize.floatingButton) : size;
-  if (platform === 'local-model') return <LocalModelMark size={drawn} />;
-  return <Image accessible={false} source={marks[platform]} resizeMode="contain" style={[platform === 'hermes' || platform === 'codex' ? styles.appIcon : styles.mark, drawn ? { width: drawn, height: drawn } : null]} />;
-}
-
-/** Processor outline in the 52-point frame, sized to sit inside the 42-point tile like the app-icon artwork. */
-const LOCAL_MODEL_CHIP = 'M21.75 18.5h8.5a3.25 3.25 0 0 1 3.25 3.25v8.5a3.25 3.25 0 0 1-3.25 3.25h-8.5a3.25 3.25 0 0 1-3.25-3.25v-8.5a3.25 3.25 0 0 1 3.25-3.25Z'
-  + 'M24.25 23h3.5a1.25 1.25 0 0 1 1.25 1.25v3.5a1.25 1.25 0 0 1-1.25 1.25h-3.5a1.25 1.25 0 0 1-1.25-1.25v-3.5a1.25 1.25 0 0 1 1.25-1.25Z'
-  + 'M22.5 15v3M26 15v3M29.5 15v3M22.5 34v3M26 34v3M29.5 34v3M15 22.5h3M15 26h3M15 29.5h3M34 22.5h3M34 26h3M34 29.5h3';
-
-/**
- * Clawket-drawn mark for the brand-less local-model backend (owner request 2026-09-26: an outline
- * on a quiet tile, never a dark backing). Theme ink and surface keep it readable in both schemes.
- */
-function LocalModelMark({ size = ControlSize.settingsRow }: { size?: number }) {
-  const { theme: { colors } } = useAppTheme();
-  // Hold the outline at 1.2 points or more when drawn small (connection list, avatar badge).
-  const strokeWidth = Math.max(1.9, (1.2 * ControlSize.settingsRow) / size);
-  return <Svg testID="platform-mark-local-model" accessible={false} width={size} height={size} viewBox="0 0 52 52">
-    <Rect x={5} y={5} width={42} height={42} rx={10.5} fill={colors.surface} />
-    <Path d={LOCAL_MODEL_CHIP} fill="none" stroke={colors.ink} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-  </Svg>;
-}
-
-/** The chip alone, cropped to its own bounds, for a disc that already is the quiet ground. */
-const LOCAL_MODEL_CHIP_VIEWBOX = '13 13 26 26';
-const LOCAL_MODEL_CHIP_EXTENT = 26;
-const DISC_OUTLINE_WIDTH = 1.4;
-
-function LocalModelGlyph({ size, ink }: { size: number; ink?: string }) {
-  const { theme: { colors } } = useAppTheme();
-  return <Svg testID="platform-disc-local-model-glyph" accessible={false} width={size} height={size} viewBox={LOCAL_MODEL_CHIP_VIEWBOX}>
-    <Path d={LOCAL_MODEL_CHIP} fill="none" stroke={ink ?? colors.ink} strokeWidth={(DISC_OUTLINE_WIDTH * LOCAL_MODEL_CHIP_EXTENT) / size}
-      strokeLinecap="round" strokeLinejoin="round" />
-  </Svg>;
+  const tint = TINTED_MARK_PLATFORMS.has(platform) ? { tintColor: colors.ink } : null;
+  return <Image accessible={false} source={marks[platform]} resizeMode="contain" style={[platform === 'hermes' || platform === 'codex' ? styles.appIcon : styles.mark, tint, drawn ? { width: drawn, height: drawn } : null]} />;
 }
 
 /**
@@ -127,17 +100,12 @@ export function PlatformDisc({ platform, size, glyph, ground = 'floating', artwo
   testID?: string;
 }) {
   const { theme: { colors } } = useAppTheme();
-  let content: React.ReactNode;
-  if (platform === 'local-model') {
-    content = <LocalModelGlyph size={size * glyph} ink={artworkColors?.ink} />;
-  } else {
-    const artwork = ARTWORK[platform];
-    const box = artwork.tile
-      ? (size / artwork.fill) * TILE_OVERSCAN
-      : (size * glyph * (DISC_OPTICAL_SCALE[platform] ?? 1)) / artwork.fill;
-    content = <Image testID={testID ? `${testID}-image` : undefined} accessible={false} source={marks[platform]}
-      resizeMode="contain" style={{ width: box, height: box }} />;
-  }
+  const artwork = ARTWORK[platform];
+  const box = artwork.tile
+    ? (size / artwork.fill) * TILE_OVERSCAN
+    : (size * glyph * (DISC_OPTICAL_SCALE[platform] ?? 1)) / artwork.fill;
+  const content = <Image testID={testID ? `${testID}-image` : undefined} accessible={false} source={marks[platform]}
+    resizeMode="contain" style={{ width: box, height: box }} />;
   return <View testID={testID} style={[styles.disc, {
     width: size,
     height: size,

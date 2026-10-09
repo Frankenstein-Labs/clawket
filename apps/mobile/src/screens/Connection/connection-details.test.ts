@@ -49,12 +49,12 @@ describe('buildConnectionDetailRows', () => {
 
   it('keeps the minimum rows for a connection that never reached the Bridge', () => {
     const rows = buildConnectionDetailRows({
-      connection: connection({ backendKind: 'local-model', transportKind: 'relay' }),
+      connection: connection({ backendKind: 'openhands-cloud', transportKind: 'relay' }),
       serverHost: '  ',
       details: { lastReadyAt: null, bridgeVersion: null, bridgeCapabilities: [] },
     });
     expect(rows.map((row) => row.id)).toEqual(['backend', 'transport', 'environment', 'last-ready']);
-    expect(rows[0]).toMatchObject({ valueKey: 'Local model' });
+    expect(rows[0]).toMatchObject({ valueKey: 'OpenHands Cloud' });
     expect(rows[2]).toMatchObject({ valueKey: 'Production' });
     expect(rows[3]).toMatchObject({ value: '—' });
   });

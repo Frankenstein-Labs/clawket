@@ -22,13 +22,13 @@ it('does not round a real sub-cent cost down to free', () => {
 const TRANSPORT_BY_BACKEND: Readonly<Record<ConnectionDescriptor['backendKind'], ConnectionDescriptor['transportKind']>> = {
   openclaw: 'relay',
   hermes: 'relay',
-  'local-model': 'relay', pi: 'relay', codex: 'relay', 'claude-code': 'relay',
+  pi: 'relay', codex: 'relay', 'claude-code': 'relay', 'openhands-cloud': 'relay',
 };
 
 const MAIN_SESSION_BY_BACKEND: Readonly<Record<ConnectionDescriptor['backendKind'], string>> = {
   openclaw: 'agent:main:main',
   hermes: 'main',
-  'local-model': 'main', pi: 'pi-session', codex: 'pi-session', 'claude-code': 'claude-session',
+  pi: 'pi-session', codex: 'pi-session', 'claude-code': 'claude-session', 'openhands-cloud': 'main',
 };
 
 function connection(
@@ -199,14 +199,14 @@ describe('Agent settings descriptor model', () => {
     expect(hermes.identity.activeMinutesAgo).toBeNull();
 
     const chatOnly = buildAgentSettingsModel({
-      connection: connection('local-model'),
-      agent: agent('local-model'),
-      capabilities: capabilities('local-model', { attachments: false, models: false }),
+      connection: connection('openhands-cloud'),
+      agent: agent('openhands-cloud'),
+      capabilities: capabilities('openhands-cloud', { attachments: false, models: false }),
       connectionState: 'ready',
       isPro: true,
     });
     expect(chatOnly.identity).toMatchObject({
-      backend: 'local-model',
+      backend: 'openhands-cloud',
       editable: false,
     });
     expect(chatOnly.stats).toEqual([]);
@@ -214,10 +214,10 @@ describe('Agent settings descriptor model', () => {
   });
 
   it('shows the combined channels row when any contributing capability is true', () => {
-    const base = capabilities('local-model', { attachments: false, models: false, devices: true });
+    const base = capabilities('openhands-cloud', { attachments: false, models: false, devices: true });
     const model = buildAgentSettingsModel({
-      connection: connection('local-model'),
-      agent: agent('local-model'),
+      connection: connection('openhands-cloud'),
+      agent: agent('openhands-cloud'),
       capabilities: base,
       connectionState: 'offline',
       isPro: true,

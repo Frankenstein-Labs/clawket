@@ -53,7 +53,6 @@ import {
   PAIRING_COMMAND,
   PAIRING_CHOOSE_COMMAND,
   resolveOnboardingError,
-  type LocalModelEngine,
   type OnboardingStatus,
   type PairableBackendKind,
   type PairingSubmission,
@@ -110,7 +109,6 @@ const BACKEND_OPTIONS: ReadonlyArray<{
 }> = [
   { kind: 'openclaw' },
   { kind: 'hermes' },
-  { kind: 'local-model' },
   { kind: 'pi' },
 ];
 
@@ -119,7 +117,6 @@ const PAIRING_INPUT_PRESENTATION: Readonly<Record<PairableBackendKind, {
 }>> = {
   openclaw: { keyboardType: 'number-pad' },
   hermes: { keyboardType: 'ascii-capable' },
-  'local-model': { keyboardType: 'number-pad' },
   pi: { keyboardType: 'number-pad' },
   codex: { keyboardType: 'number-pad' },
   'claude-code': { keyboardType: 'number-pad' },
@@ -167,50 +164,35 @@ export function OnboardingScreen({
   const [codeExpanded, setCodeExpanded] = useState(false);
   // A human code does not identify its Registry; require a backend before accepting it.
   const [codeBackendSelected, setCodeBackendSelected] = useState(false);
-  const [localModelEngine, setLocalModelEngine] = useState<LocalModelEngine>('llamacpp');
   const [localError, setLocalError] = useState(false);
   const [docsExpanded, setDocsExpanded] = useState(false);
   const viewedRef = useRef(false);
   const submitInFlightRef = useRef(false);
   const formRevisionRef = useRef(0);
   useEffect(() => () => { formRevisionRef.current += 1; }, []);
-  const effectiveCommand = choosing ? PAIRING_CHOOSE_COMMAND : buildBackendPairingCommand(backendKind, pairingCommand, localModelEngine);
+  const effectiveCommand = choosing ? PAIRING_CHOOSE_COMMAND : buildBackendPairingCommand(backendKind, pairingCommand);
   const agentPrompt = useMemo(() => buildAgentPairingPrompt(t, effectiveCommand), [effectiveCommand, t]);
-  // The tab row doubles as the list of supported model servers; each hint names
-  // the precondition the CLI cannot check for the user before it runs.
-  const localModelEngines = useMemo((): Array<{ key: LocalModelEngine; label: string; hint: string }> => [
-    { key: 'llamacpp', label: t('llama.cpp'), hint: t('Start llama-server first (default port 8080), then run this in Terminal.') },
-    { key: 'ollama', label: t('Ollama'), hint: t('Make sure Ollama is running, then run this in Terminal.') },
-    { key: 'openai-compatible', label: t('Other'), hint: t('Point --base-url at any OpenAI-compatible server, like LM Studio or vLLM, then run this in Terminal.') },
-  ], [t]);
-  const localModelHint = backendKind === 'local-model' ? localModelEngines.find((engine) => engine.key === localModelEngine)?.hint : undefined;
-  // Pi pairs the folder the command runs in (`--project` defaults to the working directory), so run from
-  // a home-directory terminal would authorize the whole home folder. Other backends add no hint: the step
-  // title already says where to run the command (owner decision 2026-10-06).
-  const commandHint = localModelHint ?? (backendKind === 'pi'
+  const commandHint = (backendKind === 'pi'
     ? t('Open Terminal in your project folder and run this command.')
     : undefined);
   const backendOptions = useMemo(() => [
     { ...BACKEND_OPTIONS[0], label: t('OpenClaw') },
     { ...BACKEND_OPTIONS[1], label: t('Hermes') },
-    { ...BACKEND_OPTIONS[2], label: t('Local model') },
-    { ...BACKEND_OPTIONS[3], label: 'Pi' },
+    { ...BACKEND_OPTIONS[2], label: 'Pi' },
     { kind: 'codex' as const, label: 'Codex' },
     { kind: 'claude-code' as const, label: 'Claude Code' },
   ] as const, [t]);
-  // Chooser order (owner decision 2026-09-26): OpenClaw, Hermes, Codex, Claude Code, Pi,
-  // then the model server the user already runs (2026-09-19: installable products first).
+  // Chooser order (owner decision 2026-09-26): installable products first.
   const chooserRows = useMemo((): ReadonlyArray<{ kind: PairableBackendKind; label: string }> => [
     backendOptions[0],
     backendOptions[1],
-    backendOptions[4],
-    backendOptions[5],
     backendOptions[3],
+    backendOptions[4],
     backendOptions[2],
   ], [backendOptions, t]);
   // "No agent yet?" links follow the chooser order.
   const websiteOptions = useMemo((): ReadonlyArray<{ kind: OnboardingWebsiteBackendKind; label: string }> => [
-    ...chooserRows.flatMap((row) => row.kind === 'local-model' ? [] : [{ kind: row.kind, label: row.label }]),
+    ...chooserRows.map((row) => ({ kind: row.kind, label: row.label })),
   ], [chooserRows]);
   const styles = useMemo(
     () => createStyles(theme.colors),
@@ -287,7 +269,6 @@ export function OnboardingScreen({
   const pairingPlaceholder: Readonly<Record<PairableBackendKind, string>> = {
     openclaw: t('123 456'),
     hermes: t('ABC 234'),
-    'local-model': t('123 456'),
     pi: t('123 456'),
     codex: t('123 456'),
     'claude-code': t('123 456'),
@@ -338,8 +319,8 @@ export function OnboardingScreen({
     if (!onCopyAgentPrompt) return;
     void Promise.resolve(onCopyAgentPrompt(agentPrompt, backendKind)).then(() => { flashAgentPromptCopied(); }, () => setLocalError(true));
   };
-  const backendLabel = backendKind === 'local-model' ? t('Local model') : backendKind === 'openclaw' ? 'OpenClaw' : backendKind === 'claude-code' ? 'Claude Code' : backendKind === 'codex' ? 'Codex' : backendKind === 'pi' ? 'Pi' : 'Hermes';
-  const agentMethodAvailable = !choosing && backendKind !== 'local-model' && Boolean(onCopyAgentPrompt);
+  const backendLabel = backendKind === 'openclaw' ? 'OpenClaw' : backendKind === 'claude-code' ? 'Claude Code' : backendKind === 'codex' ? 'Codex' : backendKind === 'pi' ? 'Pi' : 'Hermes';
+  const agentMethodAvailable = !choosing && Boolean(onCopyAgentPrompt);
   const agentMethod = agentMethodAvailable && pairingMethod === 'agent';
   const codeVisible = agentMethod || codeExpanded;
   const scan = choosing ? onScanAnyQr : () => onScanQr(backendKind);
@@ -431,9 +412,6 @@ export function OnboardingScreen({
             <Button testID="onboarding-copy-agent-prompt" label={agentPromptCopied ? t('Copied') : t('Copy this message')} icon={agentPromptCopied ? Check : Copy}
               variant="neutral" haptic accessibilityLabel={t('Copy this message')} onPress={copyAgentPrompt} />
           </FormStep> : <FormStep number="01" title={t('Run in your computer’s terminal')} action={methodAction}>
-            {backendKind === 'local-model'
-              ? <SegmentedTabs testID="onboarding-local-model-engine" size="sm" tabs={localModelEngines} active={localModelEngine} onSwitch={setLocalModelEngine} />
-              : null}
             {commandHint ? <Text testID="onboarding-command-hint" style={styles.subtitle}>{commandHint}</Text> : null}
             <CommandBlock stacked command={effectiveCommand} copied={copied} onCopy={onCopyCommand ? () => {
               void Promise.resolve(onCopyCommand(effectiveCommand)).then(flashCopied, () => setLocalError(true));
@@ -452,7 +430,7 @@ export function OnboardingScreen({
         closeAccessibilityLabel={t('Close', { ns: 'common' })} title={t('Select platform')} snapPoints={PLATFORM_PICKER_SNAP_POINTS}>
         <BottomSheetScrollView contentContainerStyle={styles.platformPickerContent} showsVerticalScrollIndicator={false}>
           <Text style={styles.subtitle}>{t('Choose the platform that printed your code.')}</Text>
-          {chooserRows.filter((row) => row.kind !== 'local-model').map((row) => <ChoiceRow key={row.kind}
+          {chooserRows.map((row) => <ChoiceRow key={row.kind}
             testID={`onboarding-code-backend-${row.kind}`} leading={<PlatformMark platform={row.kind} balanced />} title={row.label}
             onPress={() => { formRevisionRef.current += 1; selectedBackendRef.current = row.kind; setBackendKind(row.kind); setCodeBackendSelected(true); setPairingCode(''); setPlatformPickerOpen(false); }} />)}
         </BottomSheetScrollView>

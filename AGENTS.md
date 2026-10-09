@@ -118,7 +118,7 @@ Authenticated room admission applies to every backend: at most 128 full-client s
 
 ## Preview Service Environment Rule
 
-1. Preview is a service environment, not a backend or transport kind. Preserve the chosen backend identity and `transportKind=relay`; the local-model extension uses dedicated resources that are offered in every app environment and never gated by Debug Mode (see `docs/3.0/15-local-model.md`).
+1. Preview is a service environment, not a backend or transport kind. Preserve the chosen backend identity and `transportKind=relay`.
 2. Production and Preview must use isolated Registry, Relay, KV, Durable Object, pairing credentials, and local pairing files. A Preview deploy must never target Production bindings.
 3. Official QR codes are environment-checked by mobile. Custom/self-hosted Registry URLs remain supported and must not be misclassified as an official environment.
 4. The Bridge service may connect Production and Preview simultaneously, but failure in one environment must not stop the other runtime.
@@ -160,9 +160,8 @@ When implementation, architecture, or release behavior changes, update the close
 6. Tests that require an external checkout or live service must have an explicit integration command and must not make the CI-safe gate depend on a developer's home directory. Keep the ordinary `npm test` command as the broader local suite.
 7. Owner decision 2026-10-07: dependency advisories do not block PR merges. `npm run security:audit` checks both lockfiles in the independent weekly/manual `Dependency security review` workflow, outside the required gate; findings and malformed reports still fail that review. Before an authorized release, assess a fresh report against the actual shipped dependencies and record fixes or owner-accepted risks (see `docs/ci.md`). Suppressing a finding in the report needs owner approval, naming one advisory in one package with a reason and expiry; expired or unused exceptions fail the review. Current: GHSA-86w9-cpqp-85rv (node-forge via Expo CLI code signing, no patched release), GHSA-vfj7-8cjw-p6xm (braces via micromatch in the Expo/Metro bundler and Jest, no patched release), and GHSA-wq5f-xc86-pv6w (Miniflare's exact sharp 0.35.4 dependency; adopt the upstream fix without a native override, owner-approved 2026-10-07), all until 2026-11-01. Mobile's direct sharp build-tool dependency must use patched 0.35.5 or later.
 
-`relay:test:integration` runs self-contained local Relay/model servers and recorded mobile adapters. Real local-model inference uses `test:local-model:recovery` (`CLAWKET_RECOVERY_CONFIG`) or `test:local-model:preview` (`CLAWKET_LOCAL_MODEL_PREVIEW_SMOKE=1`, optional model endpoint configuration); these commands fail when prerequisites are absent, never silently skip.
+`relay:test:integration` runs self-contained local Relay/model servers and recorded mobile adapters; it fails when prerequisites are absent, never silently skips.
 
-Local-model supervisor start retries a rejected control response only after a proven credential-generation change, within its existing 15-second budget and without launching another owner for that retry. Publish control credentials atomically; unchanged invalid responses still fail. Keep process-test socket paths within the macOS Unix socket limit.
 
 Windows ACL assertions must fail on command/module errors or missing paths. When invoking Windows PowerShell from PowerShell 7, resolve its security module from the invoked shell's `$PSHOME`; inherited module paths must not produce a false zero-access result.
 

@@ -3,8 +3,6 @@ import {
   getDefaultPairingMethod,
   PAIRING_CHOOSE_COMMAND,
   buildBackendPairingCommand,
-  buildLocalModelPairingCommand,
-  LOCAL_MODEL_ENGINES,
   createPairingSubmission,
   formatVerificationCode,
   isPlausibleEmail,
@@ -18,7 +16,7 @@ describe('Onboarding model', () => {
   it('uses backend defaults and reserves discovery for a terminal', () => {
     expect(getDefaultPairingMethod('openclaw')).toBe('agent');
     expect(getDefaultPairingMethod('hermes')).toBe('agent');
-    for (const backend of ['codex', 'claude-code', 'pi', 'local-model'] as const) {
+    for (const backend of ['codex', 'claude-code', 'pi'] as const) {
       expect(getDefaultPairingMethod(backend)).toBe('terminal');
     }
     expect(PAIRING_CHOOSE_COMMAND).toBe('npx @p697/clawket@latest pair choose');
@@ -40,13 +38,6 @@ describe('Onboarding model', () => {
     expect(buildBackendPairingCommand('claude-code', command)).toBe(`${command} --backend claude-code`);
     expect(buildBackendPairingCommand('pi', `${command} --preview`)).toBe(`${command} --backend pi`);
     expect(buildBackendPairingCommand('openclaw', `${command} --preview`)).toBe(`${command} --preview --backend openclaw`);
-  });
-
-  it('spells out engine and address for model servers that do not match the CLI default', () => {
-    expect(LOCAL_MODEL_ENGINES).toEqual(['llamacpp', 'ollama', 'openai-compatible']);
-    expect(buildLocalModelPairingCommand('llamacpp')).toBe('npx @p697/clawket@latest pair --backend local-model');
-    expect(buildLocalModelPairingCommand('ollama')).toBe('npx @p697/clawket@latest pair --backend local-model --engine ollama --base-url http://127.0.0.1:11434');
-    expect(buildLocalModelPairingCommand('openai-compatible')).toBe('npx @p697/clawket@latest pair --backend local-model --engine openai-compatible --base-url http://127.0.0.1:1234');
   });
 
   it('removes separators without silently changing malformed invitation values', () => {

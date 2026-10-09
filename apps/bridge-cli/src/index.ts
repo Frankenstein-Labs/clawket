@@ -6,7 +6,6 @@ import { handleUpdateCommand } from './update.js';
 import { handleClaudeCommand } from './claude-code.js';
 import { handleCodexCommand } from './codex.js';
 import { handlePiCommand } from './pi.js';
-import { handleLocalModelCommand } from './local-model.js';
 import { keepHermesRelayRuntimeAlive } from './hermes-relay-lifecycle.js';
 import { describeHermesApiIssue, HermesApiNotReadyError, readHermesApiIssue, type HermesApiIssue } from './hermes-readiness.js';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -98,8 +97,7 @@ async function main(): Promise<void> {
   const [rawCommand = 'help', ...args] = argv;
   if (isRuntimeCommand(argv) && await delegateManagedRuntime(argv)) return;
   let command = rawCommand;
-  if ((rawCommand === 'hermes' && ['status', 'doctor', 'logs', 'start', 'install', 'restart', 'stop', 'uninstall', 'reset'].includes(args[0]))
-    || (rawCommand === 'local-model' && ['status', 'doctor', 'logs'].includes(args[0]))) {
+  if (rawCommand === 'hermes' && ['status', 'doctor', 'logs', 'start', 'install', 'restart', 'stop', 'uninstall', 'reset'].includes(args[0])) {
     command = args.shift()!; args.push('--backend', rawCommand);
   }
   const isServiceMode = hasFlag(args, '--service');
@@ -113,7 +111,7 @@ async function main(): Promise<void> {
 
   const backend = requestedBackend(args);
   if (command === 'update') { await handleUpdateCommand(args); return; }
-  if (['openclaw', 'hermes', 'codex', 'claude-code', 'pi', 'local-model'].includes(rawCommand) && backend && backend !== rawCommand) {
+  if (['openclaw', 'hermes', 'codex', 'claude-code', 'pi'].includes(rawCommand) && backend && backend !== rawCommand) {
     throw new Error('The backend command and --backend disagree; no runtime was changed.');
   }
   if (rawCommand === 'hermes-refresh-code' && backend && backend !== 'hermes') throw new Error('hermes-refresh-code requires the Hermes backend.');
@@ -137,9 +135,6 @@ async function main(): Promise<void> {
       }
     }
     return;
-  }
-  if (backend === 'local-model' && !['pair', 'run'].includes(command)) {
-    throw new Error('Local-model lifecycle uses its foreground terminal or Windows supervisor. Use local-model pair / run, status, doctor or logs.');
   }
   if ((hasFlag(args, '--config') || hasFlag(args, '--project') || hasFlag(args, '--device')) && !backend && ['reset', 'start', 'install', 'restart', 'stop', 'uninstall'].includes(command)) {
     throw new Error('Select --backend with --config, --project or --device before changing a runtime.');
@@ -165,16 +160,6 @@ async function main(): Promise<void> {
   if (readFlag(args, '--backend') === 'codex') { await handleCodexCommand([command, ...args]); return; }
   if (command === 'pi') { await handlePiCommand(args); return; }
   if (readFlag(args, '--backend') === 'pi') { await handlePiCommand([command, ...args]); return; }
-
-  if (command === 'local-model') {
-    await handleLocalModelCommand(args);
-    return;
-  }
-
-  if (backend === 'local-model') {
-    await handleLocalModelCommand([command, ...args]);
-    return;
-  }
 
   if (command === 'pair') {
     await handlePairCommand(args, jsonOutput);
@@ -2427,9 +2412,6 @@ function openPairingPage(url: string): void {
 
 function printHelp(): void {
   console.log([
-    'clawket local-model pair [--preview] [--base-url <http://127.0.0.1:8080>] [--engine <llamacpp|ollama|openai-compatible>] [--endpoints <file.json>] [--config <file.json>] [--qr-file <file.png>]',
-    'clawket local-model pair --llama-server <executable> --models-preset <file.ini> [--base-url <loopback-url>]',
-    'clawket local-model run [--config <file.json>]',
     'clawket pair choose   Discover and select one installed Agent (interactive terminal)',
     'clawket pair [--backend <openclaw|hermes|codex|claude-code|pi>] [--preview] [--open] [backend-specific options]',
     'clawket pair          Without --backend, keep the legacy OpenClaw/Hermes automatic pairing flow',

@@ -15,30 +15,51 @@ import { isUnauthorizedCloudError, verifyOpenHandsCloudSession } from '../../con
 import { useAppTheme } from '../../theme';
 import { FontSize, FontWeight, LineHeight, Radius, Space } from '../../theme/tokens';
 
-type Props = Readonly<{ onBack?: () => void }>;
+type Props = Readonly<{ onBack?: () => void; onConnected?: () => void }>;
 type Phase = 'idle' | 'starting' | 'waiting' | 'connected' | 'error';
 
 /** OpenHands Cloud OAuth Device Flow; tokens are never placed in ordinary app storage. */
-export function OpenHandsCloudAuthScreen({ onBack }: Props): React.JSX.Element {
+export function OpenHandsCloudAuthScreen({ onBack, onConnected }: Props): React.JSX.Element {
   const { theme: { colors } } = useAppTheme();
   const insets = useSafeAreaInsets();
   const controllerRef = useRef<AbortController | null>(null);
+  const connectedNotifiedRef = useRef(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [authorization, setAuthorization] = useState<Awaited<ReturnType<typeof startOpenHandsCloudDeviceFlow>> | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Redirect once per connection attempt: resetting at the start of every
+  // attempt (and whenever one is abandoned) keeps a retry after a disconnect,
+  // cancel, or failed handoff able to reach `onConnected` again.
+  const onConnectedRef = useRef(onConnected);
+  onConnectedRef.current = onConnected;
+  const notifyConnected = useCallback(() => {
+    if (connectedNotifiedRef.current) return;
+    connectedNotifiedRef.current = true;
+    onConnectedRef.current?.();
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     void openHandsCredentialStore.getAccessToken().then(async (token) => {
       if (!token) return;
+      // Show progress while the stored session is checked, so an already
+      // connected user never sees the sign-in button during the probe.
+      if (mounted) setPhase('starting');
       try {
         await verifyOpenHandsCloudSession();
-        if (mounted) setPhase('connected');
+        if (mounted) {
+          setPhase('connected');
+          notifyConnected();
+        }
       } catch (error) {
         // Only a rejected credential is discarded; an offline start keeps the token.
         if (!isUnauthorizedCloudError(error)) {
-          if (mounted) setPhase('connected');
+          if (mounted) {
+            setPhase('connected');
+            notifyConnected();
+          }
           return;
         }
         await openHandsCredentialStore.clearAccessToken();
@@ -49,12 +70,13 @@ export function OpenHandsCloudAuthScreen({ onBack }: Props): React.JSX.Element {
       mounted = false;
       controllerRef.current?.abort();
     };
-  }, []);
+  }, [notifyConnected]);
 
   const beginLogin = useCallback(async () => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
+    connectedNotifiedRef.current = false;
     setAuthorization(null);
     setMessage(null);
     setCopied(false);
@@ -74,19 +96,37 @@ export function OpenHandsCloudAuthScreen({ onBack }: Props): React.JSX.Element {
       });
       if (controller.signal.aborted) return;
       await openHandsCredentialStore.saveAccessToken(token.access_token);
-      await verifyOpenHandsCloudSession();
-      if (!controller.signal.aborted) setPhase('connected');
+      try {
+        await verifyOpenHandsCloudSession();
+      } catch (error) {
+        // The device flow produced a token, so the credential is valid; a
+        // transient verification failure must not discard it. Only an explicit
+        // rejection means the token already expired.
+        if (isUnauthorizedCloudError(error)) {
+          await openHandsCredentialStore.clearAccessToken().catch(() => undefined);
+          if (!controller.signal.aborted) {
+            setMessage('La connexion a échoué ou le code a expiré. Réessaie.');
+            setPhase('error');
+          }
+          return;
+        }
+      }
+      if (!controller.signal.aborted) {
+        setPhase('connected');
+        notifyConnected();
+      }
     } catch {
       if (controller.signal.aborted) return;
       await openHandsCredentialStore.clearAccessToken().catch(() => undefined);
       setMessage('La connexion a échoué ou le code a expiré. Réessaie.');
       setPhase('error');
     }
-  }, []);
+  }, [notifyConnected]);
 
   const cancel = useCallback(() => {
     controllerRef.current?.abort();
     controllerRef.current = null;
+    connectedNotifiedRef.current = false;
     setAuthorization(null);
     setMessage(null);
     setPhase('idle');
@@ -105,6 +145,7 @@ export function OpenHandsCloudAuthScreen({ onBack }: Props): React.JSX.Element {
 
   const disconnect = useCallback(async () => {
     controllerRef.current?.abort();
+    connectedNotifiedRef.current = false;
     await openHandsCredentialStore.clearAccessToken();
     setAuthorization(null);
     setMessage(null);

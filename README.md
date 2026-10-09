@@ -4,11 +4,11 @@
 
 # OpenHands Mobile
 
-**L’application mobile pour se connecter à OpenDevine Cloud.**
+**L’application mobile pour se connecter à OpenHands Cloud.**
 
-OpenHands Mobile a été créée principalement pour donner accès à **OpenDevine Cloud** depuis un téléphone. Elle permet de se connecter à vos agents OpenHands dans le cloud, de suivre les conversations et les réponses en direct, de consulter les appels d’outils et de changer de session.
+OpenHands Mobile a été créée principalement pour donner accès à **OpenHands Cloud** depuis un téléphone. Elle permet de se connecter à vos agents OpenHands dans le cloud, de suivre les conversations et les réponses en direct, de consulter les appels d’outils et de changer de session.
 
-L’application peut également se connecter à des **agents locaux** et à des backends exécutés sur votre propre ordinateur ou votre réseau. La connexion à OpenDevine Cloud est son usage principal ; les connexions locales offrent une solution complémentaire pour les utilisateurs qui souhaitent conserver leurs agents chez eux.
+L’application peut également se connecter à des **agents locaux** et à des backends exécutés sur votre propre ordinateur ou votre réseau. La connexion à OpenHands Cloud est son usage principal ; les connexions locales offrent une solution complémentaire pour les utilisateurs qui souhaitent conserver leurs agents chez eux.
 
 <p align="center">
   <a href="https://github.com/Frankenstein-Labs/clawket/releases"><strong>⬇ Télécharger l’APK de test Android (canal QA)</strong></a>
@@ -39,7 +39,7 @@ La version **officielle** est construite et signée par le pipeline EAS (`produc
 
 ## À propos d’OpenHands Mobile
 
-L’application est un client mobile : elle se connecte à OpenDevine Cloud en priorité, tout en prenant en charge les agents locaux et les backends compatibles configurés par l’utilisateur. Elle ne remplace pas le service cloud ou l’agent local auquel elle se connecte.
+L’application est un client mobile : elle se connecte à OpenHands Cloud en priorité, tout en prenant en charge les agents locaux et les backends compatibles configurés par l’utilisateur. Elle ne remplace pas le service cloud ou l’agent local auquel elle se connecte.
 
 ## Fonctions de l’application
 
@@ -50,7 +50,7 @@ L’application est un client mobile : elle se connecte à OpenDevine Cloud en p
 - **Connect your way.** Use Relay for remote access, or connect over LAN, Tailscale, or your own endpoint. Self-host the infrastructure if you prefer.
 - **Use your language.** The app supports 19 interface languages, light and dark themes, and voice input with an optional transcription service.
 
-OpenHands Mobile se connecte en priorité à OpenDevine Cloud, et peut aussi utiliser les agents locaux que vous exécutez. Les fonctions disponibles dépendent du backend connecté.
+OpenHands Mobile se connecte en priorité à OpenHands Cloud, et peut aussi utiliser les agents locaux que vous exécutez. Les fonctions disponibles dépendent du backend connecté.
 
 ## Get connected
 
@@ -69,7 +69,7 @@ To detect installed platforms and choose one interactively (including Codex, Cla
 npx @p697/clawket@latest pair choose
 ```
 
-The pairing home shows this command and its Copy action directly below the platform list, under **Or detect automatically**. Scan and expandable code entry are available on the same page, and the scanner can also read a QR code from your photos; manual codes require selecting their platform first. Platform-specific onboarding defaults to terminal scanning for Codex, Claude Code, Pi, and local models; OpenClaw and Hermes default to an agent message. You can switch methods and enter a pairing code instead of scanning. `pair choose` is interactive, accepts no flags, and is not a Preview command.
+The pairing home shows this command and its Copy action directly below the platform list, under **Or detect automatically**. Scan and expandable code entry are available on the same page, and the scanner can also read a QR code from your photos; manual codes require selecting their platform first. Platform-specific onboarding defaults to terminal scanning for Codex, Claude Code, and Pi; OpenClaw and Hermes default to an agent message. You can switch methods and enter a pairing code instead of scanning. `pair choose` is interactive, accepts no flags, and is not a Preview command.
 
 For direct pairing on your local network:
 
@@ -77,7 +77,7 @@ For direct pairing on your local network:
 clawket pair local
 ```
 
-To select a backend explicitly, use `--backend` with `openclaw`, `hermes`, `codex`, `claude-code`, `pi`, or `local-model`. Use `clawket status`, `clawket doctor`, and `clawket logs` to inspect your connection.
+To select a backend explicitly, use `--backend` with `openclaw`, `hermes`, `codex`, `claude-code`, or `pi`. Use `clawket status`, `clawket doctor`, and `clawket logs` to inspect your connection.
 
 `status` summarizes all saved Agent connections; add `--verbose` for paths and capabilities. Use `clawket logs --backend codex --last 10m --follow` (or another backend) for live troubleshooting. Default lifecycle/reset commands retain the OpenClaw/Hermes service scope; use `clawket codex reset`, `clawket claude-code reset`, or `clawket pi reset` with the original pairing options for those Agents. Reset retains session history.
 
@@ -104,7 +104,6 @@ npm run mobile:config:show
 npm run mobile:config:check
 ```
 
-Local-model connections are also available for llama.cpp, Ollama, and OpenAI-compatible servers. See the [local-model guide](./docs/3.0/15-local-model.md) for setup and current limitations.
 
 ## Connections and self-hosting
 

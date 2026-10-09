@@ -56,7 +56,7 @@ export type ModelSheetProps = Readonly<{
   visible: boolean;
   /** Opened from a permission prompt: the first page scrolls to the permission choices. */
   focusPermissions?: boolean;
-  /** `global` choices change every conversation (Hermes, the local model). */
+  /** `global` choices change every conversation (Hermes, Pi). */
   scope: 'session' | 'global';
   /**
    * `native`: the computer confirms every write (Codex). Nothing looks chosen

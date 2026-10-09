@@ -219,7 +219,7 @@ export function normalizeAnalyticsEventString(
 ): string {
   if (event === 'reconnect') {
     const values: Record<string, readonly string[]> = {
-      backend: ['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code'],
+      backend: ['openclaw', 'hermes', 'pi', 'codex', 'claude-code'],
       transport: ['local', 'relay', 'tailscale', 'cloudflare', 'custom'],
       reason: ['tick_timeout', 'socket_close', 'probe_failed', 'seq_gap', 'foreground'],
       origin: ['foreground', 'health_probe', 'transport', 'adapter'],
@@ -229,7 +229,7 @@ export function normalizeAnalyticsEventString(
   }
   if (event === 'transport_diagnostic' && property !== 'code') {
     const values: Record<string, readonly string[]> = {
-      backend: ['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code'],
+      backend: ['openclaw', 'hermes', 'pi', 'codex', 'claude-code'],
       transport: ['local', 'relay', 'tailscale', 'cloudflare', 'custom'],
       environment: ['production', 'preview', 'custom', 'unknown'],
       event: ['error', 'close'],
@@ -239,11 +239,11 @@ export function normalizeAnalyticsEventString(
   }
   if (event === 'connection_diagnostic' && property !== 'code') {
     const values: Record<string, readonly string[]> = {
-      backend: ['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code', 'unknown'],
+      backend: ['openclaw', 'hermes', 'pi', 'codex', 'claude-code', 'unknown'],
       transport: ['local', 'relay', 'tailscale', 'cloudflare', 'custom'],
       operation: ['connect', 'foreground_recovery', 'pair_claim', 'pair_claim_code', 'pair_validation'],
       environment: ['production', 'preview', 'custom', 'unknown'],
-      detected_backend: ['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code', 'unknown'],
+      detected_backend: ['openclaw', 'hermes', 'pi', 'codex', 'claude-code', 'unknown'],
       detected_environment: ['production', 'preview', 'custom', 'unknown'],
       outcome: ['success', 'error', 'timeout'],
       phase: ['socket', 'handshake', 'ready', 'fetch', 'body', 'pair_payload', 'pair_claim_result', 'pair_saved_connection'],
@@ -258,7 +258,7 @@ export function normalizeAnalyticsEventString(
     const allowed: Record<string, readonly string[]> = {
       action: ['edit', 'saved', 'failed'],
       document: ['agents', 'soul', 'identity', 'user', 'bootstrap', 'memory'],
-      backend: ['openclaw', 'hermes', 'local-model', 'pi', 'codex', 'claude-code'],
+      backend: ['openclaw', 'hermes', 'pi', 'codex', 'claude-code'],
     };
     return allowed[property]?.includes(value) ? value : 'other';
   }

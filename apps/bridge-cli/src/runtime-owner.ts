@@ -24,7 +24,7 @@ export function readRuntimeOwner(path: string): RuntimeOwner | null {
   if (value.protocol !== 1 || !Number.isInteger(value.pid) || value.pid <= 0 || !/^[a-f0-9]{64}$/.test(value.token)
     || typeof value.endpoint !== 'string' || !/^(?:\\\\\.\\pipe\\clawket-update-|\/.*\/clawket-update-)[a-f0-9-]{36}(?:\.sock)?$/.test(value.endpoint)
     || typeof value.version !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(value.version)
-    || !['openclaw', 'hermes', 'hermes-relay', 'codex', 'claude-code', 'pi', 'local-model'].includes(value.backend)
+    || !['openclaw', 'hermes', 'hermes-relay', 'codex', 'claude-code', 'pi'].includes(value.backend)
     || typeof value.entry !== 'string' || typeof value.node !== 'string'
     || (value.configPath !== undefined && typeof value.configPath !== 'string')
     || (value.port !== undefined && (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535))) throw new Error('Invalid update owner record.');

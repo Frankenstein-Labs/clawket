@@ -6,12 +6,12 @@ import { readCliVersion } from './metadata.js';
 
 export function isRuntimeCommand(argv: string[]): boolean {
   const commands = ['run', 'start', 'install', 'restart'];
-  return commands.includes(argv[0]) || (['codex', 'claude-code', 'pi', 'hermes', 'local-model'].includes(argv[0]) && commands.includes(argv[1])) || (argv[0] === 'hermes' && argv[1] === 'relay' && argv[2] === 'run');
+  return commands.includes(argv[0]) || (['codex', 'claude-code', 'pi', 'hermes'].includes(argv[0]) && commands.includes(argv[1])) || (argv[0] === 'hermes' && argv[1] === 'relay' && argv[2] === 'run');
 }
 
 /** Future starts use the verified snapshot, including stopped configurations. */
 export async function delegateManagedRuntime(argv: string[]): Promise<boolean> {
-  if (process.env.CLAWKET_UPDATE_ACTIVATION === '1' || (argv[0] === 'local-model' && process.send)) return false;
+  if (process.env.CLAWKET_UPDATE_ACTIVATION === '1') return false;
   if (!isRuntimeCommand(argv) || argv.includes('--help') || argv.includes('-h')) return false;
   const root = join(homedir(), '.clawket', 'runtime'), path = join(root, 'active.json');
   if (!existsSync(path)) return false;

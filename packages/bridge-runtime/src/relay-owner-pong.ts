@@ -158,8 +158,9 @@ export class RelayOwnerPong {
       if (!cycle?.protocolNonce || nonce !== cycle.protocolNonce) return false;
       return this.confirmCycle(cycle);
     }
-    // local-model still owns its legacy cadence/nonce-free protocol pongs and
-    // never calls startProtocolPing. Do not silently upgrade that backend.
+    // A negotiated relay without the protocol-nonce extension (for example a
+    // backend that only performs legacy, nonce-free pongs) confirms without a
+    // protocol round-trip. Do not silently upgrade it.
     if (this.negotiated) this.confirmedRoundTrip = true;
     this.clearCycle(); this.clearRefreshTimer();
     return true;

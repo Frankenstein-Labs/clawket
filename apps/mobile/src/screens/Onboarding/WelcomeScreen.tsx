@@ -22,7 +22,7 @@ type Props = {
 
 /**
  * The agent products a new user can pair, in the backend chooser's order (owner decision
- * 2026-09-26). Brand names stay untranslated; the local-model server is not a product to list.
+ * 2026-09-26). Brand names stay untranslated.
  */
 export const WELCOME_AGENTS: ReadonlyArray<Readonly<{ platform: PlatformKind; name: string }>> = [
   { platform: 'openclaw', name: 'OpenClaw' },

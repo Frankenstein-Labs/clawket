@@ -9,8 +9,6 @@ import {
   assessRelayEnvironmentSelection,
   getOfficialHermesRegistryUrl,
   getOfficialRelayRegistryUrl,
-  isEnvironmentIndependentRegistry,
-  OFFICIAL_LOCAL_MODEL_PREVIEW_REGISTRY_URL,
   OFFICIAL_PI_REGISTRY_URL,
   OFFICIAL_CLAUDE_CODE_REGISTRY_URL,
   OFFICIAL_CLAUDE_CODE_PREVIEW_REGISTRY_URL,
@@ -32,7 +30,7 @@ import {
   type PairingPayloadAssessment,
 } from './gateway-scan-flow';
 
-export type PairingBackendKind = Extract<BackendKind, 'openclaw' | 'hermes' | 'local-model' | 'pi' | 'codex' | 'claude-code'>;
+export type PairingBackendKind = Extract<BackendKind, 'openclaw' | 'hermes' | 'pi' | 'codex' | 'claude-code'>;
 
 export type BackendPairingResult = Readonly<{
   backendKind: PairingBackendKind;
@@ -52,7 +50,6 @@ type BackendPairingInput = BackendPairingContext & Readonly<{
       serverUrl: string;
       pairingCode: string;
       expectedBackendKind: PairingBackendKind;
-      /** Omitted for the environment-independent local-model Registry. */
       environment?: RelayServiceEnvironment;
     }): Promise<boolean>;
     connectLink(url: string, expectation: {
@@ -116,26 +113,6 @@ const BACKEND_PAIRING_PROFILES: Readonly<Record<PairingBackendKind, BackendPairi
     async connectLink(input) {
       const connected = await input.secureInvitation.connectLink(input.url, { expectedBackendKind: 'pi' });
       return connected ? requireExpectedActiveConnection('pi', input.runtime) : null;
-    },
-  },
-  // Local model has one dedicated Registry and no Production twin, so pairing
-  // ignores the selected environment and Debug Mode (owner decision 2026-09-19).
-  'local-model': {
-    reportsCodeOutcome: false,
-    async connectCode(input) {
-      const connected = await input.secureInvitation.connectCode({
-        serverUrl: OFFICIAL_LOCAL_MODEL_PREVIEW_REGISTRY_URL, pairingCode: input.pairingCode,
-        expectedBackendKind: 'local-model',
-      });
-      return connected ? requireExpectedActiveConnection('local-model', input.runtime) : null;
-    },
-    async connectLink(input) {
-      const descriptor = parsePairingLink(input.url);
-      if (!descriptor || !isEnvironmentIndependentRegistry(descriptor.serverUrl)) {
-        throw new AdapterError('unsupported', 'Local model pairing requires the local model Registry');
-      }
-      const connected = await input.secureInvitation.connectLink(input.url, { expectedBackendKind: 'local-model' });
-      return connected ? requireExpectedActiveConnection('local-model', input.runtime) : null;
     },
   },
   openclaw: {

@@ -1,20 +1,15 @@
 import {
   createOpenHandsCloudClient,
   isUnauthorizedCloudError,
+  OPENHANDS_CLOUD_REQUEST_TIMEOUT_MS,
   OpenHandsCloudRequestError,
-  OPENHANDS_CLOUD_API_HOST,
   verifyOpenHandsCloudSession,
+  type CloudRequest,
+  type CloudResponse,
+  type CloudTransport,
   type OpenHandsCloudApi,
 } from './cloud-client';
 import type { OpenHandsCredentialStore } from './credential-store';
-
-jest.mock('@openhands/typescript-client/clients', () => ({
-  CloudClient: class MockCloudClient {},
-}));
-
-function createClient(): jest.Mocked<OpenHandsCloudApi> {
-  return { getOrganizations: jest.fn() };
-}
 
 function createCredentials(token: string | null): jest.Mocked<OpenHandsCredentialStore> {
   return {
@@ -24,45 +19,77 @@ function createCredentials(token: string | null): jest.Mocked<OpenHandsCredentia
   };
 }
 
+/** Records every path the client requests and answers from a fixed route table. */
+function recordingTransport(routes: Record<string, (request: CloudRequest) => CloudResponse>): {
+  transport: CloudTransport;
+  paths: string[];
+} {
+  const paths: string[] = [];
+  return {
+    paths,
+    transport: async (request) => {
+      paths.push(request.path);
+      const respond = routes[request.path];
+      if (!respond) return { status: 404, data: undefined };
+      return respond(request);
+    },
+  };
+}
+
+function ok(data: unknown): CloudResponse {
+  return { status: 200, data };
+}
+
 describe('OpenHands Cloud client', () => {
-  test('configures the official host and keeps the token inside the SDK client', () => {
-    const Client = jest.fn(() => createClient());
-    const client = createOpenHandsCloudClient(' cloud-token ', Client);
-
-    expect(Client).toHaveBeenCalledWith({ host: OPENHANDS_CLOUD_API_HOST, apiKey: 'cloud-token' });
-    expect(client).toHaveProperty('getOrganizations');
-  });
-
   test('rejects blank access tokens before creating a client', () => {
-    const Client = jest.fn(() => createClient());
-
-    expect(() => createOpenHandsCloudClient(' \n ', Client)).toThrow(
+    expect(() => createOpenHandsCloudClient(' \n ', null, jest.fn())).toThrow(
       'OpenHands access token must not be empty.',
     );
-    expect(Client).not.toHaveBeenCalled();
   });
 
-  test('verifies the stored token through the Cloud API', async () => {
-    const client = createClient();
-    client.getOrganizations.mockResolvedValue({ items: [], currentOrgId: null });
-    const Client = jest.fn(() => client);
-    const credentials = createCredentials('cloud-token');
-
-    await expect(verifyOpenHandsCloudSession(credentials, Client)).resolves.toEqual({
-      items: [],
-      currentOrgId: null,
+  test('verifies the stored token through the organizations endpoint', async () => {
+    const { transport, paths } = recordingTransport({
+      '/api/organizations': () => ok({ items: [{ id: 'org-1' }], current_org_id: 'org-1' }),
     });
-    expect(client.getOrganizations).toHaveBeenCalledTimes(1);
-    expect(credentials.getAccessToken).toHaveBeenCalledTimes(1);
+
+    await expect(verifyOpenHandsCloudSession(createCredentials('cloud-token'), transport)).resolves.toEqual({
+      items: [{ id: 'org-1' }],
+      currentOrgId: 'org-1',
+    });
+    expect(paths).toEqual(['/api/organizations']);
   });
 
   test('fails closed when no token is stored', async () => {
-    const Client = jest.fn(() => createClient());
-
-    await expect(verifyOpenHandsCloudSession(createCredentials(null), Client)).rejects.toThrow(
+    const transport = jest.fn();
+    await expect(verifyOpenHandsCloudSession(createCredentials(null), transport)).rejects.toThrow(
       'OpenHands Cloud is not authenticated.',
     );
-    expect(Client).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  test('searches conversations newest first and keeps the runtime host', async () => {
+    const { transport, paths } = recordingClient();
+    const client = createOpenHandsCloudClient('token', null, transport);
+
+    await expect(client.searchConversations()).resolves.toEqual([
+      {
+        id: 'conv-1',
+        title: 'Fix the build',
+        updatedAt: '2026-01-02T00:00:00Z',
+        createdAt: '2026-01-01T00:00:00Z',
+        executionStatus: 'running',
+        sandboxStatus: 'running',
+        conversationUrl: 'https://runtime.example/pxy/abc',
+        sessionApiKey: 'session-token',
+      },
+    ]);
+    expect(paths[0]).toContain('/api/v1/app-conversations/search');
+    expect(paths[0]).toContain('UPDATED_AT_DESC');
+  });
+
+  test('surfaces an HTTP status as a classified error', async () => {
+    const client = createOpenHandsCloudClient('token', null, async () => ({ status: 401, data: undefined }));
+    await expect(client.getOrganizations()).rejects.toBeInstanceOf(OpenHandsCloudRequestError);
   });
 
   test('classifies an invalid credential as unauthorized', () => {
@@ -74,7 +101,51 @@ describe('OpenHands Cloud client', () => {
     expect(isUnauthorizedCloudError(new OpenHandsCloudRequestError(500))).toBe(false);
     expect(isUnauthorizedCloudError(new OpenHandsCloudRequestError(503))).toBe(false);
     expect(isUnauthorizedCloudError(new TypeError('Network request failed'))).toBe(false);
-    expect(isUnauthorizedCloudError(new Error('OpenHands Cloud request failed (401).'))).toBe(false);
     expect(isUnauthorizedCloudError(undefined)).toBe(false);
   });
+
+  test('bounds every request so an unreachable host cannot hang the sign-in', async () => {
+    const originalFetch = globalThis.fetch;
+    const signals: Array<AbortSignal | undefined> = [];
+    globalThis.fetch = jest.fn((_url: string, init?: { signal?: AbortSignal }) => {
+      const signal = init?.signal;
+      signals.push(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+        });
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const client = createOpenHandsCloudClient('token');
+      jest.useFakeTimers();
+      const pending = client.getOrganizations();
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      jest.advanceTimersByTime(OPENHANDS_CLOUD_REQUEST_TIMEOUT_MS);
+      expect(signals[0]?.aborted).toBe(true);
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      jest.useRealTimers();
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
+
+function recordingClient(): { transport: CloudTransport; paths: string[]; api: OpenHandsCloudApi } {
+  const { transport, paths } = recordingTransport({
+    [`/api/v1/app-conversations/search?limit=30&sort_order=UPDATED_AT_DESC`]: () => ok({
+      items: [{
+        id: 'conv-1',
+        title: 'Fix the build',
+        updated_at: '2026-01-02T00:00:00Z',
+        created_at: '2026-01-01T00:00:00Z',
+        execution_status: 'running',
+        sandbox_status: 'running',
+        conversation_url: 'https://runtime.example/pxy/abc',
+        session_api_key: 'session-token',
+      }],
+    }),
+  });
+  return { transport, paths, api: createOpenHandsCloudClient('token', null, transport) };
+}
