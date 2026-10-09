@@ -1,5 +1,7 @@
 import {
   createOpenHandsCloudClient,
+  isUnauthorizedCloudError,
+  OpenHandsCloudRequestError,
   OPENHANDS_CLOUD_API_HOST,
   verifyOpenHandsCloudSession,
   type OpenHandsCloudApi,
@@ -61,5 +63,18 @@ describe('OpenHands Cloud client', () => {
       'OpenHands Cloud is not authenticated.',
     );
     expect(Client).not.toHaveBeenCalled();
+  });
+
+  test('classifies an invalid credential as unauthorized', () => {
+    expect(isUnauthorizedCloudError(new OpenHandsCloudRequestError(401))).toBe(true);
+    expect(isUnauthorizedCloudError(new OpenHandsCloudRequestError(403))).toBe(true);
+  });
+
+  test('does not treat a transient failure as an invalid credential', () => {
+    expect(isUnauthorizedCloudError(new OpenHandsCloudRequestError(500))).toBe(false);
+    expect(isUnauthorizedCloudError(new OpenHandsCloudRequestError(503))).toBe(false);
+    expect(isUnauthorizedCloudError(new TypeError('Network request failed'))).toBe(false);
+    expect(isUnauthorizedCloudError(new Error('OpenHands Cloud request failed (401).'))).toBe(false);
+    expect(isUnauthorizedCloudError(undefined)).toBe(false);
   });
 });
